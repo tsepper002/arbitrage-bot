@@ -1,2 +1,7 @@
+# Core dependencies for arbitrage bot
 aiohttp
 websockets
+websocket-client
+requests
+python-dotenv
+pydantic
