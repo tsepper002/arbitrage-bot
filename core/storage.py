@@ -1,6 +1,9 @@
 import time
 import threading
 
+# TODO: LEGACY FILE - This file is deprecated and will be removed in a future PR.
+# Use core/price_store.py (PriceStore) as the canonical implementation.
+# This file is kept temporarily to avoid breaking existing code.
 
 class PriceStorage:
     def __init__(self):
