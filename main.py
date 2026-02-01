@@ -6,11 +6,11 @@ import asyncio
 import logging
 from typing import List
 
-from .core.price_store import PriceStore
-from .core.arbitrage import ArbitrageEngine
-from .exchanges.bybit_ws import BybitWS
-from .exchanges.kucoin_ws import KucoinWS
-from .exchanges.htx_ws import HtxWS
+from core.price_store import PriceStore
+from core.arbitrage import ArbitrageEngine
+from exchanges.bybit_ws import BybitWS
+from exchanges.kucoin_ws import KucoinWS
+from exchanges.htx_ws import HtxWS
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("arbitrage_bot")
