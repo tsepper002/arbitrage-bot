@@ -14,7 +14,6 @@ import asyncio
 import random
 
 logger = logging.getLogger("bybit_ws")
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
 
 DEPTH_LEVELS = 20
 

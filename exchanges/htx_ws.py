@@ -19,7 +19,6 @@ import websocket
 import asyncio
 
 logger = logging.getLogger("htx_ws")
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
 
 DEPTH_LEVELS = 20
 
