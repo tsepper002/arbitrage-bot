@@ -6,12 +6,17 @@ Enhanced with health monitoring and configurable settings.
 import asyncio
 import logging
 from typing import List
+import sys
+import os
 
-from .core.price_store import PriceStore
-from .core.arbitrage import ArbitrageEngine
-from .exchanges.bybit_ws import BybitWS
-from .exchanges.kucoin_ws import KucoinWS
-from .exchanges.htx_ws import HtxWS
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from core.price_store import PriceStore
+from core.arbitrage import ArbitrageEngine
+from exchanges.bybit_ws import BybitWS
+from exchanges.kucoin_ws import KucoinWS
+from exchanges.htx_ws import HtxWS
 import settings
 
 # Configure logging
