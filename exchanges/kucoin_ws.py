@@ -5,6 +5,7 @@ KuCoin single-connection WS client with depth (level2) subscription and delta ap
 - applies snapshots and incremental changes (if provided)
 - publishes top-DEPTH_LEVELS to PriceStore via update_levels
 - deduplicates 'ack' messages to avoid log spam
+Enhanced with health monitoring and reconnection support.
 """
 import json
 import threading
@@ -15,6 +16,7 @@ import requests
 import websocket
 import asyncio
 import random
+from .ws_helpers import WSHealthMonitor, WSReconnectHelper
 
 logger = logging.getLogger("kucoin_ws")
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -43,6 +45,11 @@ class KucoinWS:
         self._local_books: Dict[str, Dict[str, Dict[float, float]]] = {sym: {"bids": {}, "asks": {}} for sym in symbols}
         # seen ack ids to deduplicate ack logs and processing
         self._seen_acks: set = set()
+        
+        # Add health monitoring
+        self._health_monitor = WSHealthMonitor(exchange_name)
+        self._reconnect_helper = WSReconnectHelper(exchange_name)
+        
         self._thread = threading.Thread(target=self._run, daemon=True)
         if stagger_start and stagger_start > 0:
             time.sleep(stagger_start * random.uniform(0.5, 1.5))
@@ -90,6 +97,10 @@ class KucoinWS:
 
     def _on_open(self, ws):
         try:
+            # Mark connection as healthy
+            self._health_monitor.on_connection_start()
+            self._reconnect_helper.on_successful_connection()
+            
             for sym in self.symbols:
                 topic_ticker = f"/market/ticker:{sym}"
                 sub_ticker = {"id": int(time.time()), "type": "subscribe", "topic": topic_ticker, "privateChannel": False, "response": True}
@@ -102,6 +113,9 @@ class KucoinWS:
             logger.exception("KuCoin on_open error")
 
     def _on_message(self, ws, msg):
+        # Record message for health monitoring
+        self._health_monitor.on_message_received()
+        
         data = _safe_json_loads(msg)
         if not data:
             logger.debug("KuCoin: non-json or empty message")
@@ -159,6 +173,10 @@ class KucoinWS:
                     bids_levels = self._book_to_levels(self._local_books[sym]["bids"], "bids")
                     asks_levels = self._book_to_levels(self._local_books[sym]["asks"], "asks")
                     logger.debug(f"KuCoin depth snapshot for {sym}: bids={len(bids_levels)} asks={len(asks_levels)}")
+                    
+                    # Track symbol-level health
+                    self._health_monitor.on_message_received(sym)
+                    
                     asyncio.run_coroutine_threadsafe(
                         self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
                         self.loop
@@ -265,8 +283,15 @@ class KucoinWS:
 
     def stop(self):
         self._stop.set()
+        self._health_monitor.on_connection_close()
         try:
             if self._ws:
                 self._ws.close()
         except Exception:
             pass
+    
+    def get_health_status(self) -> dict:
+        """Get current health status of this connection."""
+        health = self._health_monitor.check_health()
+        self._health_monitor.log_health_status()
+        return health

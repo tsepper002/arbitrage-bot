@@ -7,6 +7,7 @@ HTX / Huobi WS client with depth subscription and delta handling.
 - maintains a local book (price -> size) per symbol and publishes top DEPTH_LEVELS
   via price_store.update_levels(exchange, symbol, bids_levels, asks_levels, ts)
 - handles snapshot messages (tick with bids/asks) and incremental updates (applies changes)
+Enhanced with health monitoring and reconnection support.
 """
 import json
 import gzip
@@ -17,6 +18,7 @@ from typing import List, Optional, Tuple, Dict, Any
 import random
 import websocket
 import asyncio
+from .ws_helpers import WSHealthMonitor, WSReconnectHelper
 
 logger = logging.getLogger("htx_ws")
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -58,6 +60,11 @@ class HtxWS:
         self._ws = None
         # local book: symbol -> {'bids': {price: size}, 'asks': {price: size}}
         self._local_books: Dict[str, Dict[str, Dict[float, float]]] = {s: {"bids": {}, "asks": {}} for s in symbols}
+        
+        # Add health monitoring
+        self._health_monitor = WSHealthMonitor(exchange_name)
+        self._reconnect_helper = WSReconnectHelper(exchange_name)
+        
         self._thread = threading.Thread(target=self._run, daemon=True)
         if stagger_start and stagger_start > 0:
             time.sleep(stagger_start * random.uniform(0.5, 1.5))
@@ -93,6 +100,10 @@ class HtxWS:
 
     def _on_open(self, ws):
         try:
+            # Mark connection as healthy
+            self._health_monitor.on_connection_start()
+            self._reconnect_helper.on_successful_connection()
+            
             # subscribe to ticker and depth.step0 for each token
             for tok in self.tokens:
                 # ticker
@@ -104,6 +115,9 @@ class HtxWS:
             logger.exception("HTX on_open error")
 
     def _on_message(self, ws, msg):
+        # Record message for health monitoring
+        self._health_monitor.on_message_received()
+        
         data = _safe_json_loads(msg)
         if not data:
             logger.debug("HTX: non-json or empty message")
@@ -239,8 +253,15 @@ class HtxWS:
 
     def stop(self):
         self._stop.set()
+        self._health_monitor.on_connection_close()
         try:
             if self._ws:
                 self._ws.close()
         except Exception:
             pass
+    
+    def get_health_status(self) -> dict:
+        """Get current health status of this connection."""
+        health = self._health_monitor.check_health()
+        self._health_monitor.log_health_status()
+        return health

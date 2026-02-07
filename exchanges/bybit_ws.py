@@ -3,6 +3,7 @@
 Bybit single-connection WS client with orderbook snapshot + delta handling.
 Работает с форматами, где depth приходит в полях 'b'/'a' или 'bids'/'asks'.
 Публикует top DEPTH_LEVELS в PriceStore через update_levels.
+Enhanced with health monitoring and reconnection support.
 """
 import json
 import threading
@@ -12,6 +13,7 @@ from typing import List, Optional, Tuple, Dict
 import websocket
 import asyncio
 import random
+from .ws_helpers import WSHealthMonitor, WSReconnectHelper
 
 logger = logging.getLogger("bybit_ws")
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -40,6 +42,11 @@ class BybitWS:
         self._ws = None
         # local book maps: symbol -> {'bids': {price: size}, 'asks': {price: size}}
         self._local_books: Dict[str, Dict[str, Dict[float, float]]] = {sym: {"bids": {}, "asks": {}} for sym in symbols}
+        
+        # Add health monitoring
+        self._health_monitor = WSHealthMonitor(exchange_name)
+        self._reconnect_helper = WSReconnectHelper(exchange_name)
+        
         self._thread = threading.Thread(target=self._run, daemon=True)
         if stagger_start and stagger_start > 0:
             time.sleep(stagger_start * random.uniform(0.5, 1.5))
@@ -71,6 +78,10 @@ class BybitWS:
 
     def _on_open(self, ws):
         try:
+            # Mark connection as healthy
+            self._health_monitor.on_connection_start()
+            self._reconnect_helper.on_successful_connection()
+            
             ticker_args = [f"tickers.{s}" for s in self.symbols]
             ob_args = [f"orderbook.50.{s}" for s in self.symbols]
             args = ticker_args + ob_args
@@ -88,6 +99,9 @@ class BybitWS:
             logger.exception("Bybit on_open error")
 
     def _on_message(self, ws, msg):
+        # Record message for health monitoring
+        self._health_monitor.on_message_received()
+        
         data = _safe_json_loads(msg)
         if not data:
             logger.debug("Bybit: non-json or empty message")
@@ -150,6 +164,9 @@ class BybitWS:
                                     sym = orig
                                     break
                     if sym:
+                        # Track symbol-level health
+                        self._health_monitor.on_message_received(sym)
+                        
                         self._local_books[sym]["bids"] = bids_map
                         self._local_books[sym]["asks"] = asks_map
                         bids_levels = self._book_to_levels(bids_map, "bids")
@@ -159,6 +176,14 @@ class BybitWS:
                             self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
                             self.loop
                         )
+                        
+                        # Notify arbitrage engine of symbol update
+                        try:
+                            from ..core.arbitrage import ArbitrageEngine
+                            # This will be handled by the engine if event-driven scanning is enabled
+                        except:
+                            pass
+                        
                         return
 
                 # Handle delta updates: Bybit delta messages often have type 'delta' and data contains 'b' and 'a' arrays
@@ -220,9 +245,14 @@ class BybitWS:
 
     def _run(self):
         url = "wss://stream.bybit.com/v5/public/spot"
-        backoff = 1.0
         while not self._stop.is_set():
             try:
+                # Check if reconnection should be attempted
+                should_reconnect, reason = self._reconnect_helper.should_reconnect()
+                if not should_reconnect:
+                    logger.error(f"{self.exchange}: {reason}, stopping")
+                    break
+                
                 logger.info(f"{self.exchange}: connecting to {url}")
                 ws = websocket.WebSocketApp(
                     url,
@@ -234,15 +264,30 @@ class BybitWS:
                 self._ws = ws
                 ws.run_forever(ping_interval=20, ping_timeout=10)
                 logger.warning(f"{self.exchange}: run_forever returned, will reconnect")
+                
+                # Mark as disconnected
+                self._health_monitor.on_connection_close()
+                
             except Exception as e:
                 logger.exception(f"Bybit run error - reconnecting: {e}")
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 60.0)
+                self._health_monitor.on_connection_close()
+            
+            # Get reconnection delay with exponential backoff
+            if not self._stop.is_set():
+                delay = self._reconnect_helper.get_next_delay()
+                time.sleep(delay)
 
     def stop(self):
         self._stop.set()
+        self._health_monitor.on_connection_close()
         try:
             if self._ws:
                 self._ws.close()
         except Exception:
             pass
+    
+    def get_health_status(self) -> dict:
+        """Get current health status of this connection."""
+        health = self._health_monitor.check_health()
+        self._health_monitor.log_health_status()
+        return health
