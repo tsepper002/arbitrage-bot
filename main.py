@@ -1,66 +1,94 @@
 #!/usr/bin/env python3
 """
 main.py — diagnostic monitor + startup.
+Enhanced with health monitoring and configurable settings.
 """
 import asyncio
 import logging
 from typing import List
+import sys
+import os
 
-from .core.price_store import PriceStore
-from .core.arbitrage import ArbitrageEngine
-from .exchanges.bybit_ws import BybitWS
-from .exchanges.kucoin_ws import KucoinWS
-from .exchanges.htx_ws import HtxWS
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
+from core.price_store import PriceStore
+from core.arbitrage import ArbitrageEngine
+from exchanges.bybit_ws import BybitWS
+from exchanges.kucoin_ws import KucoinWS
+from exchanges.htx_ws import HtxWS
+import settings
+
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 logger = logging.getLogger("arbitrage_bot")
 
+# Print configuration at startup
+logger.info("\n" + settings.get_config_summary())
 
-async def _monitor_store(store: PriceStore, interval: float = 2.0):
+
+async def _monitor_store(store: PriceStore, interval: float = None):
     """
-    Печатает расширенную информацию о snapshot: для каждой пары — какие биржи есть,
-    и для каждой биржи — есть ли bids_levels/asks_levels и их длина.
+    Prints order book information with reduced frequency to minimize log spam.
+    Configurable via settings.MONITOR_INTERVAL_SEC
     """
+    if interval is None:
+        interval = settings.MONITOR_INTERVAL_SEC
+    
     try:
         while True:
             snap = store.snapshot()
             if not snap:
-                print("[STORE] empty")
+                logger.debug("[STORE] empty")
             else:
-                for s, exmap in snap.items():
-                    parts = []
-                    for ex, rec in exmap.items():
-                        has_b = "bids_levels" in rec
-                        has_a = "asks_levels" in rec
-                        b_len = len(rec.get("bids_levels", []))
-                        a_len = len(rec.get("asks_levels", []))
-                        top_bid = rec.get("bid")
-                        top_ask = rec.get("ask")
-                        parts.append(f"{ex}: bid={top_bid} ask={top_ask} bids_levels={b_len} asks_levels={a_len}")
-                    print(f"[STORE] {s}: " + " | ".join(parts))
+                # Only print summary, not full details
+                total_exchanges = sum(len(exmap) for exmap in snap.values())
+                logger.info(f"[STORE] Tracking {len(snap)} symbols across {total_exchanges} exchange connections")
+                
+                # Print detailed info only at DEBUG level
+                if logger.isEnabledFor(logging.DEBUG):
+                    for s, exmap in snap.items():
+                        parts = []
+                        for ex, rec in exmap.items():
+                            b_len = len(rec.get("bids_levels", []))
+                            a_len = len(rec.get("asks_levels", []))
+                            top_bid = rec.get("bid")
+                            top_ask = rec.get("ask")
+                            parts.append(f"{ex}: bid={top_bid} ask={top_ask} levels={b_len}/{a_len}")
+                        logger.debug(f"[STORE] {s}: " + " | ".join(parts))
+            
             await asyncio.sleep(interval)
     except asyncio.CancelledError:
         return
 
 
 async def main():
-    symbols: List[str] = [
-        "BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT", "XRP-USDT",
-        "DOGE-USDT", "LTC-USDT", "ADA-USDT", "MATIC-USDT", "DOT-USDT",
-    ]
+    # Use symbols from settings
+    symbols: List[str] = settings.TRADING_SYMBOLS
+
+    logger.info(f"Starting arbitrage bot for {len(symbols)} symbols: {', '.join(symbols)}")
 
     loop = asyncio.get_running_loop()
     store = PriceStore()
 
+    # Initialize exchange connections with staggered start
     stagger = 0.1
+    logger.info("Initializing exchange connections...")
     bybit = BybitWS(symbols, store, loop, exchange_name="Bybit", stagger_start=stagger)
     await asyncio.sleep(0.1)
     kucoin = KucoinWS(symbols, store, loop, exchange_name="KuCoin", stagger_start=stagger)
     await asyncio.sleep(0.1)
     htx = HtxWS(symbols, store, loop, exchange_name="HTX", stagger_start=stagger)
+    
+    exchanges = [bybit, kucoin, htx]
 
-    monitor_task = asyncio.create_task(_monitor_store(store, interval=2.0))
+    # Start monitoring task
+    monitor_task = asyncio.create_task(_monitor_store(store))
 
+    # Start arbitrage engine
     engine = ArbitrageEngine(store)
     engine_task = asyncio.create_task(engine.run(symbols))
 
@@ -69,14 +97,22 @@ async def main():
     except asyncio.CancelledError:
         pass
     except KeyboardInterrupt:
-        pass
+        logger.info("Shutting down gracefully...")
     finally:
+        # Cleanup
         monitor_task.cancel()
-        for c in (bybit, kucoin, htx):
+        
+        # Print final statistics
+        logger.info("\n" + "="*60)
+        engine.executor.print_statistics()
+        logger.info("="*60)
+        
+        # Stop exchange connections
+        for c in exchanges:
             try:
                 c.stop()
-            except Exception:
-                logger.exception("Error stopping client")
+            except Exception as e:
+                logger.exception(f"Error stopping client: {e}")
 
 
 if __name__ == "__main__":
