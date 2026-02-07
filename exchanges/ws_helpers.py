@@ -5,7 +5,7 @@ Provides health monitoring and reconnection capabilities that can be added to ex
 """
 import time
 import logging
-from typing import Dict, Optional, Callable
+from typing import Dict, Optional, Callable, Tuple
 import settings
 
 logger = logging.getLogger("ws_health")
@@ -132,7 +132,7 @@ class WSReconnectHelper:
         self._current_delay = settings.WS_RECONNECT_DELAY_SEC
         logger.info(f"{self.exchange_name}: Connection successful, reset reconnect counter")
     
-    def should_reconnect(self) -> tuple[bool, Optional[str]]:
+    def should_reconnect(self) -> Tuple[bool, Optional[str]]:
         """
         Check if reconnection should be attempted.
         

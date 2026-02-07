@@ -245,9 +245,10 @@ class ArbitrageEngine:
                         best_ask = (ex, a)
                 
                 # Only log market data occasionally to reduce spam
-                if False:  # Disabled to reduce log spam, enable for debugging
+                # Disabled by default - enable for debugging by changing condition to True
+                if logger.isEnabledFor(logging.DEBUG) and False:
                     if best_bid[0] or best_ask[0]:
-                        print(f"MARKET {s}: BEST_BID {best_bid[0] or '-'} {best_bid[1]} BEST_ASK {best_ask[0] or '-'} {best_ask[1]}")
+                        logger.debug(f"MARKET {s}: BEST_BID {best_bid[0] or '-'} {best_bid[1]} BEST_ASK {best_ask[0] or '-'} {best_ask[1]}")
 
                 # Scan for opportunities
                 opps = await self.scan_once(s)

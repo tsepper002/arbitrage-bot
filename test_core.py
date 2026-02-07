@@ -19,7 +19,7 @@ def test_configuration():
     
     print(settings.get_config_summary())
     
-    assert settings.DRY_RUN == True, "DRY_RUN should default to True"
+    assert settings.DRY_RUN is True, "DRY_RUN should default to True"
     assert settings.MIN_NET_ROI_PCT > 0, "MIN_NET_ROI_PCT should be positive"
     assert settings.MAX_EXPOSURE_USDT > 0, "MAX_EXPOSURE_USDT should be positive"
     assert settings.SAFETY_FACTOR > 0 and settings.SAFETY_FACTOR <= 1, "SAFETY_FACTOR should be between 0 and 1"

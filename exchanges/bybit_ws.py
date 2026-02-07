@@ -176,14 +176,6 @@ class BybitWS:
                             self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
                             self.loop
                         )
-                        
-                        # Notify arbitrage engine of symbol update
-                        try:
-                            from ..core.arbitrage import ArbitrageEngine
-                            # This will be handled by the engine if event-driven scanning is enabled
-                        except:
-                            pass
-                        
                         return
 
                 # Handle delta updates: Bybit delta messages often have type 'delta' and data contains 'b' and 'a' arrays

@@ -26,7 +26,7 @@ A robust, efficient arbitrage bot for detecting and executing cross-exchange arb
 
 ### Prerequisites
 
-- Python 3.10 or higher
+- Python 3.9 or higher
 - pip package manager
 - Internet connection for exchange WebSocket feeds
 

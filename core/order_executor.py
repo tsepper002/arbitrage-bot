@@ -5,7 +5,7 @@ Provides a safe interface for order placement with detailed logging.
 """
 import time
 import logging
-from typing import Dict, Optional, List
+from typing import List, Optional, Tuple, Dict
 from datetime import datetime
 import settings
 
@@ -36,7 +36,7 @@ class OrderExecutor:
         else:
             logger.warning("🔴 OrderExecutor initialized in LIVE mode - REAL ORDERS WILL BE PLACED!")
     
-    def can_trade(self, symbol: str) -> tuple[bool, Optional[str]]:
+    def can_trade(self, symbol: str) -> Tuple[bool, Optional[str]]:
         """
         Check if trading is allowed based on rate limits and cooldowns.
         

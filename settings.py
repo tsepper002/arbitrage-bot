@@ -134,21 +134,33 @@ LOG_LEVEL = os.getenv("ARB_LOG_LEVEL", "INFO")
 # ============================================================================
 def get_config_summary() -> str:
     """Returns a formatted summary of current configuration."""
-    return f"""
+    return """
 === Arbitrage Bot Configuration ===
-Execution Mode: {'DRY RUN (Safe)' if DRY_RUN else 'LIVE TRADING (Real money!)'}
-Min Net ROI: {MIN_NET_ROI_PCT}%
-Max Exposure: ${MAX_EXPOSURE_USDT} USDT
-Safety Factor: {SAFETY_FACTOR}
-Max Trades/Min: {MAX_TRADES_PER_MINUTE}
-Symbol Cooldown: {PER_SYMBOL_COOLDOWN_SEC}s
-Scan Interval: {SCAN_INTERVAL_SEC}s
-Event-Driven: {EVENT_DRIVEN_SCAN}
-WS Auto-Reconnect: {WS_AUTO_RECONNECT}
-Stream Staleness Threshold: {STREAM_STALENESS_THRESHOLD_SEC}s
-Trading Symbols: {len(TRADING_SYMBOLS)} pairs
+Execution Mode: {mode}
+Min Net ROI: {roi}%
+Max Exposure: ${exp} USDT
+Safety Factor: {sf}
+Max Trades/Min: {trades}
+Symbol Cooldown: {cool}s
+Scan Interval: {scan}s
+Event-Driven: {event}
+WS Auto-Reconnect: {ws}
+Stream Staleness Threshold: {stale}s
+Trading Symbols: {syms} pairs
 ===================================
-"""
+""".format(
+        mode='DRY RUN (Safe)' if DRY_RUN else 'LIVE TRADING (Real money!)',
+        roi=MIN_NET_ROI_PCT,
+        exp=MAX_EXPOSURE_USDT,
+        sf=SAFETY_FACTOR,
+        trades=MAX_TRADES_PER_MINUTE,
+        cool=PER_SYMBOL_COOLDOWN_SEC,
+        scan=SCAN_INTERVAL_SEC,
+        event=EVENT_DRIVEN_SCAN,
+        ws=WS_AUTO_RECONNECT,
+        stale=STREAM_STALENESS_THRESHOLD_SEC,
+        syms=len(TRADING_SYMBOLS)
+    )
 
 
 def is_production_ready() -> bool:
