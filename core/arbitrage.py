@@ -3,9 +3,14 @@ import asyncio
 import csv
 import os
 import time
-from typing import List, Tuple, Optional, Dict
+import logging
+from typing import List, Tuple, Optional, Dict, Set
 from .exchange_config import EXCHANGE_PARAMS
 from . import trader_config
+from .order_executor import OrderExecutor
+import settings
+
+logger = logging.getLogger("arbitrage_engine")
 
 def simulate_execution_from_book(levels: List[Tuple[float, float]], qty: float) -> Tuple[float, float]:
     remaining = qty
@@ -25,23 +30,27 @@ def simulate_execution_from_book(levels: List[Tuple[float, float]], qty: float) 
 
 class ArbitrageEngine:
     def __init__(self, store, *,
-                 default_qty: float = 0.001,
-                 min_net_pct: float = 0.05,
-                 persist_path: str = "arbs.csv",
-                 max_exposure_usdt: float | None = None,
-                 safety_factor: float = 0.5,
-                 topk: int = 20):
+                 default_qty: Optional[float] = None,
+                 min_net_pct: Optional[float] = None,
+                 persist_path: Optional[str] = None,
+                 max_exposure_usdt: Optional[float] = None,
+                 safety_factor: Optional[float] = None,
+                 topk: Optional[int] = None):
         self.store = store
         self.params = EXCHANGE_PARAMS
-        self.default_qty = default_qty
-        self.min_net_pct = min_net_pct
-        self.persist_path = persist_path
-        self.safety_factor = safety_factor
-        self.topk = topk
+        
+        # Use settings.py values as defaults
+        self.default_qty = default_qty if default_qty is not None else settings.DEFAULT_QUANTITY
+        self.min_net_pct = min_net_pct if min_net_pct is not None else settings.MIN_NET_ROI_PCT
+        self.persist_path = persist_path if persist_path is not None else settings.OPPORTUNITIES_CSV_PATH
+        self.safety_factor = safety_factor if safety_factor is not None else settings.SAFETY_FACTOR
+        self.topk = topk if topk is not None else settings.ORDERBOOK_TOP_K
 
-        # max exposure: if not provided, try to compute from trader_config (RUB -> USDT), otherwise default to 200 USDT
+        # max exposure: use settings or compute from trader_config
         if max_exposure_usdt is not None:
             self.max_exposure_usdt = max_exposure_usdt
+        elif settings.MAX_EXPOSURE_USDT:
+            self.max_exposure_usdt = settings.MAX_EXPOSURE_USDT
         else:
             sc_usdt = trader_config.get_starting_capital_usdt(None)
             if sc_usdt:
@@ -50,6 +59,13 @@ class ArbitrageEngine:
             else:
                 self.max_exposure_usdt = 200.0
 
+        # Initialize order executor
+        self.executor = OrderExecutor()
+
+        # Event-driven scanning state
+        self.updated_symbols: Set[str] = set()
+        self.last_scan_time: Dict[str, float] = {}
+
         # ensure persistence file
         if not os.path.exists(self.persist_path):
             with open(self.persist_path, "w", newline="") as f:
@@ -57,6 +73,8 @@ class ArbitrageEngine:
                 w.writerow(["ts", "symbol", "buy_ex", "sell_ex", "qty", "buy_price", "sell_price", "net", "roi_pct"])
 
         self.recent_cache = {}
+        
+        logger.info(f"ArbitrageEngine initialized: min_roi={self.min_net_pct}%, max_exposure=${self.max_exposure_usdt}, safety_factor={self.safety_factor}")
 
     def _fee_rate(self, exchange: str, side: str = "taker") -> float:
         p = self.params.get(exchange, {})
@@ -171,12 +189,49 @@ class ArbitrageEngine:
                         self.recent_cache[key] = now
                         self._persist_opportunity(info)
                         res.append(info)
+        
+        # Sort by net profit
         res.sort(key=lambda x: x["net"], reverse=True)
+        
+        # Limit to max concurrent opportunities
+        if len(res) > settings.MAX_CONCURRENT_OPPORTUNITIES:
+            logger.debug(f"Limiting to top {settings.MAX_CONCURRENT_OPPORTUNITIES} opportunities (found {len(res)})")
+            res = res[:settings.MAX_CONCURRENT_OPPORTUNITIES]
+        
         return res
 
+    def mark_symbol_updated(self, symbol: str):
+        """Mark a symbol as having updated data (for event-driven scanning)."""
+        if settings.EVENT_DRIVEN_SCAN:
+            self.updated_symbols.add(symbol)
+
     async def run(self, symbols: List[str]):
+        """Main scanning loop with event-driven optimization."""
+        logger.info(f"Starting arbitrage engine for {len(symbols)} symbols")
+        last_stats_print = time.time()
+        
         while True:
-            for s in symbols:
+            scan_start = time.time()
+            
+            # Determine which symbols to scan
+            if settings.EVENT_DRIVEN_SCAN and self.updated_symbols:
+                # Only scan symbols that have been updated
+                symbols_to_scan = list(self.updated_symbols)
+                self.updated_symbols.clear()
+            else:
+                # Scan all symbols
+                symbols_to_scan = symbols
+            
+            for s in symbols_to_scan:
+                # Throttle per-symbol scanning
+                last_scan = self.last_scan_time.get(s, 0)
+                time_since_last = scan_start - last_scan
+                if time_since_last < settings.MIN_SCAN_INTERVAL_PER_SYMBOL_SEC:
+                    continue
+                
+                self.last_scan_time[s] = scan_start
+                
+                # Get market overview
                 snap = self.store.snapshot()
                 exmap = snap.get(s, {})
                 best_bid = (None, 0.0)
@@ -188,11 +243,31 @@ class ArbitrageEngine:
                         best_bid = (ex, b)
                     if a and (best_ask[0] is None or a < best_ask[1]):
                         best_ask = (ex, a)
-                if best_bid[0] or best_ask[0]:
-                    print(f"MARKET {s}: BEST_BID {best_bid[0] or '-'} {best_bid[1]} BEST_ASK {best_ask[0] or '-'} {best_ask[1]}")
+                
+                # Only log market data occasionally to reduce spam
+                if False:  # Disabled to reduce log spam, enable for debugging
+                    if best_bid[0] or best_ask[0]:
+                        print(f"MARKET {s}: BEST_BID {best_bid[0] or '-'} {best_bid[1]} BEST_ASK {best_ask[0] or '-'} {best_ask[1]}")
 
+                # Scan for opportunities
                 opps = await self.scan_once(s)
                 if opps:
-                    for o in opps[:5]:
-                        print(f"ARBITRAGE {s}: BUY@{o['buy_ex']} {o['buy_avg']:.6f} SELL@{o['sell_ex']} {o['sell_avg']:.6f} QTY {o['qty']:.6f} NET {o['net']:.6f} ROI {o['roi_pct']:.3f}%")
-            await asyncio.sleep(1.0)
+                    for o in opps:
+                        # Execute or log the opportunity
+                        result = self.executor.execute_arbitrage(o)
+                        
+                        if result['status'] == 'simulated':
+                            # Already logged by executor
+                            pass
+                        elif result['status'] == 'blocked':
+                            logger.debug(f"Trade blocked: {result['reason']}")
+                        elif result['status'] == 'error':
+                            logger.error(f"Execution error: {result.get('reason', 'Unknown')}")
+            
+            # Print statistics periodically
+            if time.time() - last_stats_print > 60.0:
+                self.executor.print_statistics()
+                last_stats_print = time.time()
+            
+            # Sleep based on configured interval
+            await asyncio.sleep(settings.SCAN_INTERVAL_SEC)
