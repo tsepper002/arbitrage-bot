@@ -125,8 +125,14 @@ class ArbitrageEngine:
         if len(exchanges) < 2:
             return res
 
+        # BIDIRECTIONAL SCAN FIX: Check ALL directed pairs (A->B AND B->A)
+        # Previous version only checked exchanges[i+1:] which missed 50% of opportunities
         for i, buy_ex in enumerate(exchanges):
-            for sell_ex in exchanges[i+1:]:
+            # Check this exchange as buy against ALL other exchanges as sell
+            for j, sell_ex in enumerate(exchanges):
+                if i == j:  # Skip same exchange
+                    continue
+                    
                 buy = exmap.get(buy_ex, {})
                 sell = exmap.get(sell_ex, {})
 
@@ -145,10 +151,29 @@ class ArbitrageEngine:
                 if not asks or not bids:
                     continue
 
+                # S1 PREFILTER: Quick top-of-book spread check before expensive simulation
+                # Skip if gross spread is too small to be profitable after fees
+                top_bid = bids[0][0]
+                top_ask = asks[0][0]
+                gross_spread_pct = ((top_bid - top_ask) / top_ask) * 100.0 if top_ask > 0 else 0
+                
+                buy_fee = self._fee_rate(buy_ex, "taker")
+                sell_fee = self._fee_rate(sell_ex, "taker")
+                sum_fees_pct = (buy_fee + sell_fee) * 100.0
+                
+                # Prefilter: skip if spread < 80% of fees (won't be profitable)
+                if gross_spread_pct < sum_fees_pct * 0.8:
+                    continue
+
                 # choose qty adaptively
                 buy_price_est = asks[0][0] if asks else None
                 qty = self._choose_qty(asks, bids, buy_price_est)
                 if qty <= 0:
+                    continue
+
+                # A5 RISK CHECK: Skip anomalous spreads (likely data errors)
+                if gross_spread_pct > settings.ANOMALOUS_SPREAD_PCT:
+                    logger.warning(f"Skipping anomalous spread {gross_spread_pct:.2f}% for {symbol} {buy_ex}->{sell_ex} (threshold: {settings.ANOMALOUS_SPREAD_PCT}%)")
                     continue
 
                 buy_avg, buy_filled = simulate_execution_from_book(asks, qty)
