@@ -80,10 +80,13 @@ TELEGRAM_CHAT_ID = _get_env_str("ARB_TELEGRAM_CHAT_ID", "")
 # RISK MANAGEMENT PARAMETERS
 # ============================================================================
 # Minimum net ROI percentage required to execute trade (after fees & slippage)
-MIN_NET_ROI_PCT = _get_env_float("ARB_MIN_NET_ROI_PCT", 0.05)
+# Minimum percentage ROI after fees to consider executing (0.05 = 0.05%)
+# Lowered from 0.05 to 0.03 for more trading opportunities
+MIN_NET_ROI_PCT = _get_env_float("ARB_MIN_NET_ROI_PCT", 0.03)
 
 # Maximum exposure per trade in USDT (conservative default)
-MAX_EXPOSURE_USDT = _get_env_float("ARB_MAX_EXPOSURE_USDT", 200.0)
+# Increased from 200 to 500 for higher profit potential per trade
+MAX_EXPOSURE_USDT = _get_env_float("ARB_MAX_EXPOSURE_USDT", 500.0)
 
 # Safety factor for liquidity (use only this fraction of available liquidity)
 # 0.5 = use max 50% of available liquidity to avoid slippage
@@ -92,8 +95,9 @@ SAFETY_FACTOR = _get_env_float("ARB_SAFETY_FACTOR", 0.5)
 # Maximum number of trades per minute (rate limiting)
 MAX_TRADES_PER_MINUTE = _get_env_int("ARB_MAX_TRADES_PER_MINUTE", 5)
 
-# Cooldown period in seconds before same symbol can be traded again (reduced from 30 to 5)
-PER_SYMBOL_COOLDOWN_SEC = _get_env_float("ARB_SYMBOL_COOLDOWN_SEC", 5.0)
+# Cooldown period in seconds before same symbol can be traded again
+# Reduced from 30 to 3 for more frequent trading on same pairs
+PER_SYMBOL_COOLDOWN_SEC = _get_env_float("ARB_SYMBOL_COOLDOWN_SEC", 3.0)
 
 # Maximum concurrent opportunities to process per scan cycle
 MAX_CONCURRENT_OPPORTUNITIES = _get_env_int("ARB_MAX_CONCURRENT_OPPS", 3)
@@ -198,7 +202,9 @@ STRATEGY_SWITCH_THRESHOLD = _get_env_float("ARB_STRATEGY_SWITCH_THRESHOLD", 0.1)
 # EXCHANGE PARAMETERS
 # ============================================================================
 # Symbols to trade (can be extended)
-TRADING_SYMBOLS = _get_env_str("ARB_SYMBOLS", "BTC-USDT,ETH-USDT,SOL-USDT,BNB-USDT,XRP-USDT,DOGE-USDT,LTC-USDT,ADA-USDT,MATIC-USDT,DOT-USDT").split(",")
+# Trading symbols (comma-separated, no spaces)
+# Expanded from 10 to 20 pairs for more opportunities
+TRADING_SYMBOLS = _get_env_str("ARB_SYMBOLS", "BTC-USDT,ETH-USDT,SOL-USDT,BNB-USDT,XRP-USDT,DOGE-USDT,LTC-USDT,ADA-USDT,MATIC-USDT,DOT-USDT,LINK-USDT,AVAX-USDT,UNI-USDT,ATOM-USDT,FIL-USDT,APT-USDT,ARB-USDT,OP-USDT,TRX-USDT,NEAR-USDT").split(",")
 
 # Top-K orderbook levels to consider for liquidity
 ORDERBOOK_TOP_K = _get_env_int("ARB_ORDERBOOK_TOP_K", 20)
