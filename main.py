@@ -2,7 +2,7 @@
 """
 main.py — diagnostic monitor + startup.
 Enhanced with health monitoring and configurable settings.
-UPDATED: Now supports all 5 exchanges (Bybit, KuCoin, HTX, XT, MEXC)
+UPDATED: Now supports 4 exchanges (Bybit, KuCoin, HTX, MEXC)
 """
 import asyncio
 import logging
@@ -18,7 +18,6 @@ from core.arbitrage import ArbitrageEngine
 from exchanges.bybit_ws import BybitWS
 from exchanges.kucoin_ws import KucoinWS
 from exchanges.htx_ws import HtxWS
-from exchanges.xt_ws import XtWS
 from exchanges.mexc_ws import MexcWS
 import settings
 
@@ -78,20 +77,18 @@ async def main():
     store = PriceStore()
 
     # Initialize exchange connections with staggered start
-    # NOW SUPPORTS ALL 5 EXCHANGES: Bybit, KuCoin, HTX, XT, MEXC
+    # NOW SUPPORTS 4 EXCHANGES: Bybit, KuCoin, HTX, MEXC
     stagger = 0.1
-    logger.info("Initializing 5 exchange connections...")
+    logger.info("Initializing 4 exchange connections...")
     bybit = BybitWS(symbols, store, loop, exchange_name="Bybit", stagger_start=stagger)
     await asyncio.sleep(0.1)
     kucoin = KucoinWS(symbols, store, loop, exchange_name="KuCoin", stagger_start=stagger)
     await asyncio.sleep(0.1)
     htx = HtxWS(symbols, store, loop, exchange_name="HTX", stagger_start=stagger)
     await asyncio.sleep(0.1)
-    xt = XtWS(symbols, store, loop, exchange_name="XT", stagger_start=stagger)
-    await asyncio.sleep(0.1)
     mexc = MexcWS(symbols, store, loop, exchange_name="MEXC", stagger_start=stagger)
     
-    exchanges = [bybit, kucoin, htx, xt, mexc]
+    exchanges = [bybit, kucoin, htx, mexc]
     logger.info(f"✅ All {len(exchanges)} exchanges initialized")
 
     # Start monitoring task

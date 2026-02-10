@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger("exchange_config")
 
-# Updated 2025 fee schedules for all 5 exchanges
+# Updated 2025 fee schedules for 4 exchanges
 # These are standard spot trading fees (may vary by VIP level)
 EXCHANGE_PARAMS: Dict[str, Dict[str, Any]] = {
     "Bybit": {
@@ -29,15 +29,6 @@ EXCHANGE_PARAMS: Dict[str, Dict[str, Any]] = {
         "supports_depth": True,
     },
     "HTX": {
-        "maker": 0.002,  # 0.2% maker fee (2025 standard)
-        "taker": 0.002,  # 0.2% taker fee
-        "withdraw_fee": 1.0,  # Approximate USDT withdrawal fee
-        "withdraw_fee_currency": "USDT",
-        "min_notional": 1.0,
-        "min_size": 0.0001,
-        "supports_depth": True,
-    },
-    "XT": {
         "maker": 0.002,  # 0.2% maker fee (2025 standard)
         "taker": 0.002,  # 0.2% taker fee
         "withdraw_fee": 1.0,  # Approximate USDT withdrawal fee

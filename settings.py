@@ -68,10 +68,6 @@ KUCOIN_PASSPHRASE = _get_env_str("ARB_KUCOIN_PASSPHRASE", "")
 HTX_API_KEY = _get_env_str("ARB_HTX_KEY", "")
 HTX_API_SECRET = _get_env_str("ARB_HTX_SECRET", "")
 
-# XT
-XT_API_KEY = _get_env_str("ARB_XT_KEY", "")
-XT_API_SECRET = _get_env_str("ARB_XT_SECRET", "")
-
 # MEXC
 MEXC_API_KEY = _get_env_str("ARB_MEXC_KEY", "")
 MEXC_API_SECRET = _get_env_str("ARB_MEXC_SECRET", "")
@@ -236,7 +232,7 @@ def get_config_summary() -> str:
     return """
 === Arbitrage Bot Configuration (ENHANCED) ===
 Execution Mode: {mode}
-Exchanges: Bybit, KuCoin, HTX, XT, MEXC (5 total)
+Exchanges: Bybit, KuCoin, HTX, MEXC (4 total)
 Min Net ROI: {roi}%
 Max Exposure: ${exp} USDT
 Safety Factor: {sf}
