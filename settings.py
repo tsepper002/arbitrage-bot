@@ -98,6 +98,7 @@ MAX_TRADES_PER_MINUTE = _get_env_int("ARB_MAX_TRADES_PER_MINUTE", 5)
 # Cooldown period in seconds before same symbol can be traded again
 # Reduced from 30 to 3 for more frequent trading on same pairs
 PER_SYMBOL_COOLDOWN_SEC = _get_env_float("ARB_SYMBOL_COOLDOWN_SEC", 3.0)
+SYMBOL_COOLDOWN_SEC = PER_SYMBOL_COOLDOWN_SEC  # Alias for compatibility
 
 # Maximum concurrent opportunities to process per scan cycle
 MAX_CONCURRENT_OPPORTUNITIES = _get_env_int("ARB_MAX_CONCURRENT_OPPS", 3)
