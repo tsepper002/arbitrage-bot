@@ -35,7 +35,10 @@ class ArbitrageEngine:
                  persist_path: Optional[str] = None,
                  max_exposure_usdt: Optional[float] = None,
                  safety_factor: Optional[float] = None,
-                 topk: Optional[int] = None):
+                 topk: Optional[int] = None,
+                 executor: Optional[OrderExecutor] = None,
+                 risk_manager = None,
+                 strategy_manager = None):
         self.store = store
         self.params = EXCHANGE_PARAMS
         
@@ -59,8 +62,12 @@ class ArbitrageEngine:
             else:
                 self.max_exposure_usdt = 200.0
 
-        # Initialize order executor
-        self.executor = OrderExecutor()
+        # Initialize order executor (use provided or create new)
+        self.executor = executor if executor is not None else OrderExecutor()
+        
+        # Optional integrations
+        self.risk_manager = risk_manager
+        self.strategy_manager = strategy_manager
 
         # Event-driven scanning state
         self.updated_symbols: Set[str] = set()
@@ -279,12 +286,36 @@ class ArbitrageEngine:
                 opps = await self.scan_once(s)
                 if opps:
                     for o in opps:
+                        # Check risk manager before executing
+                        if self.risk_manager:
+                            can_trade, reason = self.risk_manager.check_can_trade(o)
+                            if not can_trade:
+                                logger.debug(f"Risk manager blocked trade: {reason}")
+                                continue
+                        
                         # Execute or log the opportunity
-                        result = self.executor.execute_arbitrage(o)
+                        result = await self.executor.execute_arbitrage(o)
+                        
+                        # Record trade to strategy manager
+                        if self.strategy_manager and result.get('trade_info'):
+                            strategy = o.get('strategy', 'cross_exchange')
+                            profit = result['trade_info'].get('net_profit', 0)
+                            execution_time = result.get('execution_time', 0)
+                            self.strategy_manager.record_trade(
+                                strategy=strategy,
+                                profit=profit,
+                                execution_time=execution_time
+                            )
+                        
+                        # Update risk manager after trade
+                        if self.risk_manager and result.get('trade_info'):
+                            self.risk_manager.record_trade(result['trade_info'])
                         
                         if result['status'] == 'simulated':
                             # Already logged by executor
                             pass
+                        elif result['status'] == 'success':
+                            logger.info(f"✅ Trade executed successfully: {result.get('summary', '')}")
                         elif result['status'] == 'blocked':
                             logger.debug(f"Trade blocked: {result['reason']}")
                         elif result['status'] == 'error':
