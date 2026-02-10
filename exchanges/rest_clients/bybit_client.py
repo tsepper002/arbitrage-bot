@@ -22,6 +22,18 @@ class BybitRESTClient(BaseRESTClient):
     def __init__(self, api_key: str, api_secret: str):
         super().__init__(api_key, api_secret, "Bybit")
         self.recv_window = 5000  # 5 seconds
+        self._session: Optional[aiohttp.ClientSession] = None
+    
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create aiohttp session (reuse for efficiency)."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+    
+    async def close(self):
+        """Close the aiohttp session."""
+        if self._session and not self._session.closed:
+            await self._session.close()
     
     def _generate_signature(self, params: Dict[str, Any]) -> str:
         """Generate HMAC SHA256 signature for Bybit API."""
@@ -79,12 +91,12 @@ class BybitRESTClient(BaseRESTClient):
         headers = self._get_headers()
         params = self._add_auth_params(params)
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=params, headers=headers) as resp:
-                data = await resp.json()
-                if data.get("retCode") != 0:
-                    raise Exception(f"Bybit order failed: {data}")
-                return data.get("result", {})
+        session = await self._get_session()
+        async with session.post(url, json=params, headers=headers) as resp:
+            data = await resp.json()
+            if data.get("retCode") != 0:
+                raise Exception(f"Bybit order failed: {data}")
+            return data.get("result", {})
     
     async def cancel_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
         """Cancel an order on Bybit."""
@@ -99,12 +111,12 @@ class BybitRESTClient(BaseRESTClient):
         headers = self._get_headers()
         params = self._add_auth_params(params)
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=params, headers=headers) as resp:
-                data = await resp.json()
-                if data.get("retCode") != 0:
-                    raise Exception(f"Bybit cancel failed: {data}")
-                return data.get("result", {})
+        session = await self._get_session()
+        async with session.post(url, json=params, headers=headers) as resp:
+            data = await resp.json()
+            if data.get("retCode") != 0:
+                raise Exception(f"Bybit cancel failed: {data}")
+            return data.get("result", {})
     
     async def get_order_status(self, symbol: str, order_id: str) -> Dict[str, Any]:
         """Get order status from Bybit."""
@@ -119,12 +131,12 @@ class BybitRESTClient(BaseRESTClient):
         headers = self._get_headers()
         params = self._add_auth_params(params)
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, headers=headers) as resp:
-                data = await resp.json()
-                if data.get("retCode") != 0:
-                    raise Exception(f"Bybit get order failed: {data}")
-                return data.get("result", {})
+        session = await self._get_session()
+        async with session.get(url, params=params, headers=headers) as resp:
+            data = await resp.json()
+            if data.get("retCode") != 0:
+                raise Exception(f"Bybit get order failed: {data}")
+            return data.get("result", {})
     
     async def get_balance(self, currency: Optional[str] = None) -> Dict[str, float]:
         """Get account balances from Bybit."""
@@ -137,25 +149,25 @@ class BybitRESTClient(BaseRESTClient):
         headers = self._get_headers()
         params = self._add_auth_params(params)
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, headers=headers) as resp:
-                data = await resp.json()
-                if data.get("retCode") != 0:
-                    raise Exception(f"Bybit get balance failed: {data}")
-                
-                # Parse balances
-                balances = {}
-                result = data.get("result", {})
-                for item in result.get("list", []):
-                    for coin in item.get("coin", []):
-                        coin_name = coin.get("coin")
-                        available = float(coin.get("availableToWithdraw", 0))
-                        if available > 0:
-                            balances[coin_name] = available
-                
-                if currency:
-                    return {currency: balances.get(currency, 0.0)}
-                return balances
+        session = await self._get_session()
+        async with session.get(url, params=params, headers=headers) as resp:
+            data = await resp.json()
+            if data.get("retCode") != 0:
+                raise Exception(f"Bybit get balance failed: {data}")
+            
+            # Parse balances
+            balances = {}
+            result = data.get("result", {})
+            for item in result.get("list", []):
+                for coin in item.get("coin", []):
+                    coin_name = coin.get("coin")
+                    available = float(coin.get("availableToWithdraw", 0))
+                    if available > 0:
+                        balances[coin_name] = available
+            
+            if currency:
+                return {currency: balances.get(currency, 0.0)}
+            return balances
     
     async def get_trading_pairs(self) -> List[Dict[str, Any]]:
         """Get trading pairs from Bybit."""
@@ -163,12 +175,12 @@ class BybitRESTClient(BaseRESTClient):
         
         params = {"category": "spot"}
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params) as resp:
-                data = await resp.json()
-                if data.get("retCode") != 0:
-                    raise Exception(f"Bybit get pairs failed: {data}")
-                return data.get("result", {}).get("list", [])
+        session = await self._get_session()
+        async with session.get(url, params=params) as resp:
+            data = await resp.json()
+            if data.get("retCode") != 0:
+                raise Exception(f"Bybit get pairs failed: {data}")
+            return data.get("result", {}).get("list", [])
     
     async def withdraw(
         self,
@@ -195,12 +207,12 @@ class BybitRESTClient(BaseRESTClient):
         headers = self._get_headers()
         params = self._add_auth_params(params)
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=params, headers=headers) as resp:
-                data = await resp.json()
-                if data.get("retCode") != 0:
-                    raise Exception(f"Bybit withdraw failed: {data}")
-                return data.get("result", {})
+        session = await self._get_session()
+        async with session.post(url, json=params, headers=headers) as resp:
+            data = await resp.json()
+            if data.get("retCode") != 0:
+                raise Exception(f"Bybit withdraw failed: {data}")
+            return data.get("result", {})
     
     async def get_deposit_address(self, currency: str, network: Optional[str] = None) -> Dict[str, str]:
         """Get deposit address from Bybit."""
@@ -216,14 +228,14 @@ class BybitRESTClient(BaseRESTClient):
         headers = self._get_headers()
         params = self._add_auth_params(params)
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, headers=headers) as resp:
-                data = await resp.json()
-                if data.get("retCode") != 0:
-                    raise Exception(f"Bybit get deposit address failed: {data}")
-                
-                result = data.get("result", {})
-                return {
-                    "address": result.get("address", ""),
-                    "memo": result.get("tag", "")
-                }
+        session = await self._get_session()
+        async with session.get(url, params=params, headers=headers) as resp:
+            data = await resp.json()
+            if data.get("retCode") != 0:
+                raise Exception(f"Bybit get deposit address failed: {data}")
+            
+            result = data.get("result", {})
+            return {
+                "address": result.get("address", ""),
+                "memo": result.get("tag", "")
+            }

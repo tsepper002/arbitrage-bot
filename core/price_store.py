@@ -26,14 +26,14 @@ class PriceStore:
         self._data: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
         # No lock needed - atomic dict reference swap
     
-    def update(self, exchange: str, symbol: str,
-               bid: Optional[float], bid_size: Optional[float],
-               ask: Optional[float], ask_size: Optional[float],
-               ts: Optional[float] = None):
+    async def update(self, exchange: str, symbol: str,
+                     bid: Optional[float], bid_size: Optional[float],
+                     ask: Optional[float], ask_size: Optional[float],
+                     ts: Optional[float] = None):
         """
-        Update top-of-book prices (non-async, lock-free).
+        Update top-of-book prices (async for compatibility).
         
-        Note: Changed from async to sync - no await needed.
+        Note: No lock needed with atomic dict swap (W1 optimization).
         """
         # Create copy of current data for this symbol
         current_exmap = dict(self._data.get(symbol, {}))
@@ -57,17 +57,17 @@ class PriceStore:
         
         logger.debug(f"PriceStore.update (top) {exchange} {symbol} bid={rec.get('bid')} ask={rec.get('ask')}")
     
-    def update_levels(self, exchange: str, symbol: str,
-                      bids_levels: Optional[List[Tuple[float, float]]],
-                      asks_levels: Optional[List[Tuple[float, float]]],
-                      ts: Optional[float] = None):
+    async def update_levels(self, exchange: str, symbol: str,
+                            bids_levels: Optional[List[Tuple[float, float]]],
+                            asks_levels: Optional[List[Tuple[float, float]]],
+                            ts: Optional[float] = None):
         """
-        Update orderbook depth levels (non-async, lock-free).
+        Update orderbook depth levels (async for compatibility).
         
         bids_levels: list of (price, size) ordered best-first (descending price)
         asks_levels: list of (price, size) ordered best-first (ascending price)
         
-        Note: Changed from async to sync - no await needed.
+        Note: No lock needed with atomic dict swap (W1 optimization).
         """
         # Create copy of current data for this symbol
         current_exmap = dict(self._data.get(symbol, {}))
