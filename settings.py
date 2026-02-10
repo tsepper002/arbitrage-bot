@@ -233,6 +233,27 @@ LOG_LEVEL = _get_env_str("ARB_LOG_LEVEL", "INFO")
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
+
+def get_config() -> dict:
+    """Get configuration as dictionary."""
+    return {
+        'DRY_RUN': DRY_RUN,
+        'MIN_NET_ROI_PCT': MIN_NET_ROI_PCT,
+        'MAX_EXPOSURE_USDT': MAX_EXPOSURE_USDT,
+        'TRADING_SYMBOLS': TRADING_SYMBOLS,
+        'SCAN_INTERVAL_SEC': SCAN_INTERVAL_SEC,
+        'SYMBOL_COOLDOWN_SEC': PER_SYMBOL_COOLDOWN_SEC,
+        'EXCHANGES': ['Bybit', 'KuCoin', 'HTX', 'MEXC'],
+        'MAX_DAILY_LOSS': MAX_DAILY_LOSS,
+        'MAX_HOURLY_LOSS': MAX_HOURLY_LOSS,
+        'MAX_SINGLE_TRADE_LOSS': MAX_SINGLE_TRADE_LOSS,
+        'MAX_CONSECUTIVE_LOSSES': MAX_CONSECUTIVE_LOSSES,
+        'MAX_OPEN_EXPOSURE': MAX_OPEN_EXPOSURE,
+        'ANOMALOUS_SPREAD_PCT': ANOMALOUS_SPREAD_PCT,
+        'MAX_DATA_AGE_SEC': MAX_DATA_AGE_SEC,
+    }
+
+
 def get_config_summary() -> str:
     """Returns a formatted summary of current configuration."""
     return """
