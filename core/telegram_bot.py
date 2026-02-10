@@ -243,3 +243,14 @@ async def send_telegram_message(text: str):
     """Quick function to send Telegram message."""
     bot = TelegramBot()
     await bot.send_message(text)
+
+
+# Factory function for easy initialization
+_telegram_bot_instance = None
+
+def get_telegram_bot(token: str, chat_id: str):
+    """Get or create TelegramBot singleton."""
+    global _telegram_bot_instance
+    if _telegram_bot_instance is None:
+        _telegram_bot_instance = TelegramBot(token, chat_id)
+    return _telegram_bot_instance

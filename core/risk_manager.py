@@ -140,6 +140,33 @@ class RiskManager:
         
         return True, None
     
+    def check_can_trade(self, opportunity: Dict) -> Tuple[bool, Optional[str]]:
+        """
+        Check if a specific trading opportunity is allowed.
+        
+        Args:
+            opportunity: Dict with trade details
+            
+        Returns:
+            (can_trade, reason) - reason is None if allowed
+        """
+        # First check if trading is globally allowed
+        allowed, reason = self.is_trading_allowed()
+        if not allowed:
+            return False, reason
+        
+        # Check for anomalous spreads (likely data errors)
+        roi_pct = opportunity.get('roi_pct', 0)
+        if abs(roi_pct) > settings.ANOMALOUS_SPREAD_PCT:
+            return False, f"Anomalous spread: {roi_pct:.2f}% (max: {settings.ANOMALOUS_SPREAD_PCT}%)"
+        
+        # Check trade amount
+        buy_price = opportunity.get('buy_avg', 0)
+        qty = opportunity.get('qty', 0)
+        amount = buy_price * qty
+        
+        return self.can_trade_amount(amount)
+    
     def can_trade_amount(self, amount: float) -> Tuple[bool, Optional[str]]:
         """
         Check if a specific trade amount is allowed.
@@ -206,6 +233,22 @@ class RiskManager:
         """
         return spread_pct <= settings.ANOMALOUS_SPREAD_PCT
     
+    def record_trade(self, trade_info: Dict):
+        """
+        Record a completed trade from trade_info dict.
+        
+        Args:
+            trade_info: Dict containing trade details (net_profit, exposure, etc.)
+        """
+        pnl = trade_info.get('net_profit', 0.0)
+        
+        # Calculate exposure from trade info
+        buy_price = trade_info.get('buy_price', 0.0)
+        qty = trade_info.get('qty', 0.0)
+        exposure = buy_price * qty if buy_price and qty else 0.0
+        
+        self.record_trade_result(pnl, exposure)
+    
     def record_trade_result(self, pnl: float, exposure: float):
         """
         Record the result of a completed trade.
@@ -262,3 +305,14 @@ class RiskManager:
             "open_exposure": self.open_exposure,
             "exchange_balances": self.exchange_balances.copy(),
         }
+
+
+# Factory function for easy initialization
+_risk_manager_instance = None
+
+def get_risk_manager() -> RiskManager:
+    """Get or create RiskManager singleton."""
+    global _risk_manager_instance
+    if _risk_manager_instance is None:
+        _risk_manager_instance = RiskManager()
+    return _risk_manager_instance

@@ -208,3 +208,14 @@ async def example_critical_cpu_handler(cpu_pct: float):
     # - Disable least profitable symbols
     # - Stop new trades
     # - Reduce to minimal monitoring
+
+
+# Factory function for easy initialization
+_resource_monitor_instance = None
+
+def get_resource_monitor() -> ResourceMonitor:
+    """Get or create ResourceMonitor singleton."""
+    global _resource_monitor_instance
+    if _resource_monitor_instance is None:
+        _resource_monitor_instance = ResourceMonitor()
+    return _resource_monitor_instance

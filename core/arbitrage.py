@@ -299,10 +299,12 @@ class ArbitrageEngine:
                         # Record trade to strategy manager
                         if self.strategy_manager and result.get('trade_info'):
                             strategy = o.get('strategy', 'cross_exchange')
+                            success = result['status'] == 'success'
                             profit = result['trade_info'].get('net_profit', 0)
                             execution_time = result.get('execution_time', 0)
                             self.strategy_manager.record_trade(
-                                strategy=strategy,
+                                strategy_name=strategy,
+                                success=success,
                                 profit=profit,
                                 execution_time=execution_time
                             )

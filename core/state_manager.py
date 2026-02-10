@@ -246,3 +246,14 @@ class StateManager:
             "total_lifetime_pnl": self.state.get("total_lifetime_pnl", 0.0),
             "total_lifetime_trades": self.state.get("total_lifetime_trades", 0),
         }
+
+
+# Factory function for easy initialization
+_state_manager_instance = None
+
+def get_state_manager(state_file: Optional[str] = None) -> StateManager:
+    """Get or create StateManager singleton."""
+    global _state_manager_instance
+    if _state_manager_instance is None:
+        _state_manager_instance = StateManager(state_file)
+    return _state_manager_instance
