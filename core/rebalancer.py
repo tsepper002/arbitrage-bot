@@ -64,13 +64,16 @@ class AutoRebalancer:
         self.max_transfer_fee_pct = max_transfer_fee_pct
         
         # Network preferences (cheapest first)
+        # Note: These are estimated typical fees. Actual fees vary with network congestion.
+        # TODO: Fetch dynamic fees from a price oracle or exchange API
+        # For now, using conservative estimates as of 2025
         self.network_preferences = [
-            ('ARBITRUM', 0.5),   # Arbitrum (cheapest, ~$0.50)
-            ('TRC20', 1.0),      # Tron network (~$1)
-            ('BEP20', 2.0),      # BSC (~$2)
-            ('POLYGON', 0.5),    # Polygon (~$0.50)
-            ('OPTIMISM', 0.8),   # Optimism (~$0.80)
-            ('ERC20', 15.0),     # Ethereum (expensive, ~$15)
+            ('ARBITRUM', 0.5),   # Arbitrum (cheapest, ~$0.50, can be $0.10-$2)
+            ('TRC20', 1.0),      # Tron network (~$1, usually stable)
+            ('BEP20', 2.0),      # BSC (~$2, can be $0.50-$5)
+            ('POLYGON', 0.5),    # Polygon (~$0.50, can be $0.10-$2)
+            ('OPTIMISM', 0.8),   # Optimism (~$0.80, can be $0.20-$3)
+            ('ERC20', 15.0),     # Ethereum (expensive, ~$15, can be $5-$50+)
         ]
         
         # Track pending transfers

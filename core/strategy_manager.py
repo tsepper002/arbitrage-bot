@@ -84,8 +84,11 @@ class StrategyStats:
         # Normalize components
         win_rate_norm = self.win_rate / 100
         
-        # Profit normalized to typical $0.50 profit
-        profit_norm = min(self.avg_profit_per_trade / 0.5, 1.0)
+        # Profit normalized to typical target profit ($0.50 for arbitrage)
+        # This represents a reasonable profit for small-medium arbitrage trades
+        # Adjust this baseline if your typical trades are much larger/smaller
+        TYPICAL_TARGET_PROFIT = 0.5  # $0.50 per trade
+        profit_norm = min(self.avg_profit_per_trade / TYPICAL_TARGET_PROFIT, 1.0)
         
         # Sharpe ratio normalized (typical range -1 to 3)
         sharpe_norm = max(min((self.sharpe_ratio + 1) / 4, 1.0), 0.0)

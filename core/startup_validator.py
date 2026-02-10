@@ -277,8 +277,9 @@ class StartupValidator:
         """Check 5: Verify WebSocket connections (need at least 3 of 4)"""
         logger.info("Checking WebSocket connections...")
         
-        # Wait a moment for WS to establish
-        await asyncio.sleep(2)
+        # Wait for WebSocket connections to fully establish
+        # 2 seconds is typically sufficient for initial handshake and subscription
+        await asyncio.sleep(2)  # Allow time for WS handshake + subscriptions
         
         connected = []
         disconnected = []
@@ -314,8 +315,9 @@ class StartupValidator:
         """Check 6: Verify orderbook data received for symbols"""
         logger.info("Checking orderbook data...")
         
-        # Wait for some data to arrive
-        await asyncio.sleep(3)
+        # Wait for initial orderbook snapshots to arrive via WebSocket
+        # 3 seconds allows for: WS messages → parsing → PriceStore updates
+        await asyncio.sleep(3)  # Allow time for initial orderbook data
         
         # Get snapshot
         snapshot = self.price_store.snapshot()

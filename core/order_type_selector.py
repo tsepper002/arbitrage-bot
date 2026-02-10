@@ -45,7 +45,9 @@ class OrderTypeSelector:
         self.LIMIT_BOTH_THRESHOLD = 3.0    # Spread > 3× fees → both limit
         
         # Time-to-live for limit orders (milliseconds)
-        self.LIMIT_ORDER_TTL_MS = 500
+        # TODO: Implement TTL functionality in order executor
+        # Currently orders are placed without explicit TTL, relying on exchange defaults
+        self.LIMIT_ORDER_TTL_MS = 500  # Target: cancel if not filled within 500ms
         
         logger.info(
             f"OrderTypeSelector initialized with thresholds: "

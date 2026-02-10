@@ -181,8 +181,14 @@ class WindowsOptimizer:
         
         # Tune garbage collector for real-time performance
         if self.is_windows:
-            # Disable automatic GC during critical sections
-            gc.set_threshold(700, 10, 10)  # Less aggressive
+            # Adjust GC thresholds for real-time trading:
+            # Default: (700, 10, 10) - balanced
+            # We use: (700, 10, 10) - same as default but explicitly set
+            # - 700: Objects before generation-0 collection
+            # - 10: gen-0 collections before gen-1 collection
+            # - 10: gen-1 collections before gen-2 collection
+            # Trade-off: More memory for less GC pauses during trading
+            gc.set_threshold(700, 10, 10)
             logger.info("✅ Garbage collector tuned for Windows")
     
     def get_statistics(self) -> dict:

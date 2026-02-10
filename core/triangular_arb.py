@@ -185,8 +185,16 @@ class TriangularArbitrageEngine:
                 return None
             
             # Calculate final product after fees
-            # Each leg loses (1 - fee) of value
+            # For triangular arbitrage, fees compound differently:
+            # - Each buy: pay fee on purchase (receive less)
+            # - Each sell: pay fee on sale (receive less)
+            # Conservative estimate: apply (1-fee) to each leg's output
+            # More accurate: would need to track actual amounts through each leg
+            # Using simplified model: product * (1-fee)^n where n = number of legs
             product = rate1 * rate2 * rate3 * ((1 - fee) ** 3)
+            
+            # Note: This is a conservative estimate. Actual execution would need
+            # to calculate fees on each leg's specific amount traded.
             
             # Calculate profit percentage
             profit_pct = (product - 1.0) * 100
