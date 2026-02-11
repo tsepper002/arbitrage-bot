@@ -147,7 +147,7 @@ async def test_phase_2_initialization():
         from core.order_executor import OrderExecutor
         store = PriceStore()
         executor = OrderExecutor(dry_run=True)
-        engine = ArbitrageEngine(store, executor)
+        engine = ArbitrageEngine(store, executor=executor)
         print_test("ArbitrageEngine initialization", True)
         passed += 1
     except Exception as e:
@@ -175,13 +175,15 @@ async def test_phase_3_async_operations():
             'asks': [[50001.0, 1.0], [50002.0, 2.0]]
         }
         
-        # Update store
-        await store.update('Bybit', 'BTCUSDT', orderbook)
+        # Update store with proper method
+        await store.update_levels('Bybit', 'BTCUSDT', 
+                                  bids_levels=orderbook['bids'],
+                                  asks_levels=orderbook['asks'])
         
-        # Verify
+        # Verify - snapshot returns {symbol: {exchange: {...}}}
         snapshot = store.snapshot()
-        assert 'Bybit' in snapshot
-        assert 'BTCUSDT' in snapshot['Bybit']
+        assert 'BTCUSDT' in snapshot
+        assert 'Bybit' in snapshot['BTCUSDT']
         
         print_test("PriceStore async update", True)
         passed += 1
@@ -196,17 +198,15 @@ async def test_phase_3_async_operations():
         
         store = PriceStore()
         executor = OrderExecutor(dry_run=True)
-        engine = ArbitrageEngine(store, executor)
+        engine = ArbitrageEngine(store, executor=executor)
         
         # Add some orderbook data
-        await store.update('Bybit', 'BTCUSDT', {
-            'bids': [[50000.0, 1.0], [49999.0, 2.0]],
-            'asks': [[50001.0, 1.0], [50002.0, 2.0]]
-        })
-        await store.update('KuCoin', 'BTCUSDT', {
-            'bids': [[50005.0, 1.0], [50004.0, 2.0]],
-            'asks': [[50006.0, 1.0], [50007.0, 2.0]]
-        })
+        await store.update_levels('Bybit', 'BTCUSDT',
+                                  bids_levels=[[50000.0, 1.0], [49999.0, 2.0]],
+                                  asks_levels=[[50001.0, 1.0], [50002.0, 2.0]])
+        await store.update_levels('KuCoin', 'BTCUSDT',
+                                  bids_levels=[[50005.0, 1.0], [50004.0, 2.0]],
+                                  asks_levels=[[50006.0, 1.0], [50007.0, 2.0]])
         
         # Scan for opportunities
         opportunities = await engine.scan_once('BTCUSDT')
@@ -278,7 +278,7 @@ async def test_phase_5_integrated_workflow():
         # Initialize components
         store = PriceStore()
         executor = OrderExecutor(dry_run=True)
-        engine = ArbitrageEngine(store, executor)
+        engine = ArbitrageEngine(store, executor=executor)
         
         # Simulate data flow
         exchanges = ['Bybit', 'KuCoin', 'HTX', 'MEXC']
@@ -286,11 +286,9 @@ async def test_phase_5_integrated_workflow():
         
         for exchange in exchanges:
             for symbol in symbols:
-                orderbook = {
-                    'bids': [[50000.0, 1.0], [49999.0, 2.0]],
-                    'asks': [[50001.0, 1.0], [50002.0, 2.0]]
-                }
-                await store.update(exchange, symbol, orderbook)
+                await store.update_levels(exchange, symbol,
+                                          bids_levels=[[50000.0, 1.0], [49999.0, 2.0]],
+                                          asks_levels=[[50001.0, 1.0], [50002.0, 2.0]])
         
         # Scan for opportunities
         for symbol in symbols:
