@@ -34,12 +34,14 @@ from exchanges.bybit_ws import BybitWS
 from exchanges.kucoin_ws import KucoinWS
 from exchanges.htx_ws import HtxWS
 from exchanges.mexc_ws import MexcWS
+from exchanges.binance_ws import BinanceWS
 
 # REST clients
 from exchanges.rest_clients.bybit_client import BybitRESTClient
 from exchanges.rest_clients.kucoin_client import KuCoinRESTClient
 from exchanges.rest_clients.htx_client import HTXRESTClient
 from exchanges.rest_clients.mexc_client import MEXCRESTClient
+from exchanges.rest_clients.binance_client import BinanceRESTClient
 
 import settings
 
@@ -161,7 +163,16 @@ class IntegratedArbitrageBot:
             else:
                 logger.warning("⚠️  MEXC API keys not found (live trading disabled for MEXC)")
             
-            logger.info(f"📊 Total REST clients: {len(self.rest_clients)}/4")
+            # Binance
+            binance_key = os.getenv("ARB_BINANCE_KEY", "")
+            binance_secret = os.getenv("ARB_BINANCE_SECRET", "")
+            if binance_key and binance_secret:
+                self.rest_clients["Binance"] = BinanceRESTClient(binance_key, binance_secret)
+                logger.info("✅ Binance REST client initialized")
+            else:
+                logger.warning("⚠️  Binance API keys not found (live trading disabled for Binance)")
+            
+            logger.info(f"📊 Total REST clients: {len(self.rest_clients)}/5")
             
         except Exception as e:
             logger.error(f"❌ Error initializing REST clients: {e}")
@@ -263,8 +274,11 @@ class IntegratedArbitrageBot:
             await asyncio.sleep(stagger)
             
             mexc = MexcWS(symbols, self.store, self.loop, exchange_name="MEXC", stagger_start=stagger)
+            await asyncio.sleep(stagger)
             
-            self.exchanges = [bybit, kucoin, htx, mexc]
+            binance = BinanceWS(symbols, self.store, self.loop, exchange_name="Binance", stagger_start=stagger)
+            
+            self.exchanges = [bybit, kucoin, htx, mexc, binance]
             logger.info(f"✅ All {len(self.exchanges)} exchange WebSockets initialized")
             
         except Exception as e:
