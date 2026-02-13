@@ -125,6 +125,15 @@ class ArbitrageEngine:
         return max(qty, 0.0)
 
     async def scan_once(self, symbol: str, prefunded: bool = True) -> List[Dict]:
+        # Cleanup old entries from recent_cache to prevent memory leak
+        now = time.time()
+        cutoff = now - 60.0  # Remove entries older than 60 seconds
+        keys_to_remove = [k for k, ts in self.recent_cache.items() if ts < cutoff]
+        for k in keys_to_remove:
+            del self.recent_cache[k]
+        if keys_to_remove:
+            logger.debug(f"Cleaned {len(keys_to_remove)} old entries from recent_cache")
+        
         snap = self.store.snapshot()
         exmap = snap.get(symbol, {})
         exchanges = list(exmap.keys())

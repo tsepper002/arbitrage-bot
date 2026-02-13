@@ -72,6 +72,14 @@ HTX_API_SECRET = _get_env_str("ARB_HTX_SECRET", "")
 MEXC_API_KEY = _get_env_str("ARB_MEXC_KEY", "")
 MEXC_API_SECRET = _get_env_str("ARB_MEXC_SECRET", "")
 
+# XT
+XT_API_KEY = _get_env_str("ARB_XT_KEY", "")
+XT_API_SECRET = _get_env_str("ARB_XT_SECRET", "")
+
+# Binance
+BINANCE_API_KEY = _get_env_str("ARB_BINANCE_KEY", "")
+BINANCE_API_SECRET = _get_env_str("ARB_BINANCE_SECRET", "")
+
 # Telegram Bot (Optional)
 TELEGRAM_BOT_TOKEN = _get_env_str("ARB_TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = _get_env_str("ARB_TELEGRAM_CHAT_ID", "")

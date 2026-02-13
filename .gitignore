@@ -1,4 +1,5 @@
 # Python
+**/__pycache__/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -24,10 +25,20 @@ ENV/
 # Logs
 *.log
 logs/
+arbitrage_bot.log
 
 # Generated data
 arbs.csv
 *.csv
+trades.csv
+
+# Bot state and data files
+bot_state.json
+heartbeat.txt
+
+# Environment variables and secrets
+.env
+*.env
 
 # OS
 .DS_Store

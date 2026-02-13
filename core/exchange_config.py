@@ -46,6 +46,24 @@ EXCHANGE_PARAMS: Dict[str, Dict[str, Any]] = {
         "min_size": 0.0001,
         "supports_depth": True,
     },
+    "Binance": {
+        "maker": 0.001,  # 0.1% maker fee (2025 standard)
+        "taker": 0.001,  # 0.1% taker fee
+        "withdraw_fee": 1.0,  # Approximate USDT withdrawal fee
+        "withdraw_fee_currency": "USDT",
+        "min_notional": 10.0,  # Binance typically has higher min notional
+        "min_size": 0.0001,
+        "supports_depth": True,
+    },
+    "XT": {
+        "maker": 0.002,  # 0.2% maker fee (2025 standard)
+        "taker": 0.002,  # 0.2% taker fee
+        "withdraw_fee": 1.0,  # Approximate USDT withdrawal fee
+        "withdraw_fee_currency": "USDT",
+        "min_notional": 1.0,
+        "min_size": 0.0001,
+        "supports_depth": True,
+    },
 }
 
 # Optionally try to refresh fees via REST public/private APIs.
