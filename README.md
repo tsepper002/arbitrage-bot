@@ -2,9 +2,11 @@
 
 A robust, efficient arbitrage bot for detecting and executing cross-exchange arbitrage opportunities across Bybit, KuCoin, HTX, XT, and MEXC.
 
-> 📖 **Русская инструкция**: См. [**ИНСТРУКЦИЯ.md**](ИНСТРУКЦИЯ.md) (полная) или [**БЫСТРЫЙ_СТАРТ.md**](БЫСТРЫЙ_СТАРТ.md) (за 5 минут)
+> 🚀 **Quick Commands**: See [**LAUNCH_COMMANDS.md**](LAUNCH_COMMANDS.md) (copy-paste commands) or [**КОМАНДЫ_ЗАПУСКА.md**](КОМАНДЫ_ЗАПУСКА.md) (команды на русском)
 > 
-> 📖 **Russian Instructions**: See [**ИНСТРУКЦИЯ.md**](ИНСТРУКЦИЯ.md) (complete) or [**БЫСТРЫЙ_СТАРТ.md**](БЫСТРЫЙ_СТАРТ.md) (5-minute quick start)
+> 📖 **Full Documentation**: See [**README.md**](#quick-start) (English) or [**ИНСТРУКЦИЯ.md**](ИНСТРУКЦИЯ.md) (Russian)
+> 
+> ⚡ **5-Minute Start**: See [**БЫСТРЫЙ_СТАРТ.md**](БЫСТРЫЙ_СТАРТ.md) (Russian quick guide)
 
 ## Features
 
