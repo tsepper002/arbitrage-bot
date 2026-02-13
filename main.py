@@ -183,7 +183,7 @@ class IntegratedArbitrageBot:
         try:
             # State Manager
             self.state_manager = get_state_manager()
-            await self.state_manager.load_state()
+            self.state_manager.load_state()  # This is not async, don't await
             logger.info("✅ State Manager initialized (state loaded)")
             
             # Balance Manager
