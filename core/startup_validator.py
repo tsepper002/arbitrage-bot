@@ -242,8 +242,11 @@ class StartupValidator:
         logger.info("Checking previous state...")
         
         try:
-            # Load state
-            state = self.state_manager.load_state()
+            # Load state - load_state() returns bool, state is in state_manager.state
+            loaded = self.state_manager.load_state()
+            
+            # Access the state dict from state_manager
+            state = self.state_manager.state
             
             # Check for pending orders
             pending_orders = state.get('pending_orders', [])
@@ -387,10 +390,10 @@ class StartupValidator:
         logger.info("Checking risk limits...")
         
         try:
-            # Check if blocked
-            is_blocked, reason = self.risk_manager.is_blocked()
+            # Check if trading is allowed
+            is_allowed, reason = self.risk_manager.is_trading_allowed()
             
-            if is_blocked:
+            if not is_allowed:
                 self.validation_results.append(ValidationResult(
                     check_name="Risk Limits",
                     passed=False,
@@ -400,7 +403,9 @@ class StartupValidator:
             else:
                 # Check daily P&L
                 daily_pnl = self.risk_manager.daily_pnl
-                max_loss = self.risk_manager.max_daily_loss
+                # Import settings to get max loss values
+                import settings
+                max_loss = settings.MAX_DAILY_LOSS
                 
                 self.validation_results.append(ValidationResult(
                     check_name="Risk Limits",
