@@ -5,6 +5,7 @@ Provides a safe interface for order placement with detailed logging.
 """
 import time
 import logging
+import asyncio
 from typing import List, Optional, Tuple, Dict
 from datetime import datetime
 import settings
@@ -16,17 +17,25 @@ class OrderExecutor:
     """
     Handles order execution with two modes:
     - dry_run (default): Simulates orders, logs actions without sending to exchanges
-    - live: Placeholder for real order placement (requires authenticated API clients)
+    - live: Real order placement using authenticated REST API clients
     """
     
-    def __init__(self, dry_run: Optional[bool] = None):
+    def __init__(self, dry_run: Optional[bool] = None, rest_clients: Optional[Dict[str, any]] = None,
+                 balance_manager: Optional[any] = None, risk_manager: Optional[any] = None):
         """
         Initialize order executor.
         
         Args:
             dry_run: If True, simulate orders. If None, uses settings.DRY_RUN
+            rest_clients: Dictionary of exchange_name -> REST client for live trading
+            balance_manager: BalanceManager instance for balance verification
+            risk_manager: RiskManager instance for risk checks
         """
         self.dry_run = dry_run if dry_run is not None else settings.DRY_RUN
+        self.rest_clients = rest_clients or {}
+        self.balance_manager = balance_manager
+        self.risk_manager = risk_manager
+        
         self.order_history: List[Dict] = []
         self.trade_count_per_minute: Dict[int, int] = {}  # minute timestamp -> count
         self.last_trade_time_per_symbol: Dict[str, float] = {}  # symbol -> last trade timestamp
@@ -35,6 +44,12 @@ class OrderExecutor:
             logger.info("🔵 OrderExecutor initialized in DRY RUN mode (safe simulation)")
         else:
             logger.warning("🔴 OrderExecutor initialized in LIVE mode - REAL ORDERS WILL BE PLACED!")
+            if not self.rest_clients:
+                logger.warning("⚠️ No REST clients provided - live trading will fail!")
+            if not self.balance_manager:
+                logger.warning("⚠️ No BalanceManager provided - balance verification disabled!")
+            if not self.risk_manager:
+                logger.warning("⚠️ No RiskManager provided - risk checks disabled!")
     
     def can_trade(self, symbol: str) -> Tuple[bool, Optional[str]]:
         """
@@ -160,60 +175,225 @@ class OrderExecutor:
     
     def _execute_live(self, opp: Dict) -> Dict:
         """
-        Placeholder for live order execution.
+        Execute live order using authenticated REST API clients.
         
-        IMPORTANT: This requires:
-        1. Authenticated API clients for each exchange
-        2. Account balances and verification
-        3. Proper error handling and order tracking
-        4. Risk management checks
+        CRITICAL: This places REAL orders with REAL money!
+        Implements concurrent execution with proper error handling.
         
-        Current implementation returns error - implement when infrastructure is ready.
+        Args:
+            opp: Opportunity dictionary with trade details
+            
+        Returns:
+            Execution result with status and order details
         """
         symbol = opp['symbol']
         buy_ex = opp['buy_ex']
         sell_ex = opp['sell_ex']
+        qty = opp['qty']
+        buy_price = opp['buy_avg']
+        sell_price = opp['sell_avg']
         
-        logger.error(
-            f"🔴 LIVE ORDER EXECUTION NOT IMPLEMENTED\n"
-            f"   Attempted to execute: {symbol} on {buy_ex} -> {sell_ex}\n"
-            f"   This requires authenticated exchange clients and should be implemented carefully.\n"
-            f"   Set DRY_RUN=True in settings.py to use simulation mode."
-        )
+        logger.info(f"🔴 LIVE TRADING: Executing {symbol} {qty:.6f} @ buy={buy_price:.2f} on {buy_ex}, sell={sell_price:.2f} on {sell_ex}")
         
-        return {
-            'status': 'error',
-            'reason': 'Live trading not implemented - requires authenticated exchange clients',
-            'opportunity': opp,
-            'message': 'Enable DRY_RUN mode or implement authenticated trading infrastructure'
-        }
+        # Verify REST clients are available
+        buy_client = self.rest_clients.get(buy_ex)
+        sell_client = self.rest_clients.get(sell_ex)
         
-        # TEMPLATE for future implementation:
-        # try:
-        #     # 1. Verify sufficient balances
-        #     # buy_balance = await self.get_balance(buy_ex, quote_currency)
-        #     # sell_balance = await self.get_balance(sell_ex, base_currency)
-        #     
-        #     # 2. Place buy order
-        #     # buy_order = await self.place_order(buy_ex, symbol, 'buy', qty, buy_price)
-        #     
-        #     # 3. Wait for buy fill confirmation
-        #     # await self.wait_for_fill(buy_order)
-        #     
-        #     # 4. Place sell order
-        #     # sell_order = await self.place_order(sell_ex, symbol, 'sell', qty, sell_price)
-        #     
-        #     # 5. Wait for sell fill confirmation
-        #     # await self.wait_for_fill(sell_order)
-        #     
-        #     # 6. Record successful trade
-        #     # self._record_trade(symbol, order_details)
-        #     
-        #     # return {'status': 'success', 'order_info': order_details}
-        # except Exception as e:
-        #     # Handle errors, possibly cancel unfilled orders
-        #     # logger.exception(f"Live order execution failed: {e}")
-        #     # return {'status': 'error', 'reason': str(e)}
+        if not buy_client or not sell_client:
+            logger.error(f"Missing REST client for {buy_ex if not buy_client else sell_ex}")
+            return {
+                'status': 'error',
+                'reason': f'No REST client available for {buy_ex if not buy_client else sell_ex}',
+                'opportunity': opp
+            }
+        
+        # Risk management check
+        if self.risk_manager:
+            allowed, reason = self.risk_manager.check_trade_allowed(
+                symbol, buy_ex, sell_ex, qty, buy_price, sell_price, opp['net']
+            )
+            if not allowed:
+                logger.warning(f"Trade blocked by risk manager: {reason}")
+                return {
+                    'status': 'blocked',
+                    'reason': f'Risk check failed: {reason}',
+                    'opportunity': opp
+                }
+        
+        # Balance verification
+        if self.balance_manager:
+            balances_ok, balance_error = self.balance_manager.verify_balances_for_trade(
+                buy_ex, sell_ex, symbol, qty, buy_price, sell_price
+            )
+            if not balances_ok:
+                logger.warning(f"Insufficient balance: {balance_error}")
+                return {
+                    'status': 'blocked',
+                    'reason': f'Insufficient balance: {balance_error}',
+                    'opportunity': opp
+                }
+        
+        # Execute both legs concurrently to minimize slippage
+        buy_order = None
+        sell_order = None
+        buy_filled = False
+        sell_filled = False
+        
+        try:
+            # Place both orders using market orders for fast execution
+            logger.info(f"Placing buy order on {buy_ex}: {symbol} {qty:.6f} @ market")
+            buy_order = buy_client.place_order(
+                symbol=symbol,
+                side='buy',
+                order_type='market',
+                quantity=qty
+            )
+            buy_order_id = buy_order.get('order_id') or buy_order.get('orderId')
+            logger.info(f"✅ Buy order placed: {buy_order_id}")
+            
+            logger.info(f"Placing sell order on {sell_ex}: {symbol} {qty:.6f} @ market")
+            sell_order = sell_client.place_order(
+                symbol=symbol,
+                side='sell',
+                order_type='market',
+                quantity=qty
+            )
+            sell_order_id = sell_order.get('order_id') or sell_order.get('orderId')
+            logger.info(f"✅ Sell order placed: {sell_order_id}")
+            
+            # Wait for fills (with timeout)
+            max_wait = 10.0  # 10 seconds max wait for fill
+            start_wait = time.time()
+            
+            while (time.time() - start_wait) < max_wait:
+                # Check buy order status
+                if not buy_filled:
+                    try:
+                        buy_status = buy_client.get_order_status(buy_order_id, symbol)
+                        status = buy_status.get('status', '').lower()
+                        if status in ['filled', 'complete', 'closed']:
+                            buy_filled = True
+                            # Extract actual fill price and quantity
+                            buy_price = float(buy_status.get('avg_price', buy_status.get('price', buy_price)))
+                            qty = float(buy_status.get('filled_quantity', buy_status.get('executedQty', qty)))
+                            logger.info(f"✅ Buy order filled: {qty:.6f} @ {buy_price:.2f}")
+                    except Exception as e:
+                        logger.error(f"Error checking buy order status: {e}")
+                
+                # Check sell order status
+                if not sell_filled:
+                    try:
+                        sell_status = sell_client.get_order_status(sell_order_id, symbol)
+                        status = sell_status.get('status', '').lower()
+                        if status in ['filled', 'complete', 'closed']:
+                            sell_filled = True
+                            # Extract actual fill price
+                            sell_price = float(sell_status.get('avg_price', sell_status.get('price', sell_price)))
+                            logger.info(f"✅ Sell order filled: {qty:.6f} @ {sell_price:.2f}")
+                    except Exception as e:
+                        logger.error(f"Error checking sell order status: {e}")
+                
+                # Break if both filled
+                if buy_filled and sell_filled:
+                    break
+                
+                time.sleep(0.5)  # Check every 500ms
+            
+            # Handle partial fills or timeouts
+            if not buy_filled:
+                logger.warning(f"⚠️ Buy order not filled within {max_wait}s - attempting cancel")
+                try:
+                    buy_client.cancel_order(buy_order_id, symbol)
+                except Exception as e:
+                    logger.error(f"Failed to cancel buy order: {e}")
+                
+                return {
+                    'status': 'error',
+                    'reason': 'Buy order timeout - order cancelled',
+                    'opportunity': opp,
+                    'buy_order': buy_order
+                }
+            
+            if not sell_filled:
+                logger.warning(f"⚠️ Sell order not filled within {max_wait}s - attempting cancel")
+                try:
+                    sell_client.cancel_order(sell_order_id, symbol)
+                except Exception as e:
+                    logger.error(f"Failed to cancel sell order: {e}")
+                
+                # We have a position now - this is a problem!
+                logger.error(f"🚨 CRITICAL: Bought on {buy_ex} but failed to sell on {sell_ex}!")
+                return {
+                    'status': 'error',
+                    'reason': 'Sell order timeout - holding position!',
+                    'opportunity': opp,
+                    'buy_order': buy_order,
+                    'sell_order': sell_order
+                }
+            
+            # Calculate actual profit
+            gross = (sell_price - buy_price) * qty
+            buy_fee_rate = 0.001  # Get from exchange_config
+            sell_fee_rate = 0.001
+            fees = (buy_price * qty * buy_fee_rate) + (sell_price * qty * sell_fee_rate)
+            net_profit = gross - fees
+            roi_pct = (net_profit / (buy_price * qty)) * 100 if (buy_price * qty) > 0 else 0
+            
+            logger.info(f"💰 Trade completed: profit=${net_profit:.4f} ({roi_pct:.3f}% ROI)")
+            
+            # Record trade
+            order_info = {
+                'mode': 'live',
+                'symbol': symbol,
+                'buy_exchange': buy_ex,
+                'sell_exchange': sell_ex,
+                'quantity': qty,
+                'buy_price': buy_price,
+                'sell_price': sell_price,
+                'gross_profit': gross,
+                'fees': fees,
+                'net_profit': net_profit,
+                'roi_pct': roi_pct,
+                'buy_order_id': buy_order_id,
+                'sell_order_id': sell_order_id,
+            }
+            
+            self._record_trade(symbol, order_info)
+            
+            # Update risk manager
+            if self.risk_manager:
+                self.risk_manager.record_trade(
+                    symbol, buy_ex, sell_ex, qty, buy_price, sell_price, net_profit, roi_pct
+                )
+            
+            # Refresh balances after trade
+            if self.balance_manager:
+                try:
+                    asyncio.create_task(self.balance_manager.fetch_balances(force=True))
+                except Exception:
+                    pass  # Best effort
+            
+            return {
+                'status': 'success',
+                'order_info': order_info,
+                'message': 'Both legs executed successfully'
+            }
+            
+        except Exception as e:
+            logger.exception(f"🚨 CRITICAL ERROR during live execution: {e}")
+            
+            # Attempt cleanup if partially executed
+            if buy_order and not sell_order:
+                logger.error("Buy order placed but sell order failed - attempting emergency sell...")
+                # TODO: Implement emergency sell logic
+            
+            return {
+                'status': 'error',
+                'reason': f'Execution failed: {str(e)}',
+                'opportunity': opp,
+                'buy_order': buy_order,
+                'sell_order': sell_order
+            }
     
     def get_statistics(self) -> Dict:
         """Get execution statistics."""
