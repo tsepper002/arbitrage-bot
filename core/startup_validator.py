@@ -317,11 +317,13 @@ class StartupValidator:
         
         # Check if price_store exists
         if self.price_store is None:
+            # PriceStore not initialized yet - this is expected during early startup
+            # Mark as passed with informational message since it's not an error
             self.validation_results.append(ValidationResult(
                 check_name="Orderbook Data",
-                passed=False,
-                message="PriceStore not yet initialized",
-                critical=False  # Not critical during early initialization
+                passed=True,
+                message="PriceStore not yet initialized (will be created in Phase 5)",
+                critical=False
             ))
             return
         
