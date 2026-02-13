@@ -1,0 +1,122 @@
+{
+  "bybit": {
+    "name": "bybit",
+    "enabled": true,
+    "testnet": false,
+    "rate_limit": 10,
+    "websocket_enabled": true,
+    "rest_enabled": true,
+    "symbols": [
+      "BTC/USDT",
+      "ETH/USDT"
+    ],
+    "metadata": {}
+  },
+  "kucoin": {
+    "name": "kucoin",
+    "enabled": true,
+    "testnet": false,
+    "rate_limit": 10,
+    "websocket_enabled": true,
+    "rest_enabled": true,
+    "symbols": [
+      "BTC/USDT",
+      "ETH/USDT"
+    ],
+    "metadata": {}
+  },
+  "htx": {
+    "name": "htx",
+    "enabled": true,
+    "testnet": false,
+    "rate_limit": 10,
+    "websocket_enabled": true,
+    "rest_enabled": true,
+    "symbols": [
+      "BTC/USDT",
+      "ETH/USDT"
+    ],
+    "metadata": {}
+  },
+  "mexc": {
+    "name": "mexc",
+    "enabled": true,
+    "testnet": false,
+    "rate_limit": 10,
+    "websocket_enabled": true,
+    "rest_enabled": true,
+    "symbols": [
+      "BTC/USDT",
+      "ETH/USDT"
+    ],
+    "metadata": {}
+  },
+  "binance": {
+    "name": "binance",
+    "enabled": true,
+    "testnet": false,
+    "rate_limit": 10,
+    "websocket_enabled": true,
+    "rest_enabled": true,
+    "symbols": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "BNB/USDT",
+      "SOL/USDT",
+      "ADA/USDT"
+    ],
+    "metadata": {}
+  },
+  "coinbase": {
+    "name": "coinbase",
+    "enabled": true,
+    "testnet": false,
+    "rate_limit": 10,
+    "websocket_enabled": true,
+    "rest_enabled": true,
+    "symbols": [
+      "BTC/USD",
+      "ETH/USD"
+    ],
+    "metadata": {}
+  },
+  "gateio": {
+    "name": "gateio",
+    "enabled": true,
+    "testnet": false,
+    "rate_limit": 10,
+    "websocket_enabled": true,
+    "rest_enabled": true,
+    "symbols": [
+      "BTC/USDT",
+      "ETH/USDT"
+    ],
+    "metadata": {}
+  },
+  "okx": {
+    "name": "okx",
+    "enabled": true,
+    "testnet": false,
+    "rate_limit": 10,
+    "websocket_enabled": true,
+    "rest_enabled": true,
+    "symbols": [
+      "BTC/USDT",
+      "ETH/USDT"
+    ],
+    "metadata": {}
+  },
+  "cryptocom": {
+    "name": "cryptocom",
+    "enabled": true,
+    "testnet": false,
+    "rate_limit": 10,
+    "websocket_enabled": true,
+    "rest_enabled": true,
+    "symbols": [
+      "BTC/USDT",
+      "ETH/USDT"
+    ],
+    "metadata": {}
+  }
+}

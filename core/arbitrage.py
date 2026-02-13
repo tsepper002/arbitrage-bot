@@ -35,7 +35,10 @@ class ArbitrageEngine:
                  persist_path: Optional[str] = None,
                  max_exposure_usdt: Optional[float] = None,
                  safety_factor: Optional[float] = None,
-                 topk: Optional[int] = None):
+                 topk: Optional[int] = None,
+                 executor: Optional[OrderExecutor] = None,
+                 risk_manager = None,
+                 strategy_manager = None):
         self.store = store
         self.params = EXCHANGE_PARAMS
         
@@ -59,8 +62,12 @@ class ArbitrageEngine:
             else:
                 self.max_exposure_usdt = 200.0
 
-        # Initialize order executor
-        self.executor = OrderExecutor()
+        # Initialize order executor (use provided or create new)
+        self.executor = executor if executor is not None else OrderExecutor()
+        
+        # Optional integrations
+        self.risk_manager = risk_manager
+        self.strategy_manager = strategy_manager
 
         # Event-driven scanning state
         self.updated_symbols: Set[str] = set()
@@ -125,8 +132,14 @@ class ArbitrageEngine:
         if len(exchanges) < 2:
             return res
 
+        # BIDIRECTIONAL SCAN FIX: Check ALL directed pairs (A->B AND B->A)
+        # Previous version only checked exchanges[i+1:] which missed 50% of opportunities
         for i, buy_ex in enumerate(exchanges):
-            for sell_ex in exchanges[i+1:]:
+            # Check this exchange as buy against ALL other exchanges as sell
+            for j, sell_ex in enumerate(exchanges):
+                if i == j:  # Skip same exchange
+                    continue
+                    
                 buy = exmap.get(buy_ex, {})
                 sell = exmap.get(sell_ex, {})
 
@@ -145,10 +158,29 @@ class ArbitrageEngine:
                 if not asks or not bids:
                     continue
 
+                # S1 PREFILTER: Quick top-of-book spread check before expensive simulation
+                # Skip if gross spread is too small to be profitable after fees
+                top_bid = bids[0][0]
+                top_ask = asks[0][0]
+                gross_spread_pct = ((top_bid - top_ask) / top_ask) * 100.0 if top_ask > 0 else 0
+                
+                buy_fee = self._fee_rate(buy_ex, "taker")
+                sell_fee = self._fee_rate(sell_ex, "taker")
+                sum_fees_pct = (buy_fee + sell_fee) * 100.0
+                
+                # Prefilter: skip if spread < 80% of fees (won't be profitable)
+                if gross_spread_pct < sum_fees_pct * 0.8:
+                    continue
+
                 # choose qty adaptively
                 buy_price_est = asks[0][0] if asks else None
                 qty = self._choose_qty(asks, bids, buy_price_est)
                 if qty <= 0:
+                    continue
+
+                # A5 RISK CHECK: Skip anomalous spreads (likely data errors)
+                if gross_spread_pct > settings.ANOMALOUS_SPREAD_PCT:
+                    logger.warning(f"Skipping anomalous spread {gross_spread_pct:.2f}% for {symbol} {buy_ex}->{sell_ex} (threshold: {settings.ANOMALOUS_SPREAD_PCT}%)")
                     continue
 
                 buy_avg, buy_filled = simulate_execution_from_book(asks, qty)
@@ -254,12 +286,38 @@ class ArbitrageEngine:
                 opps = await self.scan_once(s)
                 if opps:
                     for o in opps:
+                        # Check risk manager before executing
+                        if self.risk_manager:
+                            can_trade, reason = self.risk_manager.check_can_trade(o)
+                            if not can_trade:
+                                logger.debug(f"Risk manager blocked trade: {reason}")
+                                continue
+                        
                         # Execute or log the opportunity
-                        result = self.executor.execute_arbitrage(o)
+                        result = await self.executor.execute_arbitrage(o)
+                        
+                        # Record trade to strategy manager
+                        if self.strategy_manager and result.get('trade_info'):
+                            strategy = o.get('strategy', 'cross_exchange')
+                            success = result['status'] == 'success'
+                            profit = result['trade_info'].get('net_profit', 0)
+                            execution_time = result.get('execution_time', 0)
+                            self.strategy_manager.record_trade(
+                                strategy_name=strategy,
+                                success=success,
+                                profit=profit,
+                                execution_time=execution_time
+                            )
+                        
+                        # Update risk manager after trade
+                        if self.risk_manager and result.get('trade_info'):
+                            self.risk_manager.record_trade(result['trade_info'])
                         
                         if result['status'] == 'simulated':
                             # Already logged by executor
                             pass
+                        elif result['status'] == 'success':
+                            logger.info(f"✅ Trade executed successfully: {result.get('summary', '')}")
                         elif result['status'] == 'blocked':
                             logger.debug(f"Trade blocked: {result['reason']}")
                         elif result['status'] == 'error':

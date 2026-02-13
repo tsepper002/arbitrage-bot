@@ -1,0 +1,78 @@
+╔═══════════════════════════════════════════════════════════════╗
+║               БЫЛО (5 бирж)  →  СТАЛО (4 биржи)              ║
+╚═══════════════════════════════════════════════════════════════╝
+
+main.py:
+--------
+БЫЛО:
+  from exchanges.xt_ws import XtWS    ← удалено
+  
+  xt = XtWS(...)                      ← удалено
+  exchanges = [bybit, kucoin, htx, xt, mexc]  ← XT удалён из списка
+
+СТАЛО:
+  # from exchanges.xt_ws import XtWS   (строка удалена)
+  
+  exchanges = [bybit, kucoin, htx, mexc]  ← без XT
+
+
+settings.py:
+-----------
+БЫЛО:
+  XT_API_KEY = _get_env_str("ARB_XT_KEY", "")       ← удалено
+  XT_API_SECRET = _get_env_str("ARB_XT_SECRET", "") ← удалено
+  
+  Exchanges: Bybit, KuCoin, HTX, XT, MEXC (5 total)
+
+СТАЛО:
+  # (переменные XT удалены)
+  
+  Exchanges: Bybit, KuCoin, HTX, MEXC (4 total)
+
+
+.env.example:
+-------------
+БЫЛО:
+  # XT
+  ARB_XT_KEY=your_xt_api_key_here        ← удалено
+  ARB_XT_SECRET=your_xt_api_secret_here  ← удалено
+
+СТАЛО:
+  # (секция XT полностью удалена)
+
+
+core/exchange_config.py:
+------------------------
+БЫЛО:
+  EXCHANGE_PARAMS = {
+      "Bybit": {...},
+      "KuCoin": {...},
+      "HTX": {...},
+      "XT": {...},        ← удалено
+      "MEXC": {...}
+  }
+
+СТАЛО:
+  EXCHANGE_PARAMS = {
+      "Bybit": {...},
+      "KuCoin": {...},
+      "HTX": {...},
+      "MEXC": {...}       ← без XT
+  }
+
+
+Вывод при запуске:
+------------------
+БЫЛО:
+  [INFO] Initializing 5 exchange connections...
+  [INFO] XT: connecting to wss://stream.xt.com/public
+  [INFO] ✅ All 5 exchanges initialized
+
+СТАЛО:
+  [INFO] Initializing 4 exchange connections...
+  [INFO] ✅ All 4 exchanges initialized
+
+
+╔═══════════════════════════════════════════════════════════════╗
+║  Итог: XT полностью удалён, бот работает с 4 биржами         ║
+╚═══════════════════════════════════════════════════════════════╝

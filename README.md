@@ -1,6 +1,10 @@
 # Cryptocurrency Arbitrage Bot
 
-A robust, efficient arbitrage bot for detecting and executing cross-exchange arbitrage opportunities across Bybit, KuCoin, and HTX (Huobi).
+A robust, efficient arbitrage bot for detecting and executing cross-exchange arbitrage opportunities across Bybit, KuCoin, HTX, XT, and MEXC.
+
+> 📖 **Русская инструкция**: См. [**ИНСТРУКЦИЯ.md**](ИНСТРУКЦИЯ.md) (полная) или [**БЫСТРЫЙ_СТАРТ.md**](БЫСТРЫЙ_СТАРТ.md) (за 5 минут)
+> 
+> 📖 **Russian Instructions**: See [**ИНСТРУКЦИЯ.md**](ИНСТРУКЦИЯ.md) (complete) or [**БЫСТРЫЙ_СТАРТ.md**](БЫСТРЫЙ_СТАРТ.md) (5-minute quick start)
 
 ## Features
 
