@@ -10,6 +10,7 @@ Expected benefit: Stability and error prevention
 import asyncio
 import logging
 import os
+import settings
 from typing import Dict, List, Tuple
 from dataclasses import dataclass
 
@@ -403,16 +404,14 @@ class StartupValidator:
             else:
                 # Check daily P&L
                 daily_pnl = self.risk_manager.daily_pnl
-                # Import settings to get max loss values
-                import settings
-                max_loss = settings.MAX_DAILY_LOSS
+                max_daily_loss = settings.MAX_DAILY_LOSS
                 
                 self.validation_results.append(ValidationResult(
                     check_name="Risk Limits",
                     passed=True,
                     message=(
                         f"Daily P&L: ${daily_pnl:.2f} "
-                        f"(max loss: ${max_loss:.2f})"
+                        f"(max loss: ${max_daily_loss:.2f})"
                     )
                 ))
         except Exception as e:
