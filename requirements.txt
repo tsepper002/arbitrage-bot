@@ -6,6 +6,9 @@ websocket-client>=1.7.0
 # HTTP requests
 requests>=2.31.0
 
+# Exchange API library
+ccxt>=4.0.0
+
 # System monitoring (Windows 11 optimization)
 psutil>=5.9.0
 
