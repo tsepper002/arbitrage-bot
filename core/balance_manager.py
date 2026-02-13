@@ -140,7 +140,7 @@ class BalanceManager:
     
     def verify_balances_for_trade(self, buy_exchange: str, sell_exchange: str,
                                   symbol: str, quantity: float, buy_price: float,
-                                  sell_price: float) -> tuple[bool, Optional[str]]:
+                                  sell_price: float) -> Tuple[bool, Optional[str]]:
         """
         Verify sufficient balances exist for an arbitrage trade.
         
