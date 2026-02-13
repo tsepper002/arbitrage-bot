@@ -49,7 +49,7 @@ DRY_RUN = _get_env_bool("ARB_DRY_RUN", True)
 # RISK MANAGEMENT PARAMETERS
 # ============================================================================
 # Minimum net ROI percentage required to execute trade (after fees & slippage)
-MIN_NET_ROI_PCT = _get_env_float("ARB_MIN_NET_ROI_PCT", 0.05)
+MIN_NET_ROI_PCT = _get_env_float("ARB_MIN_NET_ROI_PCT", 0.03)  # Reduced from 0.05 to 0.03
 
 # Maximum exposure per trade in USDT (conservative default)
 MAX_EXPOSURE_USDT = _get_env_float("ARB_MAX_EXPOSURE_USDT", 200.0)
@@ -59,10 +59,10 @@ MAX_EXPOSURE_USDT = _get_env_float("ARB_MAX_EXPOSURE_USDT", 200.0)
 SAFETY_FACTOR = _get_env_float("ARB_SAFETY_FACTOR", 0.5)
 
 # Maximum number of trades per minute (rate limiting)
-MAX_TRADES_PER_MINUTE = _get_env_int("ARB_MAX_TRADES_PER_MINUTE", 5)
+MAX_TRADES_PER_MINUTE = _get_env_int("ARB_MAX_TRADES_PER_MINUTE", 30)  # Increased from 5 to 30
 
 # Cooldown period in seconds before same symbol can be traded again
-PER_SYMBOL_COOLDOWN_SEC = _get_env_float("ARB_SYMBOL_COOLDOWN_SEC", 30.0)
+PER_SYMBOL_COOLDOWN_SEC = _get_env_float("ARB_SYMBOL_COOLDOWN_SEC", 3.0)  # Reduced from 30.0 to 3.0
 
 # Maximum concurrent opportunities to process per scan cycle
 MAX_CONCURRENT_OPPORTUNITIES = _get_env_int("ARB_MAX_CONCURRENT_OPPS", 3)
@@ -71,7 +71,7 @@ MAX_CONCURRENT_OPPORTUNITIES = _get_env_int("ARB_MAX_CONCURRENT_OPPS", 3)
 # PERFORMANCE & THROTTLING (optimized for weak hardware)
 # ============================================================================
 # Scan interval in seconds (increase on weak hardware)
-SCAN_INTERVAL_SEC = _get_env_float("ARB_SCAN_INTERVAL_SEC", 1.0)
+SCAN_INTERVAL_SEC = _get_env_float("ARB_SCAN_INTERVAL_SEC", 0.1)  # Reduced from 1.0 to 0.1
 
 # Monitoring output interval in seconds (reduce log spam)
 MONITOR_INTERVAL_SEC = _get_env_float("ARB_MONITOR_INTERVAL_SEC", 5.0)

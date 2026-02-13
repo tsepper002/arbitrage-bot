@@ -126,7 +126,9 @@ class ArbitrageEngine:
             return res
 
         for i, buy_ex in enumerate(exchanges):
-            for sell_ex in exchanges[i+1:]:
+            for j, sell_ex in enumerate(exchanges):
+                if i == j:
+                    continue
                 buy = exmap.get(buy_ex, {})
                 sell = exmap.get(sell_ex, {})
 
