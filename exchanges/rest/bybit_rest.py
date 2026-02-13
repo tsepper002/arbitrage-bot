@@ -68,8 +68,8 @@ class BybitRestClient(BaseRestClient):
         }
     
     def _normalize_symbol(self, symbol: str) -> str:
-        """Convert symbol to Bybit format (BTCUSDT)."""
-        return symbol.replace('-', '').replace('_', '')
+        """Convert symbol to Bybit format (BTCUSDT - uppercase, no separator)."""
+        return symbol.replace('-', '').replace('_', '').upper()
     
     def get_balance(self, currency: Optional[str] = None) -> Dict[str, float]:
         """

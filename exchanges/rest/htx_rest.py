@@ -8,6 +8,7 @@ import logging
 import json
 import base64
 import hashlib
+import hmac
 from typing import Dict, Optional, Any
 from urllib.parse import urlencode, urlparse
 from datetime import datetime
@@ -80,9 +81,10 @@ class HTXRestClient(BaseRestClient):
         
         # Sign with HMAC SHA256
         signature = base64.b64encode(
-            hashlib.sha256(
-                self.api_secret.encode('utf-8') + 
-                payload.encode('utf-8')
+            hmac.new(
+                self.api_secret.encode('utf-8'),
+                payload.encode('utf-8'),
+                hashlib.sha256
             ).digest()
         ).decode()
         
@@ -128,9 +130,10 @@ class HTXRestClient(BaseRestClient):
             
             # Generate signature
             signature = base64.b64encode(
-                hashlib.sha256(
-                    self.api_secret.encode('utf-8') + 
-                    payload.encode('utf-8')
+                hmac.new(
+                    self.api_secret.encode('utf-8'),
+                    payload.encode('utf-8'),
+                    hashlib.sha256
                 ).digest()
             ).decode()
             

@@ -242,7 +242,7 @@ class KuCoinRestClient(BaseRestClient):
                 'symbol': order.get('symbol'),
                 'side': order.get('side'),
                 'type': order.get('type'),
-                'status': order.get('isActive') and 'active' or 'done',
+                'status': 'active' if order.get('isActive') else 'done',
                 'quantity': float(order.get('size', 0)),
                 'price': float(order.get('price', 0)),
                 'executed_qty': float(order.get('dealSize', 0)),
