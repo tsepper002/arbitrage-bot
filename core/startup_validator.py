@@ -315,6 +315,16 @@ class StartupValidator:
         """Check 6: Verify orderbook data received for symbols"""
         logger.info("Checking orderbook data...")
         
+        # Check if price_store exists
+        if self.price_store is None:
+            self.validation_results.append(ValidationResult(
+                check_name="Orderbook Data",
+                passed=False,
+                message="PriceStore not yet initialized",
+                critical=False  # Not critical during early initialization
+            ))
+            return
+        
         # Wait for initial orderbook snapshots to arrive via WebSocket
         # 3 seconds allows for: WS messages → parsing → PriceStore updates
         await asyncio.sleep(3)  # Allow time for initial orderbook data
