@@ -17,6 +17,8 @@ from core.arbitrage import ArbitrageEngine
 from exchanges.bybit_ws import BybitWS
 from exchanges.kucoin_ws import KucoinWS
 from exchanges.htx_ws import HtxWS
+from exchanges.xt_ws import XtWS
+from exchanges.mexc_ws import MexcWS
 import settings
 
 # Configure logging
@@ -82,8 +84,13 @@ async def main():
     kucoin = KucoinWS(symbols, store, loop, exchange_name="KuCoin", stagger_start=stagger)
     await asyncio.sleep(0.1)
     htx = HtxWS(symbols, store, loop, exchange_name="HTX", stagger_start=stagger)
+    await asyncio.sleep(0.1)
+    xt = XtWS(symbols, store, loop, exchange_name="XT", stagger_start=stagger)
+    await asyncio.sleep(0.1)
+    mexc = MexcWS(symbols, store, loop, exchange_name="MEXC", stagger_start=stagger)
     
-    exchanges = [bybit, kucoin, htx]
+    exchanges = [bybit, kucoin, htx, xt, mexc]
+    logger.info(f"✅ All 5 exchanges initialized: {', '.join([e.exchange for e in exchanges])}")
 
     # Start monitoring task
     monitor_task = asyncio.create_task(_monitor_store(store))

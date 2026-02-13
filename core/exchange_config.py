@@ -8,28 +8,47 @@ from typing import Dict, Any, Optional
 logger = logging.getLogger("exchange_config")
 
 # Default static parameters. You should validate and update these for your accounts.
+# Updated with real 2025 fee structures
 EXCHANGE_PARAMS: Dict[str, Dict[str, Any]] = {
     "Bybit": {
-        "maker": 0.0002,
-        "taker": 0.0006,
+        "maker": 0.001,  # Updated to 0.1% maker fee (2025)
+        "taker": 0.001,  # Updated to 0.1% taker fee (2025)
         "withdraw_fee": None,
         "withdraw_fee_currency": "USDT",
         "min_notional": 1.0,
         "min_size": 0.0001,
-        "supports_depth": False,  # enable true if you implemented depth parsing
+        "supports_depth": True,
     },
     "KuCoin": {
-        "maker": 0.0001,
-        "taker": 0.0006,
+        "maker": 0.001,  # Updated to 0.1% maker fee (2025)
+        "taker": 0.001,  # Updated to 0.1% taker fee (2025)
+        "withdraw_fee": None,
+        "withdraw_fee_currency": "USDT",
+        "min_notional": 1.0,
+        "min_size": 0.0001,
+        "supports_depth": True,
+    },
+    "HTX": {
+        "maker": 0.002,  # 0.2% maker fee (2025)
+        "taker": 0.002,  # 0.2% taker fee (2025)
+        "withdraw_fee": None,
+        "withdraw_fee_currency": "USDT",
+        "min_notional": 1.0,
+        "min_size": 0.0001,
+        "supports_depth": True,
+    },
+    "XT": {
+        "maker": 0.002,  # 0.2% maker fee (2025)
+        "taker": 0.002,  # 0.2% taker fee (2025)
         "withdraw_fee": None,
         "withdraw_fee_currency": "USDT",
         "min_notional": 1.0,
         "min_size": 0.0001,
         "supports_depth": False,
     },
-    "HTX": {
-        "maker": 0.0000,
-        "taker": 0.0020,
+    "MEXC": {
+        "maker": 0.000,  # 0% maker fee! (2025)
+        "taker": 0.0005,  # 0.05% taker fee (2025)
         "withdraw_fee": None,
         "withdraw_fee_currency": "USDT",
         "min_notional": 1.0,
