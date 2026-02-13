@@ -224,10 +224,13 @@ class IntegratedArbitrageBot:
         """Run comprehensive startup validation."""
         try:
             self.startup_validator = get_startup_validator(
+                exchanges=list(self.rest_clients.keys()) if self.rest_clients else [],
                 rest_clients=self.rest_clients,
+                ws_connections=self.ws_connections if hasattr(self, 'ws_connections') else {},
                 balance_manager=self.balance_manager,
                 risk_manager=self.risk_manager,
                 state_manager=self.state_manager,
+                price_store=self.price_store if hasattr(self, 'price_store') else None,
                 telegram_bot=self.telegram_bot
             )
             
