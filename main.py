@@ -541,11 +541,11 @@ class IntegratedArbitrageBot:
             
             # 6. Volatility Arbitrage Strategy
             self.volatility_arb = VolatilityArbitrageStrategy(
-                config={
-                    'lookback_period': 30,
-                    'risk_free_rate': 0.02,
-                    'vol_threshold': 0.05
-                }
+                exchange_client=self.rest_clients.get("Bybit"),
+                symbol="BTC-USDT",
+                lookback_period=30,
+                vol_threshold=0.2,
+                position_size_usdt=500.0
             )
             logger.info("✅ Volatility Arbitrage Strategy initialized")
             
