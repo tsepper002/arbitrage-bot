@@ -50,7 +50,7 @@ from analytics.backtest_engine import BacktestEngine
 from analytics.market_intelligence import MarketIntelligence
 from analytics.realtime_analytics import RealtimeAnalytics
 from analytics.correlation_analyzer import CorrelationAnalyzer
-from analytics.custom_dashboards import CustomDashboard
+from analytics.custom_dashboard import CustomDashboard
 
 # Professional Features
 from professional_features.flash_crash_protector import FlashCrashProtector
