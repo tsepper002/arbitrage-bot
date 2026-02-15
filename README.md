@@ -16,7 +16,10 @@ A robust, efficient arbitrage bot for detecting and executing cross-exchange arb
 >
 > ---
 > 
-> 🚀 **Quick Commands**: See [**LAUNCH_COMMANDS.md**](LAUNCH_COMMANDS.md) (copy-paste commands) or [**КОМАНДЫ_ЗАПУСКА.md**](КОМАНДЫ_ЗАПУСКА.md) (команды на русском)
+> 🚀 **БЫСТРЫЙ ЗАПУСК / QUICK START**: 
+> - [**БЫСТРЫЙ_ЗАПУСК_КОМАНДЫ.md**](БЫСТРЫЙ_ЗАПУСК_КОМАНДЫ.md) - **КОПИРУЙ И ЗАПУСКАЙ** (Russian, tested commands)
+> - [**LAUNCH_COMMANDS.md**](LAUNCH_COMMANDS.md) - Copy-paste commands (English)
+> - [**КОМАНДЫ_ЗАПУСКА.md**](КОМАНДЫ_ЗАПУСКА.md) - Команды на русском
 > 
 > 📖 **Full Documentation**: See [**README.md**](#quick-start) (English) or [**ИНСТРУКЦИЯ.md**](ИНСТРУКЦИЯ.md) (Russian)
 > 
