@@ -373,11 +373,7 @@ class IntegratedArbitrageBot:
             logger.info("✅ Correlation Analyzer initialized")
             
             # Custom Dashboard
-            self.custom_dashboard = CustomDashboard(
-                performance_tracker=self.performance_tracker,
-                trade_journal=self.trade_journal,
-                risk_analytics=self.risk_analytics
-            )
+            self.custom_dashboard = CustomDashboard()
             logger.info("✅ Custom Dashboard initialized")
             
             logger.info("✅ All 5 Additional Analytics Modules initialized!")
