@@ -869,7 +869,18 @@ class IntegratedArbitrageBot:
         for exchange in self.exchanges:
             try:
                 exchange_name = getattr(exchange, 'name', getattr(exchange, 'exchange_name', str(type(exchange).__name__)))
-                await exchange.stop()
+                
+                # Check if exchange has a stop method
+                if not hasattr(exchange, 'stop'):
+                    logger.debug(f"{exchange_name} has no stop method, skipping")
+                    continue
+                
+                # Call stop method (handle both sync and async)
+                stop_method = exchange.stop()
+                if asyncio.iscoroutine(stop_method):
+                    await stop_method
+                # else: synchronous method already executed
+                    
             except Exception as e:
                 exchange_name = getattr(exchange, 'name', getattr(exchange, 'exchange_name', str(type(exchange).__name__)))
                 logger.error(f"Error stopping {exchange_name}: {e}")
