@@ -672,7 +672,7 @@ class IntegratedArbitrageBot:
             
             # Resource monitoring task
             if self.resource_monitor:
-                resource_task = asyncio.create_task(self.resource_monitor.monitoring_loop())
+                resource_task = asyncio.create_task(self.resource_monitor.start_monitoring())
                 self.tasks.append(resource_task)
                 logger.info("✅ Resource monitor task started")
             
