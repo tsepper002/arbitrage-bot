@@ -91,14 +91,21 @@ from exchanges.rest_clients.binance_client import BinanceRESTClient
 
 import settings
 
-# Configure logging
+# Configure logging with separate levels for console and file
+# Console: INFO and above (clean output, no DEBUG spam)
+# File: DEBUG and above (full details for debugging)
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)  # Only INFO+ in console
+console_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+
+file_handler = logging.FileHandler("arbitrage_bot.log")
+file_handler.setLevel(logging.DEBUG)  # All logs in file
+file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+
+# Configure root logger
 logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("arbitrage_bot.log")
-    ]
+    level=logging.DEBUG,  # Root level must be DEBUG to capture all
+    handlers=[console_handler, file_handler]
 )
 logger = logging.getLogger("arbitrage_bot")
 
