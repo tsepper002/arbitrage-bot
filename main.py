@@ -46,6 +46,11 @@ from analytics.trade_journal import TradeJournal
 from analytics.performance_tracker import PerformanceTracker
 from analytics.profit_attribution import ProfitAttributionAnalyzer
 from analytics.risk_analytics import RiskAnalytics
+from analytics.backtest_engine import BacktestEngine
+from analytics.market_intelligence import MarketIntelligence
+from analytics.realtime_analytics import RealtimeAnalytics
+from analytics.correlation_analyzer import CorrelationAnalyzer
+from analytics.custom_dashboards import CustomDashboard
 
 # Professional Features
 from professional_features.flash_crash_protector import FlashCrashProtector
@@ -129,6 +134,11 @@ class IntegratedArbitrageBot:
         self.performance_tracker = None
         self.profit_attribution = None
         self.risk_analytics = None
+        self.backtest_engine = None
+        self.market_intelligence = None
+        self.realtime_analytics = None
+        self.correlation_analyzer = None
+        self.custom_dashboard = None
         
         # Professional Features
         self.flash_crash_protector = None
@@ -338,6 +348,41 @@ class IntegratedArbitrageBot:
             # Risk Analytics
             self.risk_analytics = RiskAnalytics()
             logger.info("✅ Risk Analytics initialized")
+            
+            # Phase 6: Additional Analytics Modules (5 modules)
+            logger.info("\n📊 Initializing Additional Analytics...")
+            
+            # Backtest Engine
+            self.backtest_engine = BacktestEngine(
+                price_store=self.store
+            )
+            logger.info("✅ Backtest Engine initialized")
+            
+            # Market Intelligence
+            self.market_intelligence = MarketIntelligence(
+                price_store=self.store
+            )
+            logger.info("✅ Market Intelligence initialized")
+            
+            # Realtime Analytics
+            self.realtime_analytics = RealtimeAnalytics()
+            logger.info("✅ Realtime Analytics initialized")
+            
+            # Correlation Analyzer
+            self.correlation_analyzer = CorrelationAnalyzer(
+                price_store=self.store
+            )
+            logger.info("✅ Correlation Analyzer initialized")
+            
+            # Custom Dashboard
+            self.custom_dashboard = CustomDashboard(
+                performance_tracker=self.performance_tracker,
+                trade_journal=self.trade_journal,
+                risk_analytics=self.risk_analytics
+            )
+            logger.info("✅ Custom Dashboard initialized")
+            
+            logger.info("✅ All 5 Additional Analytics Modules initialized!")
             
             # Professional Features
             logger.info("\n🛡️  Initializing Professional Risk Features...")
