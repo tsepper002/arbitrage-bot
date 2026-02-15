@@ -65,6 +65,9 @@ class StartupValidator:
         self.min_total_capital = min_total_capital
         self.min_ws_connections = min_ws_connections
         
+        # Check if running in DRY_RUN mode
+        self.dry_run = os.getenv('ARB_DRY_RUN', 'true').lower() == 'true'
+        
         self.validation_results: List[ValidationResult] = []
         
         logger.info(
@@ -157,11 +160,13 @@ class StartupValidator:
                 missing.append(exchange)
         
         if missing:
+            # In DRY_RUN mode, missing API keys are not critical
+            is_critical = not self.dry_run
             self.validation_results.append(ValidationResult(
                 check_name="API Keys",
                 passed=False,
                 message=f"Missing API keys for: {', '.join(missing)}",
-                critical=True
+                critical=is_critical
             ))
         else:
             self.validation_results.append(ValidationResult(
@@ -190,11 +195,13 @@ class StartupValidator:
                 failed.append(f"{exchange} ({str(e)[:50]})")
         
         if failed:
+            # In DRY_RUN mode, REST connectivity failures are not critical
+            is_critical = not self.dry_run
             self.validation_results.append(ValidationResult(
                 check_name="REST Connectivity",
                 passed=False,
                 message=f"Failed to connect: {', '.join(failed)}",
-                critical=True
+                critical=is_critical
             ))
         else:
             self.validation_results.append(ValidationResult(
@@ -215,6 +222,8 @@ class StartupValidator:
             total_balance = self.balance_manager.get_total_balance()
             
             if total_balance < self.min_total_capital:
+                # In DRY_RUN mode, low balance is not critical (simulated trading)
+                is_critical = not self.dry_run
                 self.validation_results.append(ValidationResult(
                     check_name="Balance Check",
                     passed=False,
@@ -222,7 +231,7 @@ class StartupValidator:
                         f"Total balance ${total_balance:.2f} is below minimum "
                         f"${self.min_total_capital:.2f}"
                     ),
-                    critical=True
+                    critical=is_critical
                 ))
             else:
                 self.validation_results.append(ValidationResult(
@@ -231,11 +240,13 @@ class StartupValidator:
                     message=f"Total balance: ${total_balance:.2f} (min: ${self.min_total_capital:.2f})"
                 ))
         except Exception as e:
+            # In DRY_RUN mode, balance retrieval errors are not critical
+            is_critical = not self.dry_run
             self.validation_results.append(ValidationResult(
                 check_name="Balance Check",
                 passed=False,
                 message=f"Error retrieving balances: {str(e)}",
-                critical=True
+                critical=is_critical
             ))
     
     async def _check_previous_state(self):
@@ -296,15 +307,17 @@ class StartupValidator:
                 disconnected.append(exchange)
         
         if len(connected) < self.min_ws_connections:
+            # In DRY_RUN mode, WebSocket failures are not critical (can use simulated data)
+            is_critical = not self.dry_run
             self.validation_results.append(ValidationResult(
                 check_name="WebSocket Connections",
                 passed=False,
                 message=(
                     f"Only {len(connected)}/{len(self.exchanges)} WebSocket connections "
                     f"(need at least {self.min_ws_connections}). "
-                    f"Disconnected: {', '.join(disconnected)}"
+                    f"Disconnected: {', '.join(disconnected) if disconnected else 'none'}"
                 ),
-                critical=True
+                critical=is_critical
             ))
         else:
             self.validation_results.append(ValidationResult(
@@ -339,11 +352,13 @@ class StartupValidator:
         snapshot = self.price_store.snapshot()
         
         if not snapshot:
+            # In DRY_RUN mode, missing orderbook data is not critical
+            is_critical = not self.dry_run
             self.validation_results.append(ValidationResult(
                 check_name="Orderbook Data",
                 passed=False,
                 message="No orderbook data received",
-                critical=True
+                critical=is_critical
             ))
             return
         
@@ -360,6 +375,8 @@ class StartupValidator:
                 symbols_with_data.add(symbol)
         
         if len(exchanges_with_data) < 2:
+            # In DRY_RUN mode, limited orderbook data is not critical
+            is_critical = not self.dry_run
             self.validation_results.append(ValidationResult(
                 check_name="Orderbook Data",
                 passed=False,
@@ -367,14 +384,16 @@ class StartupValidator:
                     f"Orderbook data from only {len(exchanges_with_data)} exchange(s) "
                     "(need at least 2)"
                 ),
-                critical=True
+                critical=is_critical
             ))
         elif len(symbols_with_data) < 1:
+            # In DRY_RUN mode, missing symbols is not critical
+            is_critical = not self.dry_run
             self.validation_results.append(ValidationResult(
                 check_name="Orderbook Data",
                 passed=False,
                 message="No symbols with orderbook data",
-                critical=True
+                critical=is_critical
             ))
         else:
             self.validation_results.append(ValidationResult(
