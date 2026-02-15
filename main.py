@@ -455,12 +455,15 @@ class IntegratedArbitrageBot:
             htx = HtxWS(symbols, self.store, self.loop, exchange_name="HTX", stagger_start=stagger)
             await asyncio.sleep(stagger)
             
-            # MexcWS has different signature - only accepts symbol (singular), api_key, secret_key, ws_url, ping_interval
+            # MexcWS now accepts price_store and loop like other exchanges
             mexc = MexcWS(
                 symbol=symbols[0] if symbols else "BTC-USDT",  # First symbol
+                price_store=self.store,
+                loop=self.loop,
                 api_key=None,
                 secret_key=None,
-                ws_url="wss://contract.mexc.com/ws"
+                ws_url="wss://contract.mexc.com/ws",
+                exchange_name="MEXC"
             )
             await asyncio.sleep(stagger)
             

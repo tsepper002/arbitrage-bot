@@ -169,6 +169,10 @@ class HtxWS:
                     bids_out = self._book_to_levels(self._local_books[sym]["bids"], "bids")
                     asks_out = self._book_to_levels(self._local_books[sym]["asks"], "asks")
                     logger.debug(f"HTX depth snapshot for {sym}: bids={len(bids_out)} asks={len(asks_out)}")
+                    if bids_out and asks_out:
+                        best_bid = bids_out[0][0] if bids_out else None
+                        best_ask = asks_out[0][0] if asks_out else None
+                        logger.debug(f"HTX -> update store: {sym} bid={best_bid} ask={best_ask}")
                     asyncio.run_coroutine_threadsafe(
                         self.price_store.update_levels(self.exchange, sym, bids_out, asks_out, time.time()),
                         self.loop
@@ -183,6 +187,7 @@ class HtxWS:
                         close = None
                     if close is not None:
                         # update top-of-book using close as both bid and ask fallback
+                        logger.debug(f"HTX -> update store (ticker): {sym} close={close}")
                         asyncio.run_coroutine_threadsafe(
                             self.price_store.update(self.exchange, sym, close, None, close, None, time.time()),
                             self.loop
@@ -213,6 +218,10 @@ class HtxWS:
                         self._apply_changes(sym, "asks", asks_changes)
                     bids_out = self._book_to_levels(self._local_books[sym]["bids"], "bids")
                     asks_out = self._book_to_levels(self._local_books[sym]["asks"], "asks")
+                    if bids_out and asks_out:
+                        best_bid = bids_out[0][0] if bids_out else None
+                        best_ask = asks_out[0][0] if asks_out else None
+                        logger.debug(f"HTX -> update store (delta): {sym} bid={best_bid} ask={best_ask}")
                     asyncio.run_coroutine_threadsafe(
                         self.price_store.update_levels(self.exchange, sym, bids_out, asks_out, time.time()),
                         self.loop
