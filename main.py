@@ -62,10 +62,10 @@ from core.strategies.grid_trading import GridTradingStrategy
 from core.strategies.dca_strategy import DCAStrategy
 from core.strategies.market_making import MarketMakingStrategy
 from core.strategies.pairs_trading import PairsTradingStrategy
-from core.strategies.funding_rate_enhanced import FundingRateEnhanced
-from core.strategies.volatility_arb import VolatilityArbitrage
-from core.strategies.index_arb import IndexArbitrage
-from core.strategies.spread_betting import SpreadBetting
+from core.strategies.funding_rate_enhanced import FundingRateEnhancedStrategy
+from core.strategies.volatility_arb import VolatilityArbitrageStrategy
+from core.strategies.index_arb import IndexArbitrageStrategy
+from core.strategies.spread_betting import SpreadBettingStrategy
 from strategies.momentum_strategy import MomentumStrategy
 from strategies.breakout_strategy import BreakoutStrategy
 
@@ -522,7 +522,7 @@ class IntegratedArbitrageBot:
             logger.info("✅ Pairs Trading Strategy initialized")
             
             # 5. Enhanced Funding Rate Strategy
-            self.funding_rate_enhanced = FundingRateEnhanced(
+            self.funding_rate_enhanced = FundingRateEnhancedStrategy(
                 price_store=self.store,
                 rest_clients=self.rest_clients,
                 balance_manager=self.balance_manager
@@ -530,7 +530,7 @@ class IntegratedArbitrageBot:
             logger.info("✅ Enhanced Funding Rate Strategy initialized")
             
             # 6. Volatility Arbitrage Strategy
-            self.volatility_arb = VolatilityArbitrage(
+            self.volatility_arb = VolatilityArbitrageStrategy(
                 price_store=self.store,
                 rest_clients=self.rest_clients,
                 balance_manager=self.balance_manager
@@ -538,7 +538,7 @@ class IntegratedArbitrageBot:
             logger.info("✅ Volatility Arbitrage Strategy initialized")
             
             # 7. Index Arbitrage Strategy
-            self.index_arb = IndexArbitrage(
+            self.index_arb = IndexArbitrageStrategy(
                 price_store=self.store,
                 rest_clients=self.rest_clients,
                 balance_manager=self.balance_manager
@@ -546,7 +546,7 @@ class IntegratedArbitrageBot:
             logger.info("✅ Index Arbitrage Strategy initialized")
             
             # 8. Spread Betting Strategy
-            self.spread_betting = SpreadBetting(
+            self.spread_betting = SpreadBettingStrategy(
                 price_store=self.store,
                 rest_clients=self.rest_clients,
                 balance_manager=self.balance_manager
