@@ -202,3 +202,55 @@ class KuCoinRESTClient(BaseRESTClient):
             if data.get("code") != "200000":
                 raise Exception(f"KuCoin withdrawal failed: {data}")
             return data.get("data", {})
+    
+    async def get_deposit_address(self, currency: str) -> dict:
+        """
+        Get deposit address for a specific currency.
+        
+        Args:
+            currency: Currency symbol (e.g., 'USDT', 'BTC')
+            
+        Returns:
+            dict: Deposit address information
+        """
+        try:
+            endpoint = f"/api/v1/deposit-addresses"
+            url = f"{self.BASE_URL}{endpoint}"
+            params = {"currency": currency}
+            
+            headers = self._get_headers("GET", endpoint)
+            
+            session = await self._get_session()
+            async with session.get(url, headers=headers, params=params) as resp:
+                data = await resp.json()
+                if data.get("code") != "200000":
+                    logger.error(f"KuCoin get deposit address failed: {data}")
+                    return {}
+                return data.get('data', {})
+        except Exception as e:
+            logger.error(f"Error getting deposit address for {currency}: {e}")
+            return {}
+    
+    async def get_trading_pairs(self) -> list:
+        """
+        Get all available trading pairs.
+        
+        Returns:
+            list: List of trading pair information
+        """
+        try:
+            endpoint = "/api/v1/symbols"
+            url = f"{self.BASE_URL}{endpoint}"
+            
+            headers = self._get_headers("GET", endpoint)
+            
+            session = await self._get_session()
+            async with session.get(url, headers=headers) as resp:
+                data = await resp.json()
+                if data.get("code") != "200000":
+                    logger.error(f"KuCoin get trading pairs failed: {data}")
+                    return []
+                return data.get('data', [])
+        except Exception as e:
+            logger.error(f"Error getting trading pairs: {e}")
+            return []
