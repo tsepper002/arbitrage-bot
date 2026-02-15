@@ -716,8 +716,8 @@ class IntegratedArbitrageBot:
             if self.telegram_bot:
                 await self.telegram_bot.send_message("✅ Bot fully operational!")
             
-            # Wait for all tasks
-            await asyncio.gather(*self.tasks)
+            # Wait for all tasks (with return_exceptions to prevent premature exit)
+            await asyncio.gather(*self.tasks, return_exceptions=True)
             
         except asyncio.CancelledError:
             logger.info("Tasks cancelled, shutting down...")
