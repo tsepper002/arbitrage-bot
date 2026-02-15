@@ -18,5 +18,51 @@ cryptography>=41.0.0
 # Data handling
 python-dotenv>=1.0.0
 
-# Analytics and ML
+# =================================================================
+# FULL VERSION DEPENDENCIES - ALL 101+ MODULES
+# =================================================================
+
+# Machine Learning & AI (required for ML modules)
 numpy>=1.24.0
+scikit-learn>=1.3.0
+joblib>=1.3.0
+pandas>=2.0.0
+
+# Database support (with fallback to SQLite)
+# PostgreSQL support - optional, will use SQLite if not available
+# psycopg2-binary>=2.9.0  # Commented - will use SQLite fallback
+
+# Redis cache - optional, will use memory cache if not available
+# redis>=5.0.0  # Commented - will use memory fallback
+
+# Advanced analytics
+matplotlib>=3.7.0  # Optional for visualization
+scipy>=1.11.0  # For statistical analysis
+
+# Deep Learning - optional, CPU fallback available
+# torch>=2.0.0  # Commented - will use CPU/basic ML if not available
+# tensorflow>=2.13.0  # Commented - optional
+
+# Performance optimization
+orjson>=3.9.0  # Fast JSON parsing
+ujson>=5.8.0  # Alternative fast JSON
+
+# Security & encryption
+pyjwt>=2.8.0
+bcrypt>=4.1.0
+
+# Logging & monitoring
+coloredlogs>=15.0
+prometheus-client>=0.18.0  # Metrics export
+
+# Additional utilities
+pyyaml>=6.0
+jsonschema>=4.19.0
+python-dateutil>=2.8.2
+pytz>=2023.3
+
+# =================================================================
+# NOTE: Heavy dependencies (PostgreSQL, Redis, GPU libraries) are
+# commented out. The bot will use fallbacks (SQLite, memory cache,
+# CPU) automatically. This ensures ALL 101+ modules work out of box!
+# =================================================================
