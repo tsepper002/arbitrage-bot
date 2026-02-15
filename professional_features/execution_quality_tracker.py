@@ -3,7 +3,7 @@ Execution Quality Tracker - Tracks execution quality metrics
 Measures slippage, fill rates, and execution performance
 """
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 import time
 import numpy as np
 
