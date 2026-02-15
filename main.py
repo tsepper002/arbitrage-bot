@@ -590,17 +590,11 @@ class IntegratedArbitrageBot:
             logger.info("\n🎯 Initializing Professional Execution Modules...")
             
             # 1. TWAP Engine (Time-Weighted Average Price)
-            self.twap_engine = TWAPEngine(
-                rest_clients=self.rest_clients,
-                price_store=self.store
-            )
+            self.twap_engine = TWAPEngine()
             logger.info("✅ TWAP Engine initialized")
             
             # 2. VWAP Engine (Volume-Weighted Average Price)
-            self.vwap_engine = VWAPEngine(
-                rest_clients=self.rest_clients,
-                price_store=self.store
-            )
+            self.vwap_engine = VWAPEngine()
             logger.info("✅ VWAP Engine initialized")
             
             # 3. Iceberg Order Detector
