@@ -701,10 +701,11 @@ class IntegratedArbitrageBot:
                 logger.info("✅ Auto-rebalancer task started")
             
             # Triangular arbitrage task
-            if self.triangular_engine:
-                triangular_task = asyncio.create_task(self.triangular_engine.scan_loop(symbols))
-                self.tasks.append(triangular_task)
-                logger.info("✅ Triangular arbitrage task started")
+            # Note: Triangular engine is integrated into main engine, no separate scan needed
+            # if self.triangular_engine:
+            #     triangular_task = asyncio.create_task(self.triangular_engine.scan_loop(symbols))
+            #     self.tasks.append(triangular_task)
+            #     logger.info("✅ Triangular arbitrage task started")
             
             # Main arbitrage engine task
             engine_task = asyncio.create_task(self.engine.run(symbols))
