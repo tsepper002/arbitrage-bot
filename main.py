@@ -489,83 +489,98 @@ class IntegratedArbitrageBot:
             
             # 1. Grid Trading Strategy
             self.grid_trading = GridTradingStrategy(
-                price_store=self.store,
-                rest_clients=self.rest_clients,
-                balance_manager=self.balance_manager,
-                risk_manager=self.risk_manager
+                exchange="Bybit",  # Use first available exchange
+                symbol="BTC-USDT",  # Default symbol
+                grid_levels=10,
+                price_range_pct=0.1,
+                capital_per_level=50.0
             )
             logger.info("✅ Grid Trading Strategy initialized")
             
             # 2. DCA (Dollar Cost Averaging) Strategy
             self.dca_strategy = DCAStrategy(
-                price_store=self.store,
-                rest_clients=self.rest_clients,
-                balance_manager=self.balance_manager
+                exchange="Bybit",
+                symbol="BTC-USDT",
+                amount_per_buy=50.0,
+                interval_hours=24,
+                max_position_usdt=1000.0
             )
             logger.info("✅ DCA Strategy initialized")
             
             # 3. Market Making Strategy
             self.market_making = MarketMakingStrategy(
-                price_store=self.store,
-                rest_clients=self.rest_clients,
-                balance_manager=self.balance_manager,
-                risk_manager=self.risk_manager
+                exchange_client="Bybit",
+                symbol="BTC-USDT",
+                spread_pct=0.002,
+                order_size_usdt=100.0,
+                max_inventory_usdt=500.0,
+                refresh_interval_sec=10
             )
             logger.info("✅ Market Making Strategy initialized")
             
             # 4. Pairs Trading Strategy
             self.pairs_trading = PairsTradingStrategy(
-                price_store=self.store,
-                rest_clients=self.rest_clients,
-                balance_manager=self.balance_manager
+                exchange="Bybit",
+                pair1="BTC-USDT",
+                pair2="ETH-USDT",
+                lookback=60,
+                entry_z=2.0,
+                exit_z=0.5
             )
             logger.info("✅ Pairs Trading Strategy initialized")
             
             # 5. Enhanced Funding Rate Strategy
             self.funding_rate_enhanced = FundingRateEnhancedStrategy(
-                price_store=self.store,
-                rest_clients=self.rest_clients,
-                balance_manager=self.balance_manager
+                exchange_client="Bybit",
+                symbol="BTC-USDT",
+                min_funding_rate=0.0001,
+                position_size_usdt=1000.0,
+                hold_duration_hours=8
             )
             logger.info("✅ Enhanced Funding Rate Strategy initialized")
             
             # 6. Volatility Arbitrage Strategy
             self.volatility_arb = VolatilityArbitrageStrategy(
-                price_store=self.store,
-                rest_clients=self.rest_clients,
-                balance_manager=self.balance_manager
+                config={
+                    'lookback_period': 30,
+                    'risk_free_rate': 0.02,
+                    'vol_threshold': 0.05
+                }
             )
             logger.info("✅ Volatility Arbitrage Strategy initialized")
             
             # 7. Index Arbitrage Strategy
             self.index_arb = IndexArbitrageStrategy(
-                price_store=self.store,
-                rest_clients=self.rest_clients,
-                balance_manager=self.balance_manager
+                exchange="Bybit",
+                index_symbol="BTC-USDT",
+                components=[("BTC-USDT", 1.0)],
+                threshold_pct=0.005
             )
             logger.info("✅ Index Arbitrage Strategy initialized")
             
             # 8. Spread Betting Strategy
             self.spread_betting = SpreadBettingStrategy(
-                price_store=self.store,
-                rest_clients=self.rest_clients,
-                balance_manager=self.balance_manager
+                exchange_client="Bybit",
+                pair1="BTC-USDT",
+                pair2="ETH-USDT",
+                lookback_period=100
             )
             logger.info("✅ Spread Betting Strategy initialized")
             
             # 9. Momentum Strategy
             self.momentum_strategy = MomentumStrategy(
-                price_store=self.store,
-                rest_clients=self.rest_clients,
-                balance_manager=self.balance_manager
+                rsi_period=14
             )
             logger.info("✅ Momentum Strategy initialized")
             
             # 10. Breakout Strategy
             self.breakout_strategy = BreakoutStrategy(
-                price_store=self.store,
-                rest_clients=self.rest_clients,
-                balance_manager=self.balance_manager
+                config={
+                    'lookback_period': 50,
+                    'volume_threshold': 1.5,
+                    'breakout_threshold': 0.001,
+                    'min_touches': 3
+                }
             )
             logger.info("✅ Breakout Strategy initialized")
             
