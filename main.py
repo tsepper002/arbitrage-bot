@@ -276,7 +276,8 @@ class IntegratedArbitrageBot:
             # Balance Manager
             self.balance_manager = get_balance_manager()
             if self.rest_clients:
-                await self.balance_manager.initialize(self.rest_clients)
+                self.balance_manager.rest_clients = self.rest_clients  # Set rest_clients before initialize
+                await self.balance_manager.initialize()  # Call without arguments
                 logger.info("✅ Balance Manager initialized (balances fetched)")
                 self.balance_manager.print_summary()
             else:
