@@ -868,7 +868,7 @@ class IntegratedArbitrageBot:
         logger.info("Stopping WebSocket connections...")
         for exchange in self.exchanges:
             try:
-                exchange.stop()
+                await exchange.stop()
             except Exception as e:
                 logger.error(f"Error stopping {exchange}: {e}")
         
