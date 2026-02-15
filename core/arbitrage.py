@@ -262,6 +262,13 @@ class ArbitrageEngine:
                         self.recent_cache[key] = now
                         self._persist_opportunity(info)
                         res.append(info)
+                        
+                        # USER-FRIENDLY INFO LOGGING
+                        logger.info(f"💰 OPPORTUNITY: {symbol} | Buy {buy_ex} @ {buy_avg:.6f} → Sell {sell_ex} @ {sell_avg:.6f} | ROI: {roi_pct:.3f}% | Net: ${net:.2f}")
+                elif roi_pct > 0:
+                    # Log near-miss opportunities occasionally (for debugging)
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Near-miss: {symbol} {buy_ex}->{sell_ex} ROI={roi_pct:.3f}% (need {self.min_net_pct}%)")
         
         # Sort by net profit
         res.sort(key=lambda x: x["net"], reverse=True)
@@ -280,7 +287,9 @@ class ArbitrageEngine:
 
     async def run(self, symbols: List[str]):
         """Main scanning loop with event-driven optimization."""
-        logger.info(f"Starting arbitrage engine for {len(symbols)} symbols")
+        logger.info(f"🚀 Starting arbitrage engine for {len(symbols)} symbols: {', '.join(symbols)}")
+        logger.info(f"⚙️ Settings: MIN_ROI={self.min_net_pct}%, MAX_EXPOSURE=${self.max_exposure_usdt}, SCAN_INTERVAL={settings.SCAN_INTERVAL_SEC}s")
+        logger.info(f"📊 Waiting for price data from exchanges...")
         last_stats_print = time.time()
         
         while True:
@@ -400,7 +409,26 @@ class ArbitrageEngine:
             
             # Print statistics periodically
             if time.time() - last_stats_print > 60.0:
+                # Print executor statistics
                 self.executor.print_statistics()
+                
+                # Print scanning status
+                snap = self.store.snapshot()
+                active_symbols = len([s for s in symbols if s in snap and snap[s]])
+                total_exchanges = sum(len(snap.get(s, {})) for s in symbols) if snap else 0
+                logger.info(f"📊 STATUS: Scanning {active_symbols}/{len(symbols)} symbols across {total_exchanges} exchange connections")
+                
+                # Show which exchanges have data
+                if snap:
+                    exchanges_with_data = set()
+                    for s in symbols:
+                        if s in snap:
+                            exchanges_with_data.update(snap[s].keys())
+                    if exchanges_with_data:
+                        logger.info(f"📡 Active exchanges: {', '.join(sorted(exchanges_with_data))}")
+                    else:
+                        logger.warning("⚠️ No exchange data available in price store")
+                
                 last_stats_print = time.time()
             
             # Sleep based on configured interval
