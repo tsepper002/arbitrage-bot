@@ -369,9 +369,7 @@ class IntegratedArbitrageBot:
             logger.info("✅ Realtime Analytics initialized")
             
             # Correlation Analyzer
-            self.correlation_analyzer = CorrelationAnalyzer(
-                price_store=self.store
-            )
+            self.correlation_analyzer = CorrelationAnalyzer()
             logger.info("✅ Correlation Analyzer initialized")
             
             # Custom Dashboard
