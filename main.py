@@ -436,9 +436,15 @@ class IntegratedArbitrageBot:
                 store=self.store,
                 executor=executor,
                 risk_manager=self.risk_manager,
-                strategy_manager=self.strategy_manager
+                strategy_manager=self.strategy_manager,
+                flash_crash_protector=self.flash_crash_protector,
+                wash_trading_filter=self.wash_trading_filter,
+                orderbook_imbalance_detector=self.orderbook_imbalance_detector,
+                trade_journal=self.trade_journal,
+                profit_attribution=self.profit_attribution,
+                metrics_collector=self.metrics_collector
             )
-            logger.info("✅ Main Arbitrage Engine initialized")
+            logger.info("✅ Main Arbitrage Engine initialized with professional components")
             
         except Exception as e:
             logger.error(f"❌ Error initializing strategies: {e}")
@@ -467,6 +473,18 @@ class IntegratedArbitrageBot:
                 resource_task = asyncio.create_task(self.resource_monitor.monitoring_loop())
                 self.tasks.append(resource_task)
                 logger.info("✅ Resource monitor task started")
+            
+            # Professional health monitoring task
+            if self.health_monitor:
+                health_task = asyncio.create_task(self._health_monitor_loop())
+                self.tasks.append(health_task)
+                logger.info("✅ Professional health monitor task started")
+            
+            # Professional analytics task
+            if self.performance_tracker:
+                analytics_task = asyncio.create_task(self._analytics_loop())
+                self.tasks.append(analytics_task)
+                logger.info("✅ Professional analytics task started")
             
             # State persistence task
             if self.state_manager:
@@ -545,6 +563,70 @@ class IntegratedArbitrageBot:
             if self.state_manager:
                 await self.state_manager.save_state()
                 logger.info("✅ Final state saved")
+            return
+    
+    async def _health_monitor_loop(self):
+        """Professional health monitoring loop."""
+        try:
+            while True:
+                await asyncio.sleep(60)  # Check health every minute
+                
+                if self.health_monitor:
+                    # Get full health status
+                    health_status = self.health_monitor.get_full_status()
+                    
+                    # Check system health
+                    sys_health = health_status['system']
+                    if not sys_health['healthy']:
+                        msg = f"⚠️ System health degraded! CPU: {sys_health['cpu_percent']:.1f}%, Memory: {sys_health['memory_percent']:.1f}%"
+                        logger.warning(msg)
+                        if self.alert_manager:
+                            self.alert_manager.send_alert('WARNING', msg, ['log', 'telegram'])
+                    
+                    # Log health summary
+                    uptime_hours = health_status['uptime']['uptime_hours']
+                    logger.info(f"💚 Health check: System OK, Uptime: {uptime_hours:.1f}h")
+                    
+        except asyncio.CancelledError:
+            return
+    
+    async def _analytics_loop(self):
+        """Professional analytics monitoring loop."""
+        try:
+            while True:
+                await asyncio.sleep(300)  # Update analytics every 5 minutes
+                
+                if self.performance_tracker and self.balance_manager:
+                    # Update balance in performance tracker
+                    total_balance = self.balance_manager.get_total_balance()
+                    if total_balance > 0:
+                        self.performance_tracker.update_balance(total_balance)
+                        
+                        # Get and log performance statistics
+                        stats = self.performance_tracker.get_statistics()
+                        if stats['data_points'] > 10:
+                            logger.info(
+                                f"📊 Performance: Return: {stats['total_return_pct']:.2f}%, "
+                                f"Sharpe: {stats['sharpe_ratio']:.2f}, "
+                                f"Max DD: {stats['max_drawdown_pct']:.2f}%"
+                            )
+                
+                # Log trade journal summary
+                if self.trade_journal:
+                    summary = self.trade_journal.get_summary()
+                    if summary.get('total_trades', 0) > 0:
+                        logger.info(
+                            f"📓 Trade Journal: {summary['total_trades']} trades, "
+                            f"Net profit: ${summary['net_profit']:.2f}"
+                        )
+                
+                # Log profit attribution
+                if self.profit_attribution:
+                    by_strategy = self.profit_attribution.by_strategy()
+                    if by_strategy:
+                        logger.info(f"💰 Profit by strategy: {by_strategy}")
+                
+        except asyncio.CancelledError:
             return
     
     async def shutdown(self):

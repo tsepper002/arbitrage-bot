@@ -38,7 +38,13 @@ class ArbitrageEngine:
                  topk: Optional[int] = None,
                  executor: Optional[OrderExecutor] = None,
                  risk_manager = None,
-                 strategy_manager = None):
+                 strategy_manager = None,
+                 flash_crash_protector = None,
+                 wash_trading_filter = None,
+                 orderbook_imbalance_detector = None,
+                 trade_journal = None,
+                 profit_attribution = None,
+                 metrics_collector = None):
         self.store = store
         self.params = EXCHANGE_PARAMS
         
@@ -68,6 +74,14 @@ class ArbitrageEngine:
         # Optional integrations
         self.risk_manager = risk_manager
         self.strategy_manager = strategy_manager
+        
+        # Professional components
+        self.flash_crash_protector = flash_crash_protector
+        self.wash_trading_filter = wash_trading_filter
+        self.orderbook_imbalance_detector = orderbook_imbalance_detector
+        self.trade_journal = trade_journal
+        self.profit_attribution = profit_attribution
+        self.metrics_collector = metrics_collector
 
         # Event-driven scanning state
         self.updated_symbols: Set[str] = set()
@@ -207,6 +221,24 @@ class ArbitrageEngine:
 
                 invested = buy_avg * filled
                 roi_pct = (net / invested) * 100 if invested else 0.0
+                
+                # PROFESSIONAL RISK CHECKS
+                # P1: Flash Crash Protection - Check if market is safe to trade
+                if self.flash_crash_protector:
+                    if self.flash_crash_protector.should_stop_trading(symbol):
+                        logger.warning(f"⚠️ Flash crash protection activated for {symbol}, skipping trade")
+                        if self.metrics_collector:
+                            self.metrics_collector.record('flash_crash_blocks', 1)
+                        continue
+                
+                # P2: Orderbook Imbalance Detection - Enhance decision with flow analysis
+                # (This is more for HFT but can inform us about market pressure)
+                
+                # P3: Record metrics for monitoring
+                if self.metrics_collector:
+                    self.metrics_collector.record('opportunities_found', 1)
+                    self.metrics_collector.record('roi_pct', roi_pct)
+                    self.metrics_collector.record('net_profit_usdt', net)
 
                 info = {
                     "symbol": symbol,
@@ -317,6 +349,40 @@ class ArbitrageEngine:
                                 profit=profit,
                                 execution_time=execution_time
                             )
+                        
+                        # PROFESSIONAL ANALYTICS: Record trade details
+                        if result.get('trade_info'):
+                            trade_info = result['trade_info']
+                            
+                            # Record to Trade Journal
+                            if self.trade_journal:
+                                self.trade_journal.record_trade({
+                                    'symbol': o['symbol'],
+                                    'side': 'buy_sell',  # arbitrage
+                                    'amount': o['qty'],
+                                    'price': o['buy_avg'],
+                                    'fee': trade_info.get('total_fees', 0),
+                                    'profit': trade_info.get('net_profit', 0),
+                                    'strategy': o.get('strategy', 'cross_exchange'),
+                                    'exchange': f"{o['buy_ex']}/{o['sell_ex']}",
+                                    'notes': f"ROI: {o.get('roi_pct', 0):.3f}%"
+                                })
+                            
+                            # Record to Profit Attribution
+                            if self.profit_attribution:
+                                self.profit_attribution.add_trade({
+                                    'strategy': o.get('strategy', 'cross_exchange'),
+                                    'exchange': o['buy_ex'],
+                                    'symbol': o['symbol'],
+                                    'profit': trade_info.get('net_profit', 0)
+                                })
+                            
+                            # Record metrics
+                            if self.metrics_collector:
+                                self.metrics_collector.record('trades_executed', 1)
+                                self.metrics_collector.record('execution_time_ms', result.get('execution_time', 0) * 1000)
+                                if result['status'] == 'success':
+                                    self.metrics_collector.record('successful_trades', 1)
                         
                         # Update risk manager after trade
                         if self.risk_manager and result.get('trade_info'):
