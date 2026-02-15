@@ -356,7 +356,7 @@ class IntegratedArbitrageBot:
             
             # Backtest Engine
             self.backtest_engine = BacktestEngine(
-                price_store=self.store
+                initial_capital=10000  # Default backtest capital
             )
             logger.info("✅ Backtest Engine initialized")
             
