@@ -10,6 +10,10 @@ import sys
 import os
 from typing import List, Dict, Optional
 
+# CRITICAL: Load .env file BEFORE importing settings
+from dotenv import load_dotenv
+load_dotenv()  # This loads API keys and other config from .env file
+
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
