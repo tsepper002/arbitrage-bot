@@ -32,6 +32,7 @@ from core.strategy_manager import get_strategy_manager
 from core.rebalancer import get_auto_rebalancer
 from core.startup_validator import get_startup_validator
 from core.windows_optimizer import setup_windows_optimizations, WindowsOptimizer
+from core.smart_capital_allocator import get_smart_allocator
 
 # Exchange modules
 from exchanges.bybit_ws import BybitWS
@@ -219,6 +220,11 @@ class IntegratedArbitrageBot:
             # Resource Monitor
             self.resource_monitor = get_resource_monitor()
             logger.info("✅ Resource Monitor initialized")
+            
+            # Smart Capital Allocator
+            self.capital_allocator = get_smart_allocator(self.balance_manager)
+            logger.info("✅ Smart Capital Allocator initialized")
+            self.capital_allocator.print_allocation_summary()
             
         except Exception as e:
             logger.error(f"❌ Error initializing managers: {e}")

@@ -121,7 +121,10 @@ MAX_OPEN_EXPOSURE = _get_env_float("ARB_MAX_OPEN_EXPOSURE", 500.0)  # Max total 
 MAX_CONSECUTIVE_LOSSES = _get_env_int("ARB_MAX_CONSECUTIVE_LOSSES", 5)  # Pause after N losses
 ANOMALOUS_SPREAD_PCT = _get_env_float("ARB_ANOMALOUS_SPREAD_PCT", 5.0)  # Skip spreads above this
 MAX_DATA_AGE_SEC = _get_env_float("ARB_MAX_DATA_AGE_SEC", 3.0)  # Don't trade on stale data
-MIN_BALANCE_PER_EXCHANGE = _get_env_float("ARB_MIN_BALANCE_PER_EXCHANGE", 20.0)  # Min balance to trade
+MIN_BALANCE_PER_EXCHANGE = _get_env_float("ARB_MIN_BALANCE_PER_EXCHANGE", 8.0)  # Min balance to trade (lowered for small accounts)
+MIN_TRADE_SIZE_USDT = _get_env_float("ARB_MIN_TRADE_SIZE_USDT", 3.0)  # Minimum trade size to cover fees
+BALANCE_RESERVE_USDT = _get_env_float("ARB_BALANCE_RESERVE_USDT", 2.0)  # Keep reserve on each exchange
+MAX_BALANCE_USAGE_PCT = _get_env_float("ARB_MAX_BALANCE_USAGE_PCT", 60.0)  # Max % of balance per trade
 
 # ============================================================================
 # PERFORMANCE & THROTTLING (optimized for weak hardware)

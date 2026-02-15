@@ -51,7 +51,7 @@ class StartupValidator:
         state_manager,
         price_store,
         telegram_bot=None,
-        min_total_capital: float = 100.0,
+        min_total_capital: float = 10.0,  # Lowered from 100 to support minimal balances
         min_ws_connections: int = 3
     ):
         self.exchanges = exchanges

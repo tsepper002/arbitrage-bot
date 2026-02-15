@@ -130,6 +130,11 @@ class BalanceManager:
         """
         Check if exchange has sufficient balance for trade.
         
+        Uses dynamic safety margins:
+        - Small balances (<$50): 5% buffer for flexibility
+        - Medium balances ($50-$200): 10% buffer
+        - Large balances (>$200): 15% buffer for safety
+        
         Returns:
             (has_sufficient, reason) tuple
         """
@@ -147,9 +152,19 @@ class BalanceManager:
         if current_balance < amount:
             return False, f"Insufficient {currency}: have {current_balance:.4f}, need {amount:.4f}"
         
-        # Require at least 10% buffer
-        if current_balance < amount * 1.1:
-            return False, f"Balance too low for safety margin: {current_balance:.4f} < {amount * 1.1:.4f}"
+        # Dynamic safety margin based on balance size
+        if current_balance < 50:
+            safety_margin = 1.05  # 5% for small accounts
+        elif current_balance < 200:
+            safety_margin = 1.10  # 10% for medium accounts
+        else:
+            safety_margin = 1.15  # 15% for large accounts
+        
+        if current_balance < amount * safety_margin:
+            return False, (
+                f"Balance too low for safety margin: {current_balance:.4f} "
+                f"< {amount * safety_margin:.4f} (need {(safety_margin-1)*100:.0f}% buffer)"
+            )
         
         return True, None
     
