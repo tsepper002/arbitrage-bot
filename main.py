@@ -70,8 +70,9 @@ from strategies.momentum_strategy import MomentumStrategy
 from strategies.breakout_strategy import BreakoutStrategy
 
 # Professional Execution (Phase 5)
-from professional_features.twap_vwap_engine import TWAPEngine, VWAPEngine
-from professional_features.iceberg_detector import IcebergOrderDetector
+from professional_features.twap_engine import TWAPEngine
+from professional_features.vwap_engine import VWAPEngine
+from professional_features.iceberg_order_detector import IcebergOrderDetector
 from professional_features.order_flow_tracker import OrderFlowTracker
 
 # Exchange modules
