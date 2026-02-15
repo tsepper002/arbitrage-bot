@@ -64,6 +64,11 @@ from core.strategies.spread_betting import SpreadBetting
 from strategies.momentum_strategy import MomentumStrategy
 from strategies.breakout_strategy import BreakoutStrategy
 
+# Professional Execution (Phase 5)
+from professional_features.twap_vwap_engine import TWAPEngine, VWAPEngine
+from professional_features.iceberg_detector import IcebergOrderDetector
+from professional_features.order_flow_tracker import OrderFlowTracker
+
 # Exchange modules
 from exchanges.bybit_ws import BybitWS
 from exchanges.kucoin_ws import KucoinWS
@@ -141,6 +146,12 @@ class IntegratedArbitrageBot:
         self.spread_betting = None
         self.momentum_strategy = None
         self.breakout_strategy = None
+        
+        # Professional Execution (Phase 5)
+        self.twap_engine = None
+        self.vwap_engine = None
+        self.iceberg_detector = None
+        self.order_flow_tracker = None
         
         self.engine = None
         self.tasks = []
@@ -514,6 +525,37 @@ class IntegratedArbitrageBot:
             logger.info("✅ Breakout Strategy initialized")
             
             logger.info("✅ All 10 Trading Strategies initialized successfully!")
+            
+            # Phase 5: Professional Execution Modules (4 modules)
+            logger.info("\n🎯 Initializing Professional Execution Modules...")
+            
+            # 1. TWAP Engine (Time-Weighted Average Price)
+            self.twap_engine = TWAPEngine(
+                rest_clients=self.rest_clients,
+                price_store=self.store
+            )
+            logger.info("✅ TWAP Engine initialized")
+            
+            # 2. VWAP Engine (Volume-Weighted Average Price)
+            self.vwap_engine = VWAPEngine(
+                rest_clients=self.rest_clients,
+                price_store=self.store
+            )
+            logger.info("✅ VWAP Engine initialized")
+            
+            # 3. Iceberg Order Detector
+            self.iceberg_detector = IcebergOrderDetector(
+                price_store=self.store
+            )
+            logger.info("✅ Iceberg Order Detector initialized")
+            
+            # 4. Order Flow Tracker
+            self.order_flow_tracker = OrderFlowTracker(
+                price_store=self.store
+            )
+            logger.info("✅ Order Flow Tracker initialized")
+            
+            logger.info("✅ All 4 Professional Execution Modules initialized!")
             
             # Triangular Arbitrage Engine
             self.triangular_engine = get_triangular_engine(
