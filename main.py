@@ -361,9 +361,7 @@ class IntegratedArbitrageBot:
             logger.info("✅ Backtest Engine initialized")
             
             # Market Intelligence
-            self.market_intelligence = MarketIntelligence(
-                price_store=self.store
-            )
+            self.market_intelligence = MarketIntelligence()
             logger.info("✅ Market Intelligence initialized")
             
             # Realtime Analytics
