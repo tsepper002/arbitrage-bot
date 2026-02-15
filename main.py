@@ -34,6 +34,24 @@ from core.startup_validator import get_startup_validator
 from core.windows_optimizer import setup_windows_optimizations, WindowsOptimizer
 from core.smart_capital_allocator import get_smart_allocator
 
+# Professional Infrastructure
+from infrastructure.health_monitor import HealthMonitor
+from infrastructure.alert_manager import AlertManager
+from infrastructure.rate_limiter import RateLimiter
+from infrastructure.circuit_breaker_enhanced import CircuitBreakerEnhanced
+from infrastructure.metrics_collector import MetricsCollector
+
+# Professional Analytics
+from analytics.trade_journal import TradeJournal
+from analytics.performance_tracker import PerformanceTracker
+from analytics.profit_attribution import ProfitAttributionAnalyzer
+from analytics.risk_analytics import RiskAnalytics
+
+# Professional Features
+from professional_features.flash_crash_protector import FlashCrashProtector
+from professional_features.wash_trading_filter import WashTradingFilter
+from professional_features.orderbook_imbalance_detector import OrderbookImbalanceDetector
+
 # Exchange modules
 from exchanges.bybit_ws import BybitWS
 from exchanges.kucoin_ws import KucoinWS
@@ -81,6 +99,24 @@ class IntegratedArbitrageBot:
         self.rebalancer = None
         self.startup_validator = None
         self.windows_optimizer: Optional[WindowsOptimizer] = None
+        
+        # Professional Infrastructure
+        self.health_monitor = None
+        self.alert_manager = None
+        self.rate_limiter = None
+        self.circuit_breaker = None
+        self.metrics_collector = None
+        
+        # Professional Analytics
+        self.trade_journal = None
+        self.performance_tracker = None
+        self.profit_attribution = None
+        self.risk_analytics = None
+        
+        # Professional Features
+        self.flash_crash_protector = None
+        self.wash_trading_filter = None
+        self.orderbook_imbalance_detector = None
         
         self.engine = None
         self.tasks = []
@@ -225,6 +261,65 @@ class IntegratedArbitrageBot:
             self.capital_allocator = get_smart_allocator(self.balance_manager)
             logger.info("✅ Smart Capital Allocator initialized")
             self.capital_allocator.print_allocation_summary()
+            
+            # Professional Infrastructure
+            logger.info("\n🔬 Initializing Professional Infrastructure...")
+            
+            # Health Monitor
+            self.health_monitor = HealthMonitor()
+            logger.info("✅ Health Monitor initialized")
+            
+            # Alert Manager
+            self.alert_manager = AlertManager()
+            logger.info("✅ Alert Manager initialized")
+            
+            # Rate Limiter (10 requests per second with burst capacity of 20)
+            self.rate_limiter = RateLimiter(rate=10.0, capacity=20)
+            logger.info("✅ Rate Limiter initialized (10/sec, burst 20)")
+            
+            # Circuit Breaker (5 failures triggers open, 60s timeout)
+            self.circuit_breaker = CircuitBreakerEnhanced(failure_threshold=5, timeout=60)
+            logger.info("✅ Circuit Breaker initialized (threshold: 5, timeout: 60s)")
+            
+            # Metrics Collector
+            self.metrics_collector = MetricsCollector()
+            logger.info("✅ Metrics Collector initialized")
+            
+            # Professional Analytics
+            logger.info("\n📊 Initializing Professional Analytics...")
+            
+            # Trade Journal
+            self.trade_journal = TradeJournal()
+            logger.info("✅ Trade Journal initialized")
+            
+            # Performance Tracker
+            self.performance_tracker = PerformanceTracker()
+            logger.info("✅ Performance Tracker initialized")
+            
+            # Profit Attribution
+            self.profit_attribution = ProfitAttributionAnalyzer()
+            logger.info("✅ Profit Attribution initialized")
+            
+            # Risk Analytics
+            self.risk_analytics = RiskAnalytics()
+            logger.info("✅ Risk Analytics initialized")
+            
+            # Professional Features
+            logger.info("\n🛡️  Initializing Professional Risk Features...")
+            
+            # Flash Crash Protector
+            self.flash_crash_protector = FlashCrashProtector()
+            logger.info("✅ Flash Crash Protector initialized")
+            
+            # Wash Trading Filter
+            self.wash_trading_filter = WashTradingFilter()
+            logger.info("✅ Wash Trading Filter initialized")
+            
+            # Orderbook Imbalance Detector
+            self.orderbook_imbalance_detector = OrderbookImbalanceDetector()
+            logger.info("✅ Orderbook Imbalance Detector initialized")
+            
+            logger.info("\n🎯 All professional components initialized successfully!")
             
         except Exception as e:
             logger.error(f"❌ Error initializing managers: {e}")

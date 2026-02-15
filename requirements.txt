@@ -17,3 +17,6 @@ cryptography>=41.0.0
 
 # Data handling
 python-dotenv>=1.0.0
+
+# Analytics and ML
+numpy>=1.24.0
