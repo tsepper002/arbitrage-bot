@@ -3,7 +3,7 @@ Market Manipulation Detector - Detects market manipulation
 Identifies pump & dump, spoofing, wash trading
 """
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 import time
 
 logger = logging.getLogger(__name__)
