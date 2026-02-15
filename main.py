@@ -52,6 +52,18 @@ from professional_features.flash_crash_protector import FlashCrashProtector
 from professional_features.wash_trading_filter import WashTradingFilter
 from professional_features.orderbook_imbalance_detector import OrderbookImbalanceDetector
 
+# Trading Strategies (Phase 4)
+from core.strategies.grid_trading import GridTradingStrategy
+from core.strategies.dca_strategy import DCAStrategy
+from core.strategies.market_making import MarketMakingStrategy
+from core.strategies.pairs_trading import PairsTradingStrategy
+from core.strategies.funding_rate_enhanced import FundingRateEnhanced
+from core.strategies.volatility_arb import VolatilityArbitrage
+from core.strategies.index_arb import IndexArbitrage
+from core.strategies.spread_betting import SpreadBetting
+from strategies.momentum_strategy import MomentumStrategy
+from strategies.breakout_strategy import BreakoutStrategy
+
 # Exchange modules
 from exchanges.bybit_ws import BybitWS
 from exchanges.kucoin_ws import KucoinWS
@@ -117,6 +129,18 @@ class IntegratedArbitrageBot:
         self.flash_crash_protector = None
         self.wash_trading_filter = None
         self.orderbook_imbalance_detector = None
+        
+        # Trading Strategies (Phase 4)
+        self.grid_trading = None
+        self.dca_strategy = None
+        self.market_making = None
+        self.pairs_trading = None
+        self.funding_rate_enhanced = None
+        self.volatility_arb = None
+        self.index_arb = None
+        self.spread_betting = None
+        self.momentum_strategy = None
+        self.breakout_strategy = None
         
         self.engine = None
         self.tasks = []
@@ -403,6 +427,93 @@ class IntegratedArbitrageBot:
             # Order Type Selector
             self.order_selector = get_order_type_selector(self.rest_clients)
             logger.info("✅ Smart Order Selector initialized")
+            
+            # Phase 4: Initialize Trading Strategies (10 modules)
+            logger.info("\n🎯 Initializing Trading Strategies...")
+            
+            # 1. Grid Trading Strategy
+            self.grid_trading = GridTradingStrategy(
+                price_store=self.store,
+                rest_clients=self.rest_clients,
+                balance_manager=self.balance_manager,
+                risk_manager=self.risk_manager
+            )
+            logger.info("✅ Grid Trading Strategy initialized")
+            
+            # 2. DCA (Dollar Cost Averaging) Strategy
+            self.dca_strategy = DCAStrategy(
+                price_store=self.store,
+                rest_clients=self.rest_clients,
+                balance_manager=self.balance_manager
+            )
+            logger.info("✅ DCA Strategy initialized")
+            
+            # 3. Market Making Strategy
+            self.market_making = MarketMakingStrategy(
+                price_store=self.store,
+                rest_clients=self.rest_clients,
+                balance_manager=self.balance_manager,
+                risk_manager=self.risk_manager
+            )
+            logger.info("✅ Market Making Strategy initialized")
+            
+            # 4. Pairs Trading Strategy
+            self.pairs_trading = PairsTradingStrategy(
+                price_store=self.store,
+                rest_clients=self.rest_clients,
+                balance_manager=self.balance_manager
+            )
+            logger.info("✅ Pairs Trading Strategy initialized")
+            
+            # 5. Enhanced Funding Rate Strategy
+            self.funding_rate_enhanced = FundingRateEnhanced(
+                price_store=self.store,
+                rest_clients=self.rest_clients,
+                balance_manager=self.balance_manager
+            )
+            logger.info("✅ Enhanced Funding Rate Strategy initialized")
+            
+            # 6. Volatility Arbitrage Strategy
+            self.volatility_arb = VolatilityArbitrage(
+                price_store=self.store,
+                rest_clients=self.rest_clients,
+                balance_manager=self.balance_manager
+            )
+            logger.info("✅ Volatility Arbitrage Strategy initialized")
+            
+            # 7. Index Arbitrage Strategy
+            self.index_arb = IndexArbitrage(
+                price_store=self.store,
+                rest_clients=self.rest_clients,
+                balance_manager=self.balance_manager
+            )
+            logger.info("✅ Index Arbitrage Strategy initialized")
+            
+            # 8. Spread Betting Strategy
+            self.spread_betting = SpreadBetting(
+                price_store=self.store,
+                rest_clients=self.rest_clients,
+                balance_manager=self.balance_manager
+            )
+            logger.info("✅ Spread Betting Strategy initialized")
+            
+            # 9. Momentum Strategy
+            self.momentum_strategy = MomentumStrategy(
+                price_store=self.store,
+                rest_clients=self.rest_clients,
+                balance_manager=self.balance_manager
+            )
+            logger.info("✅ Momentum Strategy initialized")
+            
+            # 10. Breakout Strategy
+            self.breakout_strategy = BreakoutStrategy(
+                price_store=self.store,
+                rest_clients=self.rest_clients,
+                balance_manager=self.balance_manager
+            )
+            logger.info("✅ Breakout Strategy initialized")
+            
+            logger.info("✅ All 10 Trading Strategies initialized successfully!")
             
             # Triangular Arbitrage Engine
             self.triangular_engine = get_triangular_engine(
