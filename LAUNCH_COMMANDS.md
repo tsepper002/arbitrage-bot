@@ -1,11 +1,28 @@
 # 🚀 Quick Download and Launch Commands
 
+## 🚨 IMPORTANT! Download the CORRECT branch
+
+**With regular `git clone` you get the basic version (51 files).**
+**For the FULL version with all improvements (244 files) use:**
+
+```bash
+# ✅ CORRECT - Full version with all improvements
+git clone -b copilot/fix-bot-start-issues https://github.com/tsepper002/arbitrage-bot.git
+
+# ❌ WRONG - Basic version without improvements
+# git clone https://github.com/tsepper002/arbitrage-bot.git
+```
+
+📄 **More details:** [КАК_ПОЛУЧИТЬ_ПОЛНУЮ_ВЕРСИЮ.md](КАК_ПОЛУЧИТЬ_ПОЛНУЮ_ВЕРСИЮ.md)
+
+---
+
 ## Download and Install (copy commands one by one)
 
 ### Windows (PowerShell/CMD):
 ```powershell
-# 1. Download the bot
-git clone https://github.com/tsepper002/arbitrage-bot.git
+# 1. Download the bot (FULL VERSION)
+git clone -b copilot/fix-bot-start-issues https://github.com/tsepper002/arbitrage-bot.git
 cd arbitrage-bot
 
 # 2. Install dependencies
@@ -17,8 +34,8 @@ python main.py
 
 ### Linux/macOS:
 ```bash
-# 1. Download the bot
-git clone https://github.com/tsepper002/arbitrage-bot.git
+# 1. Download the bot (FULL VERSION)
+git clone -b copilot/fix-bot-start-issues https://github.com/tsepper002/arbitrage-bot.git
 cd arbitrage-bot
 
 # 2. Install dependencies
@@ -27,6 +44,25 @@ pip3 install -r requirements.txt
 # 3. Run in test mode (safe, no real trading)
 python3 main.py
 ```
+
+---
+
+## What You Get in Full Version
+
+### Basic version (main) - 51 files ❌
+- Only basic arbitrage
+- Minimal functionality
+
+### Full version (copilot/fix-bot-start-issues) - 244 files ✅
+- EVERYTHING from basic + 193 additional files:
+  - 70+ advanced modules
+  - 80+ documentation files
+  - Risk & balance management
+  - Telegram notifications
+  - ML modules & GPU acceleration
+  - Multiple trading strategies
+  - REST API for all exchanges
+  - Advanced monitoring
 
 ---
 

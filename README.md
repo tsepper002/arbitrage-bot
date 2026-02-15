@@ -2,6 +2,20 @@
 
 A robust, efficient arbitrage bot for detecting and executing cross-exchange arbitrage opportunities across Bybit, KuCoin, HTX, XT, and MEXC.
 
+> ## 🚨 ВАЖНО! Get the Full Version / Получите Полную Версию
+> 
+> **This branch has ALL improvements (244 files, 180+ modules)**  
+> **Эта ветка содержит ВСЕ улучшения (244 файла, 180+ модулей)**
+> 
+> ```bash
+> # Clone THIS branch to get full version / Клонируйте ЭТУ ветку для полной версии:
+> git clone -b copilot/fix-bot-start-issues https://github.com/tsepper002/arbitrage-bot.git
+> ```
+> 
+> 📄 See [**КАК_ПОЛУЧИТЬ_ПОЛНУЮ_ВЕРСИЮ.md**](КАК_ПОЛУЧИТЬ_ПОЛНУЮ_ВЕРСИЮ.md) for details / Подробности
+>
+> ---
+> 
 > 🚀 **Quick Commands**: See [**LAUNCH_COMMANDS.md**](LAUNCH_COMMANDS.md) (copy-paste commands) or [**КОМАНДЫ_ЗАПУСКА.md**](КОМАНДЫ_ЗАПУСКА.md) (команды на русском)
 > 
 > 📖 **Full Documentation**: See [**README.md**](#quick-start) (English) or [**ИНСТРУКЦИЯ.md**](ИНСТРУКЦИЯ.md) (Russian)
