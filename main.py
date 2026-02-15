@@ -868,9 +868,11 @@ class IntegratedArbitrageBot:
         logger.info("Stopping WebSocket connections...")
         for exchange in self.exchanges:
             try:
+                exchange_name = getattr(exchange, 'name', getattr(exchange, 'exchange_name', str(type(exchange).__name__)))
                 await exchange.stop()
             except Exception as e:
-                logger.error(f"Error stopping {exchange}: {e}")
+                exchange_name = getattr(exchange, 'name', getattr(exchange, 'exchange_name', str(type(exchange).__name__)))
+                logger.error(f"Error stopping {exchange_name}: {e}")
         
         # Final state save
         if self.state_manager:
