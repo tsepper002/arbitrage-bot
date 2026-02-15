@@ -55,7 +55,7 @@ from analytics.custom_dashboard import CustomDashboard
 # Professional Features
 from professional_features.flash_crash_protector import FlashCrashProtector
 from professional_features.wash_trading_filter import WashTradingFilter
-from professional_features.orderbook_imbalance_detector import OrderbookImbalanceDetector
+from professional_features.orderbook_imbalance_detector import OrderBookImbalanceDetector
 
 # Trading Strategies (Phase 4)
 from core.strategies.grid_trading import GridTradingStrategy
@@ -396,7 +396,7 @@ class IntegratedArbitrageBot:
             logger.info("✅ Wash Trading Filter initialized")
             
             # Orderbook Imbalance Detector
-            self.orderbook_imbalance_detector = OrderbookImbalanceDetector()
+            self.orderbook_imbalance_detector = OrderBookImbalanceDetector()
             logger.info("✅ Orderbook Imbalance Detector initialized")
             
             logger.info("\n🎯 All professional components initialized successfully!")
