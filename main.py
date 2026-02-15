@@ -598,15 +598,11 @@ class IntegratedArbitrageBot:
             logger.info("✅ VWAP Engine initialized")
             
             # 3. Iceberg Order Detector
-            self.iceberg_detector = IcebergOrderDetector(
-                price_store=self.store
-            )
+            self.iceberg_detector = IcebergOrderDetector()
             logger.info("✅ Iceberg Order Detector initialized")
             
             # 4. Order Flow Tracker
-            self.order_flow_tracker = OrderFlowTracker(
-                price_store=self.store
-            )
+            self.order_flow_tracker = OrderFlowTracker()
             logger.info("✅ Order Flow Tracker initialized")
             
             logger.info("✅ All 4 Professional Execution Modules initialized!")
