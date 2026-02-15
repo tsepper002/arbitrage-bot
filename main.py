@@ -609,11 +609,10 @@ class IntegratedArbitrageBot:
             
             # Triangular Arbitrage Engine
             self.triangular_engine = get_triangular_engine(
-                store=self.store,
-                rest_clients=self.rest_clients,
-                balance_manager=self.balance_manager,
-                risk_manager=self.risk_manager,
-                strategy_manager=self.strategy_manager
+                price_store=self.store,
+                order_executor=None,  # Will be set later
+                exchange_config={},    # Empty config for now
+                enabled_exchanges=["Bybit", "KuCoin", "HTX", "MEXC"]
             )
             logger.info("✅ Triangular Arbitrage Engine initialized")
             
