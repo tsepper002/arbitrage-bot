@@ -105,13 +105,48 @@ import settings
 # Configure logging with separate levels for console and file
 # Console: INFO and above (clean output, no DEBUG spam)
 # File: DEBUG and above (full details for debugging)
-# UTF-8 encoding already configured at top of file
 
-console_handler = logging.StreamHandler()
+# Create UTF-8 compatible stream wrapper for Windows console
+# This ensures emoji work even with cp1251 encoding
+class UTF8StreamWrapper:
+    """Wrapper to handle UTF-8 output on Windows console with cp1251 encoding."""
+    def __init__(self, stream):
+        self.stream = stream
+        self.encoding = 'utf-8'
+        
+    def write(self, message):
+        """Write message with UTF-8 support and graceful error handling."""
+        if isinstance(message, bytes):
+            message = message.decode('utf-8', errors='replace')
+        try:
+            # Try direct write first (works if console supports UTF-8)
+            self.stream.write(message)
+        except UnicodeEncodeError:
+            # Fallback: replace unsupported characters with ?
+            try:
+                # Try encoding with errors='replace' to replace emoji with ?
+                encoded = message.encode(self.stream.encoding if hasattr(self.stream, 'encoding') else 'cp1251', errors='replace')
+                self.stream.write(encoded.decode(self.stream.encoding if hasattr(self.stream, 'encoding') else 'cp1251', errors='replace'))
+            except Exception:
+                # Ultimate fallback: strip all non-ASCII
+                self.stream.write(message.encode('ascii', errors='replace').decode('ascii'))
+        except Exception:
+            pass  # Ignore any other errors
+    
+    def flush(self):
+        """Flush the underlying stream."""
+        try:
+            self.stream.flush()
+        except Exception:
+            pass
+
+# Use UTF-8 wrapper for console handler to prevent UnicodeEncodeError
+console_handler = logging.StreamHandler(UTF8StreamWrapper(sys.stderr))
 console_handler.setLevel(logging.INFO)  # Only INFO+ in console
 console_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 
-file_handler = logging.FileHandler("arbitrage_bot.log")
+# File handler with UTF-8 encoding
+file_handler = logging.FileHandler("arbitrage_bot.log", encoding='utf-8')
 file_handler.setLevel(logging.DEBUG)  # All logs in file
 file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
 
