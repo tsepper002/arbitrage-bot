@@ -4,9 +4,20 @@ main_integrated.py — Full integration of all advanced features
 Enhanced with all modules: REST clients, balance manager, risk manager, 
 state persistence, telegram, strategies, auto-rebalancer, and more.
 """
+
+# CRITICAL: Configure UTF-8 encoding FIRST, before ANY other imports!
+# This prevents UnicodeEncodeError with emoji on Windows (cp1251 encoding)
+import sys
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass  # Graceful fallback if reconfigure not available
+
+# Now safe to import everything else
 import asyncio
 import logging
-import sys
 import os
 from typing import List, Dict, Optional
 
@@ -94,15 +105,7 @@ import settings
 # Configure logging with separate levels for console and file
 # Console: INFO and above (clean output, no DEBUG spam)
 # File: DEBUG and above (full details for debugging)
-
-# Fix Windows encoding issues - try to use UTF-8 for emoji support
-import sys
-try:
-    if hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
-except Exception:
-    pass  # Ignore if reconfigure not available
+# UTF-8 encoding already configured at top of file
 
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)  # Only INFO+ in console
