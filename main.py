@@ -109,6 +109,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("arbitrage_bot")
 
+# Force all exchange loggers to INFO level (not DEBUG) for console
+# This prevents WebSocket modules from spamming console with DEBUG messages
+for logger_name in ['kucoin_ws', 'bybit_ws', 'htx_ws', 'mexc_ws', 'binance_ws', 'arbitrage_ws']:
+    exchange_logger = logging.getLogger(logger_name)
+    exchange_logger.setLevel(logging.INFO)  # Only INFO+ will be logged
+
 
 class IntegratedArbitrageBot:
     """Fully integrated arbitrage bot with all advanced features."""

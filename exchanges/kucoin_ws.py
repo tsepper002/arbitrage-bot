@@ -19,7 +19,7 @@ import random
 from .ws_helpers import WSHealthMonitor, WSReconnectHelper
 
 logger = logging.getLogger("kucoin_ws")
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
+# Logging configured in main.py - don't override here
 
 DEPTH_LEVELS = 20
 
