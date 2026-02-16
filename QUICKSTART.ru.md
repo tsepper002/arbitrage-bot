@@ -5,6 +5,8 @@
 
 Это руководство поможет вам установить и запустить арбитражного бота на вашем железе менее чем за 5 минут.
 
+> **📖 Возникли проблемы?** См. [TROUBLESHOOTING.md](TROUBLESHOOTING.md) для решения типичных проблем.
+
 ---
 
 ## 🚀 Установка и Запуск Одной Командой
@@ -50,7 +52,25 @@ git clone -b copilot/cleanup-stabilization-pass https://github.com/tsepper002/ar
 cd arbitrage-bot
 ```
 
-### 2. Создание Виртуального Окружения (Рекомендуется)
+> **⚠️ Важно:** Убедитесь что клонируете ветку `copilot/cleanup-stabilization-pass`! Эта ветка включает все исправления для Windows и удалённые emoji символы.
+
+### 2. Проверка Правильной Версии
+
+Убедитесь что у вас правильная версия:
+
+```bash
+# Проверка ветки
+git branch
+# Должно показать: * copilot/cleanup-stabilization-pass
+
+# Проверка размера main.py (должно быть ~136 строк, не 900+)
+wc -l main.py
+# Или на Windows: python -c "print(len(open('main.py').readlines()))"
+```
+
+Если видите проблемы или неправильную версию, см. [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+### 3. Создание Виртуального Окружения (Рекомендуется)
 
 **Windows:**
 ```powershell
@@ -64,7 +84,7 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 
-### 3. Установка Зависимостей
+### 4. Установка Зависимостей
 
 ```bash
 pip install -r requirements.txt
@@ -76,7 +96,7 @@ pip install -r requirements.txt
 - `websocket-client` - Библиотека WebSocket клиента
 - `requests` - HTTP библиотека
 
-### 4. Проверка Установки
+### 5. Проверка Установки
 
 ```bash
 python test_core.py
@@ -87,7 +107,9 @@ python test_core.py
 [OK] ALL TESTS PASSED
 ```
 
-### 5. Запуск Бота (Режим Сухого Запуска - Безопасно)
+Если видите ошибки, проверьте [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+### 6. Запуск Бота (Режим Сухого Запуска - Безопасно)
 
 ```bash
 python main.py

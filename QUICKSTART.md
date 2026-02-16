@@ -5,6 +5,8 @@
 
 This guide will help you install and run the arbitrage bot on your hardware in under 5 minutes.
 
+> **📖 Having issues?** See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for solutions to common problems.
+
 ---
 
 ## 🚀 One-Command Install & Run
@@ -50,7 +52,25 @@ git clone -b copilot/cleanup-stabilization-pass https://github.com/tsepper002/ar
 cd arbitrage-bot
 ```
 
-### 2. Create Virtual Environment (Recommended)
+> **⚠️ Important:** Make sure you clone the `copilot/cleanup-stabilization-pass` branch! This branch includes all the Windows compatibility fixes and removed emoji characters.
+
+### 2. Verify You Have the Correct Version
+
+Check that you have the right version:
+
+```bash
+# Check branch
+git branch
+# Should show: * copilot/cleanup-stabilization-pass
+
+# Check main.py size (should be ~136 lines, not 900+)
+wc -l main.py
+# Or on Windows: python -c "print(len(open('main.py').readlines()))"
+```
+
+If you see issues or wrong version, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+### 3. Create Virtual Environment (Recommended)
 
 **Windows:**
 ```powershell
@@ -64,7 +84,7 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 
-### 3. Install Dependencies
+### 4. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -76,7 +96,7 @@ pip install -r requirements.txt
 - `websocket-client` - WebSocket client library
 - `requests` - HTTP library
 
-### 4. Verify Installation
+### 5. Verify Installation
 
 ```bash
 python test_core.py
@@ -87,7 +107,9 @@ You should see:
 [OK] ALL TESTS PASSED
 ```
 
-### 5. Run the Bot (Dry Run Mode - Safe)
+If you see errors, check [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+### 6. Run the Bot (Dry Run Mode - Safe)
 
 ```bash
 python main.py
