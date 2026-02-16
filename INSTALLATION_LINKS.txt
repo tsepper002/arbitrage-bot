@@ -1,0 +1,73 @@
+═══════════════════════════════════════════════════════════════
+  ССЫЛКИ ДЛЯ БЫСТРОЙ УСТАНОВКИ И ЗАПУСКА БОТА
+  LINKS FOR QUICK INSTALLATION AND LAUNCH OF THE BOT
+═══════════════════════════════════════════════════════════════
+
+🌍 REPOSITORY / РЕПОЗИТОРИЙ:
+https://github.com/tsepper002/arbitrage-bot
+
+📌 BRANCH / ВЕТКА:
+copilot/cleanup-stabilization-pass
+
+═══════════════════════════════════════════════════════════════
+📚 QUICK START GUIDES / РУКОВОДСТВА ПО БЫСТРОМУ СТАРТУ
+═══════════════════════════════════════════════════════════════
+
+🇬🇧 ENGLISH VERSION:
+https://github.com/tsepper002/arbitrage-bot/blob/copilot/cleanup-stabilization-pass/QUICKSTART.md
+
+🇷🇺 РУССКАЯ ВЕРСИЯ:
+https://github.com/tsepper002/arbitrage-bot/blob/copilot/cleanup-stabilization-pass/QUICKSTART.ru.md
+
+═══════════════════════════════════════════════════════════════
+🚀 ONE-COMMAND INSTALL / УСТАНОВКА ОДНОЙ КОМАНДОЙ
+═══════════════════════════════════════════════════════════════
+
+WINDOWS (PowerShell):
+─────────────────────────────────────────────────────────────
+git clone -b copilot/cleanup-stabilization-pass https://github.com/tsepper002/arbitrage-bot.git
+cd arbitrage-bot
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python main.py
+
+
+LINUX / macOS:
+─────────────────────────────────────────────────────────────
+git clone -b copilot/cleanup-stabilization-pass https://github.com/tsepper002/arbitrage-bot.git
+cd arbitrage-bot
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python main.py
+
+═══════════════════════════════════════════════════════════════
+📖 ADDITIONAL DOCUMENTATION / ДОПОЛНИТЕЛЬНАЯ ДОКУМЕНТАЦИЯ
+═══════════════════════════════════════════════════════════════
+
+Full README:
+https://github.com/tsepper002/arbitrage-bot/blob/copilot/cleanup-stabilization-pass/README.md
+
+Implementation Summary:
+https://github.com/tsepper002/arbitrage-bot/blob/copilot/cleanup-stabilization-pass/IMPLEMENTATION_SUMMARY.md
+
+═══════════════════════════════════════════════════════════════
+✅ REQUIREMENTS / ТРЕБОВАНИЯ
+═══════════════════════════════════════════════════════════════
+
+- Python 3.9+ 
+- Git
+- Internet connection
+
+═══════════════════════════════════════════════════════════════
+🛡️ SAFETY / БЕЗОПАСНОСТЬ
+═══════════════════════════════════════════════════════════════
+
+✅ Default DRY RUN mode (no real trading)
+✅ Режим DRY RUN по умолчанию (без реальной торговли)
+
+The bot will NOT place real orders unless explicitly configured!
+Бот НЕ будет размещать реальные ордера без явной настройки!
+
+═══════════════════════════════════════════════════════════════
