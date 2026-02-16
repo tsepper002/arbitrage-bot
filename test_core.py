@@ -24,7 +24,7 @@ def test_configuration():
     assert settings.MAX_EXPOSURE_USDT > 0, "MAX_EXPOSURE_USDT should be positive"
     assert settings.SAFETY_FACTOR > 0 and settings.SAFETY_FACTOR <= 1, "SAFETY_FACTOR should be between 0 and 1"
     
-    print("✅ Configuration tests passed")
+    print("[OK] Configuration tests passed")
 
 
 def test_order_executor_dry_run():
@@ -50,15 +50,15 @@ def test_order_executor_dry_run():
     # Test execution
     result = executor.execute_arbitrage(opportunity)
     assert result['status'] == 'simulated', "Should simulate in dry run mode"
-    print(f"✅ Dry run execution: {result['status']}")
+    print(f"[OK] Dry run execution: {result['status']}")
     
     # Test statistics
     stats = executor.get_statistics()
     assert stats['total_orders'] == 1, "Should have 1 simulated order"
     assert stats['mode'] == 'dry_run', "Should be in dry_run mode"
-    print(f"✅ Statistics: {stats}")
+    print(f"[OK] Statistics: {stats}")
     
-    print("\n✅ Order executor dry run tests passed")
+    print("\n[OK] Order executor dry run tests passed")
 
 
 def test_rate_limiting():
@@ -88,16 +88,16 @@ def test_rate_limiting():
     # Should be blocked by cooldown
     result = executor.execute_arbitrage(opportunity)
     assert result['status'] == 'blocked', "Should be blocked by cooldown"
-    print(f"✅ Cooldown working: {result['reason']}")
+    print(f"[OK] Cooldown working: {result['reason']}")
     
     # Test different symbol (should work)
     opportunity2 = opportunity.copy()
     opportunity2['symbol'] = 'ETH-USDT'
     result = executor.execute_arbitrage(opportunity2)
     assert result['status'] == 'simulated', "Different symbol should work"
-    print(f"✅ Different symbol executed: {result['status']}")
+    print(f"[OK] Different symbol executed: {result['status']}")
     
-    print("\n✅ Rate limiting tests passed")
+    print("\n[OK] Rate limiting tests passed")
 
 
 def test_health_monitoring():
@@ -118,7 +118,7 @@ def test_health_monitoring():
     assert health['connected'] == True, "Should be connected"
     assert health['tracked_symbols'] == 2, "Should track 2 symbols"
     assert health['is_healthy'] == True, "Should be healthy"
-    print(f"✅ Health status: {health}")
+    print(f"[OK] Health status: {health}")
     
     # Test reconnect helper
     reconnect = WSReconnectHelper("TestExchange")
@@ -128,9 +128,9 @@ def test_health_monitoring():
     reconnect.on_successful_connection()
     delay = reconnect.get_next_delay()
     assert delay == settings.WS_RECONNECT_DELAY_SEC, "Should use initial delay"
-    print(f"✅ Reconnect delay: {delay}s")
+    print(f"[OK] Reconnect delay: {delay}s")
     
-    print("\n✅ Health monitoring tests passed")
+    print("\n[OK] Health monitoring tests passed")
 
 
 def main():
@@ -146,7 +146,7 @@ def main():
         test_health_monitoring()
         
         print("\n" + "="*70)
-        print(" ✅ ALL TESTS PASSED")
+        print(" [OK] ALL TESTS PASSED")
         print("="*70)
         print("\nThe arbitrage bot core functionality is working correctly!")
         print("Network connectivity to exchanges is required for live operation.")
@@ -155,10 +155,10 @@ def main():
         return 0
         
     except AssertionError as e:
-        print(f"\n❌ TEST FAILED: {e}")
+        print(f"\n[FAILED] TEST FAILED: {e}")
         return 1
     except Exception as e:
-        print(f"\n❌ UNEXPECTED ERROR: {e}")
+        print(f"\n[ERROR] UNEXPECTED ERROR: {e}")
         import traceback
         traceback.print_exc()
         return 1

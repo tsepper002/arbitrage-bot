@@ -8,6 +8,7 @@ import logging
 from typing import List
 import sys
 import os
+import io
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -19,10 +20,24 @@ from exchanges.kucoin_ws import KucoinWS
 from exchanges.htx_ws import HtxWS
 import settings
 
-# Configure logging
+# Fix Windows console encoding issues (emojis and unicode characters)
+# Wrap stdout/stderr with UTF-8 encoding and error handling
+if sys.platform == 'win32':
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+    if hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+
+# Configure logging with UTF-8 safe handler
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(getattr(logging, settings.LOG_LEVEL))
+formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+handler.setFormatter(formatter)
+
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[handler]
 )
 logger = logging.getLogger("arbitrage_bot")
 
