@@ -29,14 +29,14 @@ if sys.platform == 'win32':
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 # Configure logging with UTF-8 safe handler
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(getattr(logging, settings.LOG_LEVEL))
-formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+formatter = logging.Formatter(LOG_FORMAT)
 handler.setFormatter(formatter)
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[handler]
 )
 logger = logging.getLogger("arbitrage_bot")

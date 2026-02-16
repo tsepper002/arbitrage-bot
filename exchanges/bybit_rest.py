@@ -1,5 +1,6 @@
 import aiohttp
 import socket
+from .base import BaseExchange
 
 class BybitREST(BaseExchange):
     def __init__(self, api_key: str, api_secret: str):
