@@ -29,12 +29,12 @@ class WSHealthMonitor:
         """Call when connection is established."""
         self._connection_start_time = time.time()
         self._is_connected = True
-        logger.info(f"✅ {self.exchange_name}: Connected")
+        logger.info(f"[OK] {self.exchange_name}: Connected")
     
     def on_connection_close(self):
         """Call when connection is closed."""
         self._is_connected = False
-        logger.warning(f"❌ {self.exchange_name}: Disconnected")
+        logger.warning(f"[DISCONNECTED] {self.exchange_name}: Disconnected")
     
     def on_message_received(self, symbol: Optional[str] = None):
         """
@@ -96,7 +96,7 @@ class WSHealthMonitor:
         self._last_health_check = current_time
         health = self.check_health()
         
-        status_icon = "✅" if health['is_healthy'] else "⚠️"
+        status_icon = "[OK]" if health['is_healthy'] else "[WARNING]"
         logger.info(
             f"{status_icon} {self.exchange_name} Health: "
             f"Connected={health['connected']}, "

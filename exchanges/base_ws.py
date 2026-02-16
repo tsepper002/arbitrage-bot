@@ -201,7 +201,7 @@ class BaseWebSocket(ABC):
         self._last_health_check = current_time
         health = self.check_health()
         
-        status_icon = "✅" if health['is_healthy'] else "⚠️"
+        status_icon = "[OK]" if health['is_healthy'] else "[WARNING]"
         logger.info(
             f"{status_icon} {self.exchange_name} Health: "
             f"Connected={health['connected']}, "

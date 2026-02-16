@@ -168,16 +168,16 @@ def is_production_ready() -> bool:
     issues = []
     
     if not DRY_RUN:
-        issues.append("⚠️  DRY_RUN is disabled - bot will place REAL orders!")
+        issues.append("[WARNING] DRY_RUN is disabled - bot will place REAL orders!")
     
     if MIN_NET_ROI_PCT < 0.05:
-        issues.append(f"⚠️  MIN_NET_ROI_PCT ({MIN_NET_ROI_PCT}%) is very low - may result in unprofitable trades")
+        issues.append(f"[WARNING] MIN_NET_ROI_PCT ({MIN_NET_ROI_PCT}%) is very low - may result in unprofitable trades")
     
     if MAX_EXPOSURE_USDT > 1000:
-        issues.append(f"⚠️  MAX_EXPOSURE_USDT (${MAX_EXPOSURE_USDT}) is quite high")
+        issues.append(f"[WARNING] MAX_EXPOSURE_USDT (${MAX_EXPOSURE_USDT}) is quite high")
     
     if SAFETY_FACTOR > 0.8:
-        issues.append(f"⚠️  SAFETY_FACTOR ({SAFETY_FACTOR}) is high - may cause slippage")
+        issues.append(f"[WARNING] SAFETY_FACTOR ({SAFETY_FACTOR}) is high - may cause slippage")
     
     if issues:
         return False, issues
@@ -190,8 +190,8 @@ if __name__ == "__main__":
     print(get_config_summary())
     ready, issues = is_production_ready()
     if not ready:
-        print("\n⚠️  Configuration Issues:")
+        print("\n[WARNING] Configuration Issues:")
         for issue in issues:
             print(f"  {issue}")
     else:
-        print("\n✅ Configuration looks safe")
+        print("\n[OK] Configuration looks safe")

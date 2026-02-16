@@ -14,10 +14,11 @@ class KuCoin:
     def __init__(self):
         self.online = False
 
-        # 🔥 КЛЮЧЕВОЙ ФИКС — ТОЛЬКО IPv4
+        # Force IPv4 with system resolver for DNS reliability
         self.connector = aiohttp.TCPConnector(
             family=socket.AF_INET,
-            ssl=True
+            ssl=True,
+            resolver=aiohttp.ThreadedResolver()
         )
 
         self.timeout = aiohttp.ClientTimeout(total=5)

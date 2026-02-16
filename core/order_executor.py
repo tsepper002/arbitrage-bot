@@ -32,9 +32,9 @@ class OrderExecutor:
         self.last_trade_time_per_symbol: Dict[str, float] = {}  # symbol -> last trade timestamp
         
         if self.dry_run:
-            logger.info("🔵 OrderExecutor initialized in DRY RUN mode (safe simulation)")
+            logger.info("[DRY RUN] OrderExecutor initialized in DRY RUN mode (safe simulation)")
         else:
-            logger.warning("🔴 OrderExecutor initialized in LIVE mode - REAL ORDERS WILL BE PLACED!")
+            logger.warning("[LIVE] OrderExecutor initialized in LIVE mode - REAL ORDERS WILL BE PLACED!")
     
     def can_trade(self, symbol: str) -> Tuple[bool, Optional[str]]:
         """
@@ -128,7 +128,7 @@ class OrderExecutor:
         roi_pct = opp['roi_pct']
         
         logger.info(
-            f"💰 [DRY RUN] ARBITRAGE OPPORTUNITY DETECTED\n"
+            f"[DRY RUN] ARBITRAGE OPPORTUNITY DETECTED\n"
             f"   Symbol: {symbol}\n"
             f"   Buy:  {qty:.6f} @ ${buy_price:.6f} on {buy_ex} (cost: ${qty * buy_price:.2f})\n"
             f"   Sell: {qty:.6f} @ ${sell_price:.6f} on {sell_ex} (receive: ${qty * sell_price:.2f})\n"
@@ -175,7 +175,7 @@ class OrderExecutor:
         sell_ex = opp['sell_ex']
         
         logger.error(
-            f"🔴 LIVE ORDER EXECUTION NOT IMPLEMENTED\n"
+            f"[LIVE] LIVE ORDER EXECUTION NOT IMPLEMENTED\n"
             f"   Attempted to execute: {symbol} on {buy_ex} -> {sell_ex}\n"
             f"   This requires authenticated exchange clients and should be implemented carefully.\n"
             f"   Set DRY_RUN=True in settings.py to use simulation mode."
@@ -241,7 +241,7 @@ class OrderExecutor:
     def print_statistics(self):
         """Print execution statistics to console."""
         stats = self.get_statistics()
-        mode_str = "🔵 DRY RUN" if self.dry_run else "🔴 LIVE"
+        mode_str = "[DRY RUN]" if self.dry_run else "[LIVE]"
         
         print(f"\n{'='*60}")
         print(f"  Order Executor Statistics ({mode_str})")

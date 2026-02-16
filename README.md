@@ -2,6 +2,8 @@
 
 A robust, efficient arbitrage bot for detecting and executing cross-exchange arbitrage opportunities across Bybit, KuCoin, and HTX (Huobi).
 
+> **🚀 [Quick Start Guide](QUICKSTART.md)** - Install and run the bot in under 5 minutes!
+
 ## Features
 
 - **Real-time Order Book Monitoring**: WebSocket connections to multiple exchanges with automatic reconnection
