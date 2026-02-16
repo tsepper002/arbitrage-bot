@@ -94,6 +94,16 @@ import settings
 # Configure logging with separate levels for console and file
 # Console: INFO and above (clean output, no DEBUG spam)
 # File: DEBUG and above (full details for debugging)
+
+# Fix Windows encoding issues - try to use UTF-8 for emoji support
+import sys
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass  # Ignore if reconfigure not available
+
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)  # Only INFO+ in console
 console_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
