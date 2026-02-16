@@ -283,6 +283,12 @@ class KucoinWS:
                 )
                 self._ws = ws
                 ws.run_forever(ping_interval=20, ping_timeout=10)
+                
+                # Check if stopping BEFORE logging reconnect message
+                if self._stopping:
+                    logger.info(f"{self.exchange}: Stopped gracefully, no reconnect")
+                    break
+                
                 logger.warning(f"{self.exchange}: run_forever returned, will reconnect")
             except Exception as e:
                 logger.exception(f"KuCoin run error - reconnecting: {e}")

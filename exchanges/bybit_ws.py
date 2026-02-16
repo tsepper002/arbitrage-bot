@@ -263,12 +263,21 @@ class BybitWS:
                 )
                 self._ws = ws
                 ws.run_forever(ping_interval=20, ping_timeout=10)
+                
+                # Check if stopping BEFORE logging reconnect message
+                if self._stopping:
+                    logger.info(f"{self.exchange}: Stopped gracefully, no reconnect")
+                    break
+                
                 logger.warning(f"{self.exchange}: run_forever returned, will reconnect")
                 
                 # Mark as disconnected
                 self._health_monitor.on_connection_close()
                 
             except Exception as e:
+                if self._stopping:
+                    logger.info(f"{self.exchange}: Stopped during exception, no reconnect")
+                    break
                 logger.exception(f"Bybit run error - reconnecting: {e}")
                 self._health_monitor.on_connection_close()
             

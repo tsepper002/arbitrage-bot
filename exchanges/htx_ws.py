@@ -262,8 +262,17 @@ class HtxWS:
                 self._ws = ws
                 # disable control ping (use app-level ping/pong)
                 ws.run_forever(ping_interval=None, ping_timeout=None)
+                
+                # Check if stopping BEFORE logging reconnect message
+                if self._stopping:
+                    logger.info(f"{self.exchange}: Stopped gracefully, no reconnect")
+                    break
+                
                 logger.warning(f"{self.exchange}: run_forever returned, will reconnect")
             except Exception:
+                if self._stopping:
+                    logger.info(f"{self.exchange}: Stopped during exception, no reconnect")
+                    break
                 logger.exception("HTX run error - reconnecting")
             time.sleep(backoff + random.uniform(0, backoff * 0.2))
             backoff = min(backoff * 2, 60.0)

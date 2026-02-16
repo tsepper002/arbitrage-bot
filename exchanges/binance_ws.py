@@ -67,12 +67,22 @@ class BinanceWS:
     
     def _build_ws_url(self) -> str:
         """Build WebSocket URL with all symbol streams."""
-        # Binance supports multiple streams in one connection
-        # Format: /stream?streams=<streamName1>/<streamName2>/<streamName3>
-        # Use @depth (not @depth20) and remove @100ms which is invalid
-        streams = [f"{symbol}@depth" for symbol in self.binance_symbols]
-        stream_path = "/".join(streams)
-        url = f"{self.ws_base}/stream?streams={stream_path}"
+        # Binance WebSocket Stream endpoints:
+        # Single stream: wss://stream.binance.com:9443/ws/<streamName>
+        # Combined streams: wss://stream.binance.com:9443/stream?streams=<streamName1>/<streamName2>
+        # Note: @depth or @depth5 or @depth10 or @depth20 (NOT @depth20@100ms)
+        
+        # For multiple symbols, use combined stream endpoint
+        if len(self.binance_symbols) == 1:
+            # Single stream format
+            symbol = self.binance_symbols[0]
+            url = f"{self.ws_base}/ws/{symbol}@depth"
+        else:
+            # Combined streams format: streams separated by /
+            streams = [f"{symbol}@depth" for symbol in self.binance_symbols]
+            stream_path = "/".join(streams)
+            url = f"{self.ws_base}/stream?streams={stream_path}"
+        
         return url
     
     async def connect(self):
