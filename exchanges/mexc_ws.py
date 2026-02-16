@@ -40,6 +40,7 @@ class MexcWS:
         self._ws = None
         self._ping_interval = ping_interval
         self._stop = False
+        self._stopping = False  # Flag to prevent reconnects during shutdown
         self.price_store = price_store
         self.loop = loop
         self.exchange = exchange_name
@@ -52,6 +53,11 @@ class MexcWS:
             "User-Agent": "Mozilla/5.0 (compatible; ArbitrageBot/1.0)"
         }
         while not self._stop:
+            # Check if we're stopping
+            if self._stopping:
+                logger.info(f"{self.exchange}: Stopping, no reconnect")
+                break
+                
             try:
                 logger.info(f"MEXC: connecting to {self.ws_url} for {self.symbol_norm} ...")
                 # Передаём extra_headers, увеличиваем open_timeout
@@ -194,10 +200,12 @@ class MexcWS:
         return self.price
 
     async def stop(self):
+        self._stopping = True  # Prevent reconnect attempts during shutdown
         self._stop = True
         if self._ws is not None:
             try:
                 await self._ws.close()
+                logger.info(f"{self.exchange} WebSocket stopped gracefully")
             except Exception:
                 pass
 

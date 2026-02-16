@@ -49,6 +49,7 @@ class KucoinWS:
         # Add health monitoring
         self._health_monitor = WSHealthMonitor(exchange_name)
         self._reconnect_helper = WSReconnectHelper(exchange_name)
+        self._stopping = False  # Flag to prevent reconnects during shutdown
         
         self._thread = threading.Thread(target=self._run, daemon=True)
         if stagger_start and stagger_start > 0:
@@ -255,10 +256,17 @@ class KucoinWS:
 
     def _on_close(self, ws, code, reason):
         logger.info(f"{self.exchange} WS closed: {code} {reason}")
+        if self._stopping:
+            logger.info(f"{self.exchange} WebSocket stopped gracefully")
 
     def _run(self):
         backoff = 1.0
         while not self._stop.is_set():
+            # Check if we're stopping
+            if self._stopping:
+                logger.info(f"{self.exchange}: Stopping, no reconnect")
+                break
+                
             endpoint = self._prepare_endpoint()
             if not endpoint:
                 time.sleep(backoff)
@@ -282,6 +290,7 @@ class KucoinWS:
             backoff = min(backoff * 2, 60.0)
 
     def stop(self):
+        self._stopping = True  # Prevent reconnect attempts during shutdown
         self._stop.set()
         self._health_monitor.on_connection_close()
         try:

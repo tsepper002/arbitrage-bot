@@ -934,6 +934,12 @@ class IntegratedArbitrageBot:
             try:
                 exchange_name = getattr(exchange, 'name', getattr(exchange, 'exchange_name', str(type(exchange).__name__)))
                 
+                # Special handling for Binance (uses running flag)
+                if hasattr(exchange, '_stopping') and hasattr(exchange, 'running'):
+                    exchange._stopping = True
+                    exchange.running = False
+                    logger.debug(f"{exchange_name} stopping flag set")
+                
                 # Check if exchange has a stop method
                 if not hasattr(exchange, 'stop'):
                     logger.debug(f"{exchange_name} has no stop method, skipping")

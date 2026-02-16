@@ -51,6 +51,7 @@ class BinanceWS:
         
         self.ws = None
         self.running = False
+        self._stopping = False  # Flag to prevent reconnects during shutdown
         self._task = None
         
         # Start connection
@@ -85,6 +86,11 @@ class BinanceWS:
         reconnect_delay = 5
         
         while self.running:
+            # Check if we're stopping
+            if self._stopping:
+                logger.info(f"{self.exchange_name}: Stopping, no reconnect")
+                break
+                
             try:
                 url = self._build_ws_url()
                 logger.info(f"Connecting to {self.exchange_name} WebSocket...")
@@ -106,13 +112,16 @@ class BinanceWS:
                             logger.error(f"Error processing message: {e}")
                             
             except websockets.exceptions.ConnectionClosed:
-                logger.warning(f"{self.exchange_name} WebSocket connection closed, reconnecting...")
+                if not self._stopping:
+                    logger.warning(f"{self.exchange_name} WebSocket connection closed, reconnecting...")
             except Exception as e:
                 logger.error(f"{self.exchange_name} WebSocket error: {e}")
             
-            if self.running:
+            if self.running and not self._stopping:
                 logger.info(f"Reconnecting in {reconnect_delay} seconds...")
                 await asyncio.sleep(reconnect_delay)
+        
+        logger.info(f"{self.exchange_name} WebSocket stopped gracefully")
     
     async def _process_message(self, data: dict):
         """Process incoming WebSocket message."""
