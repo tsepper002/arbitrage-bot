@@ -5,6 +5,7 @@ Sends automatic alerts and responds to commands.
 """
 import asyncio
 import logging
+import socket
 import aiohttp
 from typing import Optional, Dict, Any
 import settings
@@ -63,7 +64,9 @@ class TelegramBot:
                 "disable_web_page_preview": True
             }
             
-            async with aiohttp.ClientSession() as session:
+            # Use IPv4 only to avoid DNS resolution issues
+            connector = aiohttp.TCPConnector(family=socket.AF_INET)
+            async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.post(url, json=data, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     if resp.status == 200:
                         logger.debug(f"Telegram message sent: {text[:50]}...")

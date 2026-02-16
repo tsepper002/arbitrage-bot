@@ -1,3 +1,4 @@
+import socket
 import aiohttp
 
 class BybitREST(BaseExchange):
@@ -7,7 +8,9 @@ class BybitREST(BaseExchange):
         self.base_url = "https://api.bybit.com"
 
     async def get_price(self, symbol: str) -> float:
-        async with aiohttp.ClientSession() as session:
+        # Use IPv4 only to avoid DNS resolution issues
+        connector = aiohttp.TCPConnector(family=socket.AF_INET)
+        async with aiohttp.ClientSession(connector=connector) as session:
             url = f"{self.base_url}/v2/public/tickers?symbol={symbol}"
             async with session.get(url) as response:
                 data = await response.json()

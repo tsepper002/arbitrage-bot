@@ -6,6 +6,7 @@ Implements order placement, cancellation, balance queries, and withdrawals.
 import time
 import hmac
 import hashlib
+import socket
 from typing import Dict, Any, Optional, List
 import aiohttp
 import logging
@@ -27,7 +28,9 @@ class BybitRESTClient(BaseRESTClient):
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session (reuse for efficiency)."""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            # Use IPv4 only to avoid DNS resolution issues
+            connector = aiohttp.TCPConnector(family=socket.AF_INET)
+            self._session = aiohttp.ClientSession(connector=connector)
         return self._session
     
     async def close(self):
