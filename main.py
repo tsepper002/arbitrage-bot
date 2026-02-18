@@ -524,7 +524,7 @@ class IntegratedArbitrageBot:
                 loop=self.loop,
                 api_key=None,
                 secret_key=None,
-                ws_url="wss://contract.mexc.com/ws",
+                ws_url="wss://wbs.mexc.com/ws",  # FIXED: Spot API endpoint (was contract)
                 exchange_name="MEXC"
             )
             await asyncio.sleep(stagger)
