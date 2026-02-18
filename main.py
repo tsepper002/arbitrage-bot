@@ -17,6 +17,7 @@ except Exception:
 
 # Now safe to import everything else
 import asyncio
+import argparse
 import logging
 import os
 from typing import List, Dict, Optional
@@ -1000,6 +1001,23 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Arbitrage Bot - Cryptocurrency Arbitrage Trading')
+    parser.add_argument('--mode', 
+                       choices=['dry-run', 'real'], 
+                       default='dry-run',
+                       help='Trading mode: dry-run (safe simulation) or real (live trading with real money)')
+    args = parser.parse_args()
+    
+    # Override DRY_RUN setting based on CLI argument
+    import settings
+    if args.mode == 'real':
+        settings.DRY_RUN = False
+        print("🔴 REAL TRADING MODE - Using real money! Be careful!")
+    else:
+        settings.DRY_RUN = True
+        print("🔵 DRY RUN MODE - Safe simulation (no real trades)")
+    
     try:
         exit_code = asyncio.run(main())
         sys.exit(exit_code)
