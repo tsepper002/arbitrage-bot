@@ -8,6 +8,7 @@ import time
 import hmac
 import hashlib
 import urllib.parse
+import socket
 from typing import Dict, Any, Optional, List
 import aiohttp
 import logging
@@ -28,7 +29,13 @@ class MEXCRESTClient(BaseRESTClient):
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            # Use IPv4 + ThreadedResolver to avoid DNS resolution issues
+            connector = aiohttp.TCPConnector(
+                family=socket.AF_INET,
+                resolver=aiohttp.ThreadedResolver()
+            )
+            timeout = aiohttp.ClientTimeout(total=30, sock_connect=10)
+            self._session = aiohttp.ClientSession(connector=connector, timeout=timeout)
         return self._session
     
     async def close(self):
@@ -216,3 +223,61 @@ class MEXCRESTClient(BaseRESTClient):
             if "code" in data and data["code"] != 200:
                 raise Exception(f"MEXC withdrawal failed: {data}")
             return data
+    
+    async def get_deposit_address(self, currency: str) -> dict:
+        """
+        Get deposit address for a specific currency on MEXC.
+        
+        Args:
+            currency: Currency symbol (e.g., 'USDT', 'BTC')
+            
+        Returns:
+            dict: Deposit address information
+        """
+        try:
+            path = "/api/v3/capital/deposit/address"
+            url = f"{self.BASE_URL}{path}"
+            
+            params = {
+                "coin": currency,
+                "timestamp": int(time.time() * 1000)
+            }
+            
+            params["signature"] = self._generate_signature(params)
+            
+            headers = self._get_headers()
+            session = await self._get_session()
+            
+            async with session.get(url, params=params, headers=headers) as resp:
+                data = await resp.json()
+                if "code" in data and data["code"] == 200:
+                    return data
+                else:
+                    logger.error(f"Error getting MEXC deposit address for {currency}: {data}")
+                    return {}
+        except Exception as e:
+            logger.error(f"Error getting deposit address for {currency}: {e}")
+            return {}
+    
+    async def get_trading_pairs(self) -> list:
+        """
+        Get all available trading pairs on MEXC.
+        
+        Returns:
+            list: List of trading pair information
+        """
+        try:
+            path = "/api/v3/exchangeInfo"
+            url = f"{self.BASE_URL}{path}"
+            session = await self._get_session()
+            
+            async with session.get(url) as resp:
+                data = await resp.json()
+                if "symbols" in data:
+                    return data.get("symbols", [])
+                else:
+                    logger.error(f"Error getting MEXC trading pairs: {data}")
+                    return []
+        except Exception as e:
+            logger.error(f"Error getting trading pairs: {e}")
+            return []

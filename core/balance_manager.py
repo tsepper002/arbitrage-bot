@@ -61,8 +61,51 @@ class BalanceManager:
         success_count = sum(1 for r in results if not isinstance(r, Exception))
         logger.info(f"✅ Initialized balances for {success_count}/{len(results)} exchanges")
         
+        # If DRY_RUN mode and no balances loaded, use mock data
+        if settings.DRY_RUN and success_count == 0:
+            logger.info("ℹ️  DRY_RUN mode: Using mock balances for testing (real network unavailable)")
+            self._use_mock_balances()
+            success_count = len(self.rest_clients)
+        
         self.initialized = True
         return success_count > 0
+    
+    def _use_mock_balances(self):
+        """Use mock balance data for DRY_RUN testing when network unavailable."""
+        mock_balance = {
+            'USDT': 30.0,   # $30 per exchange for testing (user requested)
+            'BTC': 0.0003,  # ~$20 worth
+            'ETH': 0.01,    # ~$19 worth
+            'BNB': 0.03,    # ~$18 worth
+            'SOL': 0.2      # ~$17 worth
+        }
+        
+        for exchange_name in self.rest_clients.keys():
+            self.balances[exchange_name] = mock_balance.copy()
+            self.last_sync[exchange_name] = time.time()
+            logger.info(f"📊 {exchange_name}: Mock balance = ${mock_balance['USDT']:.2f} USDT + crypto")
+        
+        # SHOW VIRTUAL BALANCES PROMINENTLY
+        logger.info("=" * 70)
+        logger.info("🔵 DRY_RUN MODE - VIRTUAL BALANCES")
+        logger.info("=" * 70)
+        for exchange_name in self.rest_clients.keys():
+            balance = self.balances[exchange_name]
+            total = sum(balance.values() * price for currency, price in [
+                ('USDT', 1.0), ('BTC', 68500), ('ETH', 3500), 
+                ('BNB', 350), ('SOL', 85)
+            ] if currency in balance)
+            usdt = balance.get('USDT', 0)
+            logger.info(f"  {exchange_name:12} | USDT: ${usdt:>8.2f} | Total: ${total:>8.2f} (VIRTUAL)")
+        
+        total_capital = sum(sum(b.values() * price for currency, price in [
+            ('USDT', 1.0), ('BTC', 68500), ('ETH', 3500), 
+            ('BNB', 350), ('SOL', 85)
+        ] if currency in b) for b in self.balances.values())
+        logger.info("=" * 70)
+        logger.info(f"💰 Total Virtual Capital: ${total_capital:.2f}")
+        logger.info("=" * 70)
+        logger.info("✅ Mock balances loaded for all exchanges")
     
     async def _fetch_balance(self, exchange_name: str, client) -> Dict[str, float]:
         """
@@ -130,6 +173,11 @@ class BalanceManager:
         """
         Check if exchange has sufficient balance for trade.
         
+        Uses dynamic safety margins:
+        - Small balances (<$50): 5% buffer for flexibility
+        - Medium balances ($50-$200): 10% buffer
+        - Large balances (>$200): 15% buffer for safety
+        
         Returns:
             (has_sufficient, reason) tuple
         """
@@ -147,9 +195,19 @@ class BalanceManager:
         if current_balance < amount:
             return False, f"Insufficient {currency}: have {current_balance:.4f}, need {amount:.4f}"
         
-        # Require at least 10% buffer
-        if current_balance < amount * 1.1:
-            return False, f"Balance too low for safety margin: {current_balance:.4f} < {amount * 1.1:.4f}"
+        # Dynamic safety margin based on balance size
+        if current_balance < 50:
+            safety_margin = 1.05  # 5% for small accounts
+        elif current_balance < 200:
+            safety_margin = 1.10  # 10% for medium accounts
+        else:
+            safety_margin = 1.15  # 15% for large accounts
+        
+        if current_balance < amount * safety_margin:
+            return False, (
+                f"Balance too low for safety margin: {current_balance:.4f} "
+                f"< {amount * safety_margin:.4f} (need {(safety_margin-1)*100:.0f}% buffer)"
+            )
         
         return True, None
     

@@ -38,7 +38,13 @@ class ArbitrageEngine:
                  topk: Optional[int] = None,
                  executor: Optional[OrderExecutor] = None,
                  risk_manager = None,
-                 strategy_manager = None):
+                 strategy_manager = None,
+                 flash_crash_protector = None,
+                 wash_trading_filter = None,
+                 orderbook_imbalance_detector = None,
+                 trade_journal = None,
+                 profit_attribution = None,
+                 metrics_collector = None):
         self.store = store
         self.params = EXCHANGE_PARAMS
         
@@ -68,6 +74,14 @@ class ArbitrageEngine:
         # Optional integrations
         self.risk_manager = risk_manager
         self.strategy_manager = strategy_manager
+        
+        # Professional components
+        self.flash_crash_protector = flash_crash_protector
+        self.wash_trading_filter = wash_trading_filter
+        self.orderbook_imbalance_detector = orderbook_imbalance_detector
+        self.trade_journal = trade_journal
+        self.profit_attribution = profit_attribution
+        self.metrics_collector = metrics_collector
 
         # Event-driven scanning state
         self.updated_symbols: Set[str] = set()
@@ -125,6 +139,15 @@ class ArbitrageEngine:
         return max(qty, 0.0)
 
     async def scan_once(self, symbol: str, prefunded: bool = True) -> List[Dict]:
+        # Cleanup old entries from recent_cache to prevent memory leak
+        now = time.time()
+        cutoff = now - 60.0  # Remove entries older than 60 seconds
+        keys_to_remove = [k for k, ts in self.recent_cache.items() if ts < cutoff]
+        for k in keys_to_remove:
+            del self.recent_cache[k]
+        if keys_to_remove:
+            logger.debug(f"Cleaned {len(keys_to_remove)} old entries from recent_cache")
+        
         snap = self.store.snapshot()
         exmap = snap.get(symbol, {})
         exchanges = list(exmap.keys())
@@ -198,6 +221,24 @@ class ArbitrageEngine:
 
                 invested = buy_avg * filled
                 roi_pct = (net / invested) * 100 if invested else 0.0
+                
+                # PROFESSIONAL RISK CHECKS
+                # P1: Flash Crash Protection - Check if market is safe to trade
+                if self.flash_crash_protector:
+                    if self.flash_crash_protector.should_stop_trading(symbol):
+                        logger.warning(f"⚠️ Flash crash protection activated for {symbol}, skipping trade")
+                        if self.metrics_collector:
+                            self.metrics_collector.record('flash_crash_blocks', 1)
+                        continue
+                
+                # P2: Orderbook Imbalance Detection - Enhance decision with flow analysis
+                # (This is more for HFT but can inform us about market pressure)
+                
+                # P3: Record metrics for monitoring
+                if self.metrics_collector:
+                    self.metrics_collector.record('opportunities_found', 1)
+                    self.metrics_collector.record('roi_pct', roi_pct)
+                    self.metrics_collector.record('net_profit_usdt', net)
 
                 info = {
                     "symbol": symbol,
@@ -221,6 +262,13 @@ class ArbitrageEngine:
                         self.recent_cache[key] = now
                         self._persist_opportunity(info)
                         res.append(info)
+                        
+                        # USER-FRIENDLY INFO LOGGING
+                        logger.info(f"💰 OPPORTUNITY: {symbol} | Buy {buy_ex} @ {buy_avg:.6f} → Sell {sell_ex} @ {sell_avg:.6f} | ROI: {roi_pct:.3f}% | Net: ${net:.2f}")
+                elif roi_pct > 0:
+                    # Log near-miss opportunities occasionally (for debugging)
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Near-miss: {symbol} {buy_ex}->{sell_ex} ROI={roi_pct:.3f}% (need {self.min_net_pct}%)")
         
         # Sort by net profit
         res.sort(key=lambda x: x["net"], reverse=True)
@@ -239,7 +287,9 @@ class ArbitrageEngine:
 
     async def run(self, symbols: List[str]):
         """Main scanning loop with event-driven optimization."""
-        logger.info(f"Starting arbitrage engine for {len(symbols)} symbols")
+        logger.info(f"🚀 Starting arbitrage engine for {len(symbols)} symbols: {', '.join(symbols)}")
+        logger.info(f"⚙️ Settings: MIN_ROI={self.min_net_pct}%, MAX_EXPOSURE=${self.max_exposure_usdt}, SCAN_INTERVAL={settings.SCAN_INTERVAL_SEC}s")
+        logger.info(f"📊 Waiting for price data from exchanges...")
         last_stats_print = time.time()
         
         while True:
@@ -309,6 +359,40 @@ class ArbitrageEngine:
                                 execution_time=execution_time
                             )
                         
+                        # PROFESSIONAL ANALYTICS: Record trade details
+                        if result.get('trade_info'):
+                            trade_info = result['trade_info']
+                            
+                            # Record to Trade Journal
+                            if self.trade_journal:
+                                self.trade_journal.record_trade({
+                                    'symbol': o['symbol'],
+                                    'side': 'buy_sell',  # arbitrage
+                                    'amount': o['qty'],
+                                    'price': o['buy_avg'],
+                                    'fee': trade_info.get('total_fees', 0),
+                                    'profit': trade_info.get('net_profit', 0),
+                                    'strategy': o.get('strategy', 'cross_exchange'),
+                                    'exchange': f"{o['buy_ex']}/{o['sell_ex']}",
+                                    'notes': f"ROI: {o.get('roi_pct', 0):.3f}%"
+                                })
+                            
+                            # Record to Profit Attribution
+                            if self.profit_attribution:
+                                self.profit_attribution.add_trade({
+                                    'strategy': o.get('strategy', 'cross_exchange'),
+                                    'exchange': o['buy_ex'],
+                                    'symbol': o['symbol'],
+                                    'profit': trade_info.get('net_profit', 0)
+                                })
+                            
+                            # Record metrics
+                            if self.metrics_collector:
+                                self.metrics_collector.record('trades_executed', 1)
+                                self.metrics_collector.record('execution_time_ms', result.get('execution_time', 0) * 1000)
+                                if result['status'] == 'success':
+                                    self.metrics_collector.record('successful_trades', 1)
+                        
                         # Update risk manager after trade
                         if self.risk_manager and result.get('trade_info'):
                             self.risk_manager.record_trade(result['trade_info'])
@@ -325,7 +409,26 @@ class ArbitrageEngine:
             
             # Print statistics periodically
             if time.time() - last_stats_print > 60.0:
+                # Print executor statistics
                 self.executor.print_statistics()
+                
+                # Print scanning status
+                snap = self.store.snapshot()
+                active_symbols = len([s for s in symbols if s in snap and snap[s]])
+                total_exchanges = sum(len(snap.get(s, {})) for s in symbols) if snap else 0
+                logger.info(f"📊 STATUS: Scanning {active_symbols}/{len(symbols)} symbols across {total_exchanges} exchange connections")
+                
+                # Show which exchanges have data
+                if snap:
+                    exchanges_with_data = set()
+                    for s in symbols:
+                        if s in snap:
+                            exchanges_with_data.update(snap[s].keys())
+                    if exchanges_with_data:
+                        logger.info(f"📡 Active exchanges: {', '.join(sorted(exchanges_with_data))}")
+                    else:
+                        logger.warning("⚠️ No exchange data available in price store")
+                
                 last_stats_print = time.time()
             
             # Sleep based on configured interval

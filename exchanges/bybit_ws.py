@@ -16,7 +16,7 @@ import random
 from .ws_helpers import WSHealthMonitor, WSReconnectHelper
 
 logger = logging.getLogger("bybit_ws")
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
+# Logging configured in main.py - don't override here
 
 DEPTH_LEVELS = 20
 
@@ -46,6 +46,7 @@ class BybitWS:
         # Add health monitoring
         self._health_monitor = WSHealthMonitor(exchange_name)
         self._reconnect_helper = WSReconnectHelper(exchange_name)
+        self._stopping = False  # Flag to prevent reconnects during shutdown
         
         self._thread = threading.Thread(target=self._run, daemon=True)
         if stagger_start and stagger_start > 0:
@@ -234,11 +235,18 @@ class BybitWS:
 
     def _on_close(self, ws, code, reason):
         logger.info(f"{self.exchange} WS closed: {code} {reason}")
+        if self._stopping:
+            logger.info(f"{self.exchange} WebSocket stopped gracefully")
 
     def _run(self):
         url = "wss://stream.bybit.com/v5/public/spot"
         while not self._stop.is_set():
             try:
+                # Check if we're stopping
+                if self._stopping:
+                    logger.info(f"{self.exchange}: Stopping, no reconnect")
+                    break
+                
                 # Check if reconnection should be attempted
                 should_reconnect, reason = self._reconnect_helper.should_reconnect()
                 if not should_reconnect:
@@ -255,12 +263,21 @@ class BybitWS:
                 )
                 self._ws = ws
                 ws.run_forever(ping_interval=20, ping_timeout=10)
+                
+                # Check if stopping BEFORE logging reconnect message
+                if self._stopping:
+                    logger.info(f"{self.exchange}: Stopped gracefully, no reconnect")
+                    break
+                
                 logger.warning(f"{self.exchange}: run_forever returned, will reconnect")
                 
                 # Mark as disconnected
                 self._health_monitor.on_connection_close()
                 
             except Exception as e:
+                if self._stopping:
+                    logger.info(f"{self.exchange}: Stopped during exception, no reconnect")
+                    break
                 logger.exception(f"Bybit run error - reconnecting: {e}")
                 self._health_monitor.on_connection_close()
             
@@ -270,6 +287,7 @@ class BybitWS:
                 time.sleep(delay)
 
     def stop(self):
+        self._stopping = True  # Prevent reconnect attempts during shutdown
         self._stop.set()
         self._health_monitor.on_connection_close()
         try:

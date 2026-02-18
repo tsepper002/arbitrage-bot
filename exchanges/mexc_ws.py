@@ -22,10 +22,13 @@ class MexcWS:
     def __init__(
         self,
         symbol: str,
+        price_store=None,
+        loop=None,
         api_key: Optional[str] = None,
         secret_key: Optional[str] = None,
         ws_url: str = "wss://contract.mexc.com/ws",
         ping_interval: float = 20.0,
+        exchange_name: str = "MEXC",
     ):
         # MEXC часто использует формат BTC_USDT — заменяем дефис на подчеркивание
         self.symbol = symbol
@@ -37,6 +40,10 @@ class MexcWS:
         self._ws = None
         self._ping_interval = ping_interval
         self._stop = False
+        self._stopping = False  # Flag to prevent reconnects during shutdown
+        self.price_store = price_store
+        self.loop = loop
+        self.exchange = exchange_name
 
     async def start(self):
         backoff = 1.0
@@ -46,6 +53,11 @@ class MexcWS:
             "User-Agent": "Mozilla/5.0 (compatible; ArbitrageBot/1.0)"
         }
         while not self._stop:
+            # Check if we're stopping
+            if self._stopping:
+                logger.info(f"{self.exchange}: Stopping, no reconnect")
+                break
+                
             try:
                 logger.info(f"MEXC: connecting to {self.ws_url} for {self.symbol_norm} ...")
                 # Передаём extra_headers, увеличиваем open_timeout
@@ -167,9 +179,18 @@ class MexcWS:
             if price is not None:
                 try:
                     self.price = float(price)
-                except Exception:
+                    # Update price_store if available
+                    if self.price_store and self.loop:
+                        logger.debug(f"MEXC -> update store: {self.symbol} price={self.price}")
+                        asyncio.run_coroutine_threadsafe(
+                            self.price_store.update(self.exchange, self.symbol, self.price, None, self.price, None, asyncio.get_event_loop().time()),
+                            self.loop
+                        )
+                    else:
+                        logger.info(f"MEXC {self.symbol_norm} price: {self.price}")
+                except Exception as e:
+                    logger.error(f"MEXC: failed to update price: {e}")
                     self.price = price
-                logger.info(f"MEXC {self.symbol_norm} price: {self.price}")
             else:
                 logger.debug(f"MEXC got data without price: {payload}")
         else:
@@ -179,10 +200,12 @@ class MexcWS:
         return self.price
 
     async def stop(self):
+        self._stopping = True  # Prevent reconnect attempts during shutdown
         self._stop = True
         if self._ws is not None:
             try:
                 await self._ws.close()
+                logger.info(f"{self.exchange} WebSocket stopped gracefully")
             except Exception:
                 pass
 

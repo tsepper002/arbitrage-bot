@@ -22,5 +22,4 @@ class MetricsCollector:
         for name, values in self.metrics.items():
             avg = sum(values) / len(values) if values else 0
             lines.append(f'{name} {avg}')
-        return '
-'.join(lines)
+        return '\n'.join(lines)

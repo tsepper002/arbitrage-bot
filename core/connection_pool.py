@@ -3,6 +3,7 @@ Connection Pooling Module
 Manages HTTP connection pools for efficient connection reuse across API calls.
 """
 import asyncio
+import socket
 import aiohttp
 from typing import Dict, Optional
 from collections import defaultdict
@@ -64,7 +65,10 @@ class ConnectionPool:
         """
         async with self._lock:
             if exchange not in self.pools:
+                # Use IPv4 only + ThreadedResolver to avoid DNS resolution issues
                 connector = aiohttp.TCPConnector(
+                    family=socket.AF_INET,  # IPv4 only
+                    resolver=aiohttp.ThreadedResolver(),  # Use system DNS instead of aiodns
                     limit=self.max_pool_size,
                     limit_per_host=self.max_pool_size,
                     ttl_dns_cache=300,
@@ -72,7 +76,7 @@ class ConnectionPool:
                     enable_cleanup_closed=True
                 )
                 
-                timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
+                timeout = aiohttp.ClientTimeout(total=self.timeout_seconds, sock_connect=10)
                 
                 self.pools[exchange] = aiohttp.ClientSession(
                     connector=connector,

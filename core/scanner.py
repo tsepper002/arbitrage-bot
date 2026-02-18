@@ -1,3 +1,18 @@
+"""
+DEPRECATED: This file is a legacy prototype and is no longer used by main.py.
+It contains duplicate WS client classes (BybitWS, KucoinWS, etc.) that conflict 
+with the proper implementations in exchanges/ directory.
+
+The active WebSocket implementations are in:
+- exchanges/bybit_ws.py
+- exchanges/kucoin_ws.py
+- exchanges/htx_ws.py
+- exchanges/mexc_ws.py
+- exchanges/binance_ws.py
+
+This file can be safely removed or refactored to avoid naming conflicts.
+"""
+
 import asyncio
 import websockets
 import json

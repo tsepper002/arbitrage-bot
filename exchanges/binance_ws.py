@@ -51,6 +51,7 @@ class BinanceWS:
         
         self.ws = None
         self.running = False
+        self._stopping = False  # Flag to prevent reconnects during shutdown
         self._task = None
         
         # Start connection
@@ -66,11 +67,22 @@ class BinanceWS:
     
     def _build_ws_url(self) -> str:
         """Build WebSocket URL with all symbol streams."""
-        # Binance supports multiple streams in one connection
-        # Format: /stream?streams=<streamName1>/<streamName2>/<streamName3>
-        streams = [f"{symbol}@depth20@100ms" for symbol in self.binance_symbols]
-        stream_path = "/".join(streams)
-        url = f"{self.ws_base}/stream?streams={stream_path}"
+        # Binance WebSocket Stream endpoints:
+        # Single stream: wss://stream.binance.com:9443/ws/<streamName>
+        # Combined streams: wss://stream.binance.com:9443/stream?streams=<streamName1>/<streamName2>
+        # Note: @depth or @depth5 or @depth10 or @depth20 (NOT @depth20@100ms)
+        
+        # For multiple symbols, use combined stream endpoint
+        if len(self.binance_symbols) == 1:
+            # Single stream format
+            symbol = self.binance_symbols[0]
+            url = f"{self.ws_base}/ws/{symbol}@depth"
+        else:
+            # Combined streams format: streams separated by /
+            streams = [f"{symbol}@depth" for symbol in self.binance_symbols]
+            stream_path = "/".join(streams)
+            url = f"{self.ws_base}/stream?streams={stream_path}"
+        
         return url
     
     async def connect(self):
@@ -84,6 +96,11 @@ class BinanceWS:
         reconnect_delay = 5
         
         while self.running:
+            # Check if we're stopping
+            if self._stopping:
+                logger.info(f"{self.exchange_name}: Stopping, no reconnect")
+                break
+                
             try:
                 url = self._build_ws_url()
                 logger.info(f"Connecting to {self.exchange_name} WebSocket...")
@@ -105,13 +122,25 @@ class BinanceWS:
                             logger.error(f"Error processing message: {e}")
                             
             except websockets.exceptions.ConnectionClosed:
-                logger.warning(f"{self.exchange_name} WebSocket connection closed, reconnecting...")
+                if not self._stopping:
+                    logger.warning(f"{self.exchange_name} WebSocket connection closed, reconnecting...")
             except Exception as e:
-                logger.error(f"{self.exchange_name} WebSocket error: {e}")
+                error_str = str(e)
+                # Handle HTTP 451 (Unavailable For Legal Reasons) - geographic restriction
+                if '451' in error_str:
+                    logger.error(f"❌ {self.exchange_name} unavailable in your region (HTTP 451 - geographic restriction)")
+                    logger.info(f"ℹ️  Bot will continue without {self.exchange_name}")
+                    self._stopping = True  # Don't reconnect
+                    self.running = False
+                    break
+                else:
+                    logger.error(f"{self.exchange_name} WebSocket error: {e}")
             
-            if self.running:
+            if self.running and not self._stopping:
                 logger.info(f"Reconnecting in {reconnect_delay} seconds...")
                 await asyncio.sleep(reconnect_delay)
+        
+        logger.info(f"{self.exchange_name} WebSocket stopped gracefully")
     
     async def _process_message(self, data: dict):
         """Process incoming WebSocket message."""

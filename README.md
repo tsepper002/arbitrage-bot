@@ -2,9 +2,28 @@
 
 A robust, efficient arbitrage bot for detecting and executing cross-exchange arbitrage opportunities across Bybit, KuCoin, HTX, XT, and MEXC.
 
-> 📖 **Русская инструкция**: См. [**ИНСТРУКЦИЯ.md**](ИНСТРУКЦИЯ.md) (полная) или [**БЫСТРЫЙ_СТАРТ.md**](БЫСТРЫЙ_СТАРТ.md) (за 5 минут)
+> ## 🚨 ВАЖНО! Get the Full Version / Получите Полную Версию
 > 
-> 📖 **Russian Instructions**: See [**ИНСТРУКЦИЯ.md**](ИНСТРУКЦИЯ.md) (complete) or [**БЫСТРЫЙ_СТАРТ.md**](БЫСТРЫЙ_СТАРТ.md) (5-minute quick start)
+> **This branch has ALL improvements (244 files, 180+ modules)**  
+> **Эта ветка содержит ВСЕ улучшения (244 файла, 180+ модулей)**
+> 
+> ```bash
+> # Clone THIS branch to get full version / Клонируйте ЭТУ ветку для полной версии:
+> git clone -b copilot/fix-bot-start-issues https://github.com/tsepper002/arbitrage-bot.git
+> ```
+> 
+> 📄 See [**КАК_ПОЛУЧИТЬ_ПОЛНУЮ_ВЕРСИЮ.md**](КАК_ПОЛУЧИТЬ_ПОЛНУЮ_ВЕРСИЮ.md) for details / Подробности
+>
+> ---
+> 
+> 🚀 **БЫСТРЫЙ ЗАПУСК / QUICK START**: 
+> - [**БЫСТРЫЙ_ЗАПУСК_КОМАНДЫ.md**](БЫСТРЫЙ_ЗАПУСК_КОМАНДЫ.md) - **КОПИРУЙ И ЗАПУСКАЙ** (Russian, tested commands)
+> - [**LAUNCH_COMMANDS.md**](LAUNCH_COMMANDS.md) - Copy-paste commands (English)
+> - [**КОМАНДЫ_ЗАПУСКА.md**](КОМАНДЫ_ЗАПУСКА.md) - Команды на русском
+> 
+> 📖 **Full Documentation**: See [**README.md**](#quick-start) (English) or [**ИНСТРУКЦИЯ.md**](ИНСТРУКЦИЯ.md) (Russian)
+> 
+> ⚡ **5-Minute Start**: See [**БЫСТРЫЙ_СТАРТ.md**](БЫСТРЫЙ_СТАРТ.md) (Russian quick guide)
 
 ## Features
 

@@ -92,7 +92,7 @@ class PriceStore:
         # explicit log to confirm levels were stored
         b_len = len(rec.get("bids_levels", []))
         a_len = len(rec.get("asks_levels", []))
-        logger.info(f"PriceStore.update_levels {exchange} {symbol} bids_levels={b_len} asks_levels={a_len} top_bid={rec.get('bid')} top_ask={rec.get('ask')}")
+        logger.debug(f"PriceStore.update_levels {exchange} {symbol} bids_levels={b_len} asks_levels={a_len} top_bid={rec.get('bid')} top_ask={rec.get('ask')}")
     
     async def get(self, symbol: str) -> Dict[str, Dict[str, Any]]:
         """

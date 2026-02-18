@@ -8,6 +8,7 @@ import hmac
 import hashlib
 import base64
 import urllib.parse
+import socket
 from typing import Dict, Any, Optional, List
 import aiohttp
 import logging
@@ -29,7 +30,13 @@ class HTXRESTClient(BaseRESTClient):
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            # Use IPv4 + ThreadedResolver to avoid DNS resolution issues
+            connector = aiohttp.TCPConnector(
+                family=socket.AF_INET,
+                resolver=aiohttp.ThreadedResolver()
+            )
+            timeout = aiohttp.ClientTimeout(total=30, sock_connect=10)
+            self._session = aiohttp.ClientSession(connector=connector, timeout=timeout)
         return self._session
     
     async def close(self):
@@ -221,3 +228,56 @@ class HTXRESTClient(BaseRESTClient):
             if data.get("status") != "ok":
                 raise Exception(f"HTX withdrawal failed: {data}")
             return data.get("data", {})
+    
+    async def get_deposit_address(self, currency: str) -> dict:
+        """
+        Get deposit address for a specific currency on HTX.
+        
+        Args:
+            currency: Currency symbol (e.g., 'USDT', 'BTC')
+            
+        Returns:
+            dict: Deposit address information
+        """
+        try:
+            path = "/v2/account/deposit/address"
+            params = self._get_common_params()
+            params["currency"] = currency.lower()
+            params["Signature"] = self._generate_signature("GET", "api.huobi.pro", path, params)
+            
+            url = f"{self.BASE_URL}{path}"
+            session = await self._get_session()
+            
+            async with session.get(url, params=params) as resp:
+                data = await resp.json()
+                if data.get("code") == 200:
+                    return data.get("data", {})
+                else:
+                    logger.error(f"Error getting HTX deposit address for {currency}: {data}")
+                    return {}
+        except Exception as e:
+            logger.error(f"Error getting deposit address for {currency}: {e}")
+            return {}
+    
+    async def get_trading_pairs(self) -> list:
+        """
+        Get all available trading pairs on HTX.
+        
+        Returns:
+            list: List of trading pair information
+        """
+        try:
+            path = "/v1/common/symbols"
+            url = f"{self.BASE_URL}{path}"
+            session = await self._get_session()
+            
+            async with session.get(url) as resp:
+                data = await resp.json()
+                if data.get("status") == "ok":
+                    return data.get("data", [])
+                else:
+                    logger.error(f"Error getting HTX trading pairs: {data}")
+                    return []
+        except Exception as e:
+            logger.error(f"Error getting trading pairs: {e}")
+            return []

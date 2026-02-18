@@ -21,7 +21,7 @@ import asyncio
 from .ws_helpers import WSHealthMonitor, WSReconnectHelper
 
 logger = logging.getLogger("htx_ws")
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
+# Logging configured in main.py - don't override here
 
 DEPTH_LEVELS = 20
 
@@ -64,6 +64,7 @@ class HtxWS:
         # Add health monitoring
         self._health_monitor = WSHealthMonitor(exchange_name)
         self._reconnect_helper = WSReconnectHelper(exchange_name)
+        self._stopping = False  # Flag to prevent reconnects during shutdown
         
         self._thread = threading.Thread(target=self._run, daemon=True)
         if stagger_start and stagger_start > 0:
@@ -169,6 +170,10 @@ class HtxWS:
                     bids_out = self._book_to_levels(self._local_books[sym]["bids"], "bids")
                     asks_out = self._book_to_levels(self._local_books[sym]["asks"], "asks")
                     logger.debug(f"HTX depth snapshot for {sym}: bids={len(bids_out)} asks={len(asks_out)}")
+                    if bids_out and asks_out:
+                        best_bid = bids_out[0][0] if bids_out else None
+                        best_ask = asks_out[0][0] if asks_out else None
+                        logger.debug(f"HTX -> update store: {sym} bid={best_bid} ask={best_ask}")
                     asyncio.run_coroutine_threadsafe(
                         self.price_store.update_levels(self.exchange, sym, bids_out, asks_out, time.time()),
                         self.loop
@@ -183,6 +188,7 @@ class HtxWS:
                         close = None
                     if close is not None:
                         # update top-of-book using close as both bid and ask fallback
+                        logger.debug(f"HTX -> update store (ticker): {sym} close={close}")
                         asyncio.run_coroutine_threadsafe(
                             self.price_store.update(self.exchange, sym, close, None, close, None, time.time()),
                             self.loop
@@ -213,6 +219,10 @@ class HtxWS:
                         self._apply_changes(sym, "asks", asks_changes)
                     bids_out = self._book_to_levels(self._local_books[sym]["bids"], "bids")
                     asks_out = self._book_to_levels(self._local_books[sym]["asks"], "asks")
+                    if bids_out and asks_out:
+                        best_bid = bids_out[0][0] if bids_out else None
+                        best_ask = asks_out[0][0] if asks_out else None
+                        logger.debug(f"HTX -> update store (delta): {sym} bid={best_bid} ask={best_ask}")
                     asyncio.run_coroutine_threadsafe(
                         self.price_store.update_levels(self.exchange, sym, bids_out, asks_out, time.time()),
                         self.loop
@@ -228,11 +238,18 @@ class HtxWS:
 
     def _on_close(self, ws, code, reason):
         logger.info(f"{self.exchange} WS closed: {code} {reason}")
+        if self._stopping:
+            logger.info(f"{self.exchange} WebSocket stopped gracefully")
 
     def _run(self):
         url = "wss://api.huobi.pro/ws"
         backoff = 1.0
         while not self._stop.is_set():
+            # Check if we're stopping
+            if self._stopping:
+                logger.info(f"{self.exchange}: Stopping, no reconnect")
+                break
+                
             try:
                 logger.info(f"{self.exchange}: connecting to {url}")
                 ws = websocket.WebSocketApp(
@@ -245,13 +262,23 @@ class HtxWS:
                 self._ws = ws
                 # disable control ping (use app-level ping/pong)
                 ws.run_forever(ping_interval=None, ping_timeout=None)
+                
+                # Check if stopping BEFORE logging reconnect message
+                if self._stopping:
+                    logger.info(f"{self.exchange}: Stopped gracefully, no reconnect")
+                    break
+                
                 logger.warning(f"{self.exchange}: run_forever returned, will reconnect")
             except Exception:
+                if self._stopping:
+                    logger.info(f"{self.exchange}: Stopped during exception, no reconnect")
+                    break
                 logger.exception("HTX run error - reconnecting")
             time.sleep(backoff + random.uniform(0, backoff * 0.2))
             backoff = min(backoff * 2, 60.0)
 
     def stop(self):
+        self._stopping = True  # Prevent reconnect attempts during shutdown
         self._stop.set()
         self._health_monitor.on_connection_close()
         try:
