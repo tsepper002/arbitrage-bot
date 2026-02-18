@@ -45,6 +45,7 @@ from core.rebalancer import get_auto_rebalancer
 from core.startup_validator import get_startup_validator
 from core.windows_optimizer import setup_windows_optimizations, WindowsOptimizer
 from core.smart_capital_allocator import get_smart_allocator
+from core.strategy_dispatcher import StrategyDispatcher  # NEW: All 14 strategies!
 
 # Professional Infrastructure
 from infrastructure.health_monitor import HealthMonitor
@@ -225,6 +226,9 @@ class IntegratedArbitrageBot:
         self.vwap_engine = None
         self.iceberg_detector = None
         self.order_flow_tracker = None
+        
+        # Strategy Dispatcher (NEW: All 14 strategies!)
+        self.strategy_dispatcher = None
         
         self.engine = None
         self.tasks = []
@@ -671,6 +675,11 @@ class IntegratedArbitrageBot:
             logger.info("✅ Order Flow Tracker initialized")
             
             logger.info("✅ All 4 Professional Execution Modules initialized!")
+            
+            # Initialize Strategy Dispatcher (NEW: Manages all 14 strategies!)
+            logger.info("\n🎯 Initializing Strategy Dispatcher (All 14 Strategies)...")
+            self.strategy_dispatcher = StrategyDispatcher(self)
+            logger.info("✅ Strategy Dispatcher initialized - ALL 14 STRATEGIES ACTIVE!")
             
             # Triangular Arbitrage Engine
             self.triangular_engine = get_triangular_engine(
