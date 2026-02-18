@@ -73,11 +73,11 @@ class BalanceManager:
     def _use_mock_balances(self):
         """Use mock balance data for DRY_RUN testing when network unavailable."""
         mock_balance = {
-            'USDT': 100.0,  # $100 per exchange for testing
-            'BTC': 0.001,   # ~$68 worth
-            'ETH': 0.05,    # ~$97 worth
-            'BNB': 0.15,    # ~$92 worth
-            'SOL': 1.0      # ~$85 worth
+            'USDT': 30.0,   # $30 per exchange for testing (user requested)
+            'BTC': 0.0003,  # ~$20 worth
+            'ETH': 0.01,    # ~$19 worth
+            'BNB': 0.03,    # ~$18 worth
+            'SOL': 0.2      # ~$17 worth
         }
         
         for exchange_name in self.rest_clients.keys():
