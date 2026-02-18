@@ -830,12 +830,12 @@ class IntegratedArbitrageBot:
                     if self.balance_manager:
                         self.state_manager.state["balances"] = self.balance_manager.balances
                     
-                    await self.state_manager.save_state()
+                    self.state_manager.save_state()  # Not async, no await needed
                 
         except asyncio.CancelledError:
             # Save one last time before exit
             if self.state_manager:
-                await self.state_manager.save_state()
+                self.state_manager.save_state()  # Not async, no await needed
                 logger.info("✅ Final state saved")
             return
     
@@ -965,7 +965,7 @@ class IntegratedArbitrageBot:
         
         # Final state save
         if self.state_manager:
-            await self.state_manager.save_state()
+            self.state_manager.save_state()  # Not async, no await needed
         
         # Send final Telegram notification
         if self.telegram_bot:
