@@ -85,6 +85,26 @@ class BalanceManager:
             self.last_sync[exchange_name] = time.time()
             logger.info(f"📊 {exchange_name}: Mock balance = ${mock_balance['USDT']:.2f} USDT + crypto")
         
+        # SHOW VIRTUAL BALANCES PROMINENTLY
+        logger.info("=" * 70)
+        logger.info("🔵 DRY_RUN MODE - VIRTUAL BALANCES")
+        logger.info("=" * 70)
+        for exchange_name in self.rest_clients.keys():
+            balance = self.balances[exchange_name]
+            total = sum(balance.values() * price for currency, price in [
+                ('USDT', 1.0), ('BTC', 68500), ('ETH', 3500), 
+                ('BNB', 350), ('SOL', 85)
+            ] if currency in balance)
+            usdt = balance.get('USDT', 0)
+            logger.info(f"  {exchange_name:12} | USDT: ${usdt:>8.2f} | Total: ${total:>8.2f} (VIRTUAL)")
+        
+        total_capital = sum(sum(b.values() * price for currency, price in [
+            ('USDT', 1.0), ('BTC', 68500), ('ETH', 3500), 
+            ('BNB', 350), ('SOL', 85)
+        ] if currency in b) for b in self.balances.values())
+        logger.info("=" * 70)
+        logger.info(f"💰 Total Virtual Capital: ${total_capital:.2f}")
+        logger.info("=" * 70)
         logger.info("✅ Mock balances loaded for all exchanges")
     
     async def _fetch_balance(self, exchange_name: str, client) -> Dict[str, float]:
