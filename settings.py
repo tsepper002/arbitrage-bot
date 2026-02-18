@@ -104,8 +104,9 @@ SAFETY_FACTOR = _get_env_float("ARB_SAFETY_FACTOR", 0.5)
 MAX_TRADES_PER_MINUTE = _get_env_int("ARB_MAX_TRADES_PER_MINUTE", 5)
 
 # Cooldown period in seconds before same symbol can be traded again
-# Reduced from 30 to 3 for more frequent trading on same pairs
-PER_SYMBOL_COOLDOWN_SEC = _get_env_float("ARB_SYMBOL_COOLDOWN_SEC", 3.0)
+# OPTIMIZED: 5.0s provides good balance between frequency and stability
+# Was: 3.0s, increased slightly to avoid over-trading
+PER_SYMBOL_COOLDOWN_SEC = _get_env_float("ARB_SYMBOL_COOLDOWN_SEC", 5.0)
 SYMBOL_COOLDOWN_SEC = PER_SYMBOL_COOLDOWN_SEC  # Alias for compatibility
 
 # Maximum concurrent opportunities to process per scan cycle
@@ -129,11 +130,15 @@ MAX_BALANCE_USAGE_PCT = _get_env_float("ARB_MAX_BALANCE_USAGE_PCT", 60.0)  # Max
 # ============================================================================
 # PERFORMANCE & THROTTLING (optimized for weak hardware)
 # ============================================================================
-# Scan interval in seconds (reduced from 1.0 to 0.5 for faster reactions)
-SCAN_INTERVAL_SEC = _get_env_float("ARB_SCAN_INTERVAL_SEC", 0.5)
+# Scan interval in seconds
+# OPTIMIZED: 0.3s for faster opportunity detection without overwhelming CPU
+# Was: 0.5s, now faster for better market responsiveness
+SCAN_INTERVAL_SEC = _get_env_float("ARB_SCAN_INTERVAL_SEC", 0.3)
 
 # Monitoring output interval in seconds (reduce log spam)
-MONITOR_INTERVAL_SEC = _get_env_float("ARB_MONITOR_INTERVAL_SEC", 5.0)
+# OPTIMIZED: 60s for cleaner logs while keeping user informed
+# Was: 5.0s, increased to reduce console spam
+MONITOR_INTERVAL_SEC = _get_env_float("ARB_MONITOR_INTERVAL_SEC", 60.0)
 
 # Enable event-driven scanning (only scan when orderbook changes)
 # Reduces CPU usage significantly

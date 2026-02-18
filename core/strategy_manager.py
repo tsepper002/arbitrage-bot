@@ -290,6 +290,49 @@ class StrategyManager:
         print(f"🏆 Best Strategy: {self.get_best_strategy().upper()}")
         print("=" * 80 + "\n")
     
+    def print_all_strategies_info(self):
+        """
+        Print information about ALL 14 trading strategies available in the bot.
+        Shows which are actively tracked vs. auxiliary strategies.
+        """
+        print("\n" + "=" * 80)
+        print("ALL TRADING STRATEGIES (14 TOTAL)")
+        print("=" * 80)
+        
+        print("\n🎯 MAIN STRATEGIES (Actively Tracked - 4):")
+        print("   1. CROSS_EXCHANGE - Arbitrage between different exchanges")
+        print("      • Buys on cheaper exchange, sells on expensive exchange")
+        print("      • Primary profit generator")
+        print("   2. TRIANGULAR - Triangular arbitrage within same exchange")
+        print("      • Uses 3-way currency pairs (e.g., BTC→ETH→USDT→BTC)")
+        print("      • Exploits pricing inefficiencies")
+        print("   3. SMART_ORDER - Intelligent order routing and execution")
+        print("      • TWAP/VWAP execution algorithms")
+        print("      • Minimizes slippage")
+        print("   4. VOLATILITY - Volatility-based arbitrage")
+        print("      • Exploits price volatility differences")
+        print("      • Market-making during volatile periods")
+        
+        print("\n📊 ADDITIONAL STRATEGIES (Auxiliary - 10):")
+        print("   5. Grid Trading - Places buy/sell orders in a grid pattern")
+        print("   6. DCA Strategy - Dollar-Cost Averaging for position building")
+        print("   7. Market Making - Provides liquidity on both sides")
+        print("   8. Pairs Trading - Trades correlated pairs (mean reversion)")
+        print("   9. Enhanced Funding Rate - Exploits funding rate differences")
+        print("  10. Volatility Arbitrage - Advanced volatility trading")
+        print("  11. Index Arbitrage - Trades spot vs. index differences")
+        print("  12. Spread Betting - Trades on spread movements")
+        print("  13. Momentum Strategy - Follows price momentum")
+        print("  14. Breakout Strategy - Trades breakouts from ranges")
+        
+        print("\n" + "=" * 80)
+        print(f"ACTIVE TRACKING: {len(self.strategies)} main strategies")
+        print(f"TOTAL STRATEGIES: 14 (4 main + 10 auxiliary)")
+        print("=" * 80 + "\n")
+        
+        # Also print current performance
+        self.print_summary()
+    
     def get_strategy_allocation(self, total_capital: float) -> Dict[str, float]:
         """
         Calculate capital allocation for each strategy based on priorities.

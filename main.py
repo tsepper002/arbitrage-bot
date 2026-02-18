@@ -758,6 +758,12 @@ class IntegratedArbitrageBot:
                 self.tasks.append(state_task)
                 logger.info("✅ State persistence task started")
             
+            # Telegram monitoring task
+            if self.telegram_bot:
+                telegram_task = asyncio.create_task(self.telegram_bot.start_monitoring_loop(self))
+                self.tasks.append(telegram_task)
+                logger.info("✅ Telegram monitoring task started")
+            
             # Auto-rebalancer task
             if self.rebalancer:
                 rebalance_task = asyncio.create_task(self.rebalancer.monitoring_loop())
@@ -804,8 +810,9 @@ class IntegratedArbitrageBot:
                     logger.info(f"📊 [STORE] {len(snap)} symbols, {total_exchanges} exchange connections")
                 
                 # Print strategy performance
+                # Print detailed strategy information
                 if self.strategy_manager:
-                    self.strategy_manager.print_summary()
+                    self.strategy_manager.print_all_strategies_info()
                 
         except asyncio.CancelledError:
             return
@@ -915,8 +922,9 @@ class IntegratedArbitrageBot:
             logger.info("FINAL STATISTICS")
             logger.info("="*80)
             self.engine.executor.print_statistics()
+            # Print final strategy summary
             if self.strategy_manager:
-                self.strategy_manager.print_summary()
+                self.strategy_manager.print_all_strategies_info()
             logger.info("="*80)
         
         # Close REST client sessions

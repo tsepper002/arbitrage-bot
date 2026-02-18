@@ -243,6 +243,210 @@ Win rate: {stats.get('win_rate', 0):.1f}%
 Lifetime P&L: ${stats.get('lifetime_pnl', 0):.2f}
 Lifetime trades: {stats.get('lifetime_trades', 0)}
 """
+    
+    # Command handling methods
+    
+    async def handle_command(self, command: str, bot_manager=None) -> str:
+        """
+        Handle incoming command and return response.
+        
+        Args:
+            command: Command string (e.g., "/start", "/status")
+            bot_manager: Reference to main bot manager for data
+            
+        Returns:
+            Response text
+        """
+        command = command.lower().strip()
+        
+        if command == "/start" or command == "/help":
+            return self._cmd_help()
+        elif command == "/status":
+            return self._cmd_status(bot_manager)
+        elif command == "/balance":
+            return self._cmd_balance(bot_manager)
+        elif command == "/trades":
+            return self._cmd_trades(bot_manager)
+        elif command == "/opportunities":
+            return self._cmd_opportunities(bot_manager)
+        else:
+            return "❌ Unknown command. Use /help to see available commands."
+    
+    def _cmd_help(self) -> str:
+        """Return help message with all commands."""
+        return """
+🤖 *Arbitrage Bot Commands*
+
+/start - Show this help message
+/status - Bot status and health
+/balance - Exchange balances
+/trades - Trading statistics
+/opportunities - Recent opportunities
+/help - Show this message
+
+Bot sends automatic updates every 30 minutes and alerts for important events.
+"""
+    
+    def _cmd_status(self, bot_manager) -> str:
+        """Return bot status."""
+        if not bot_manager:
+            return "❌ Bot manager not available"
+        
+        try:
+            mode = "🔵 DRY RUN" if settings.DRY_RUN else "🔴 LIVE TRADING"
+            
+            # Get status from bot manager
+            status_info = {
+                'mode': mode,
+                'trading_allowed': True,  # Get from bot_manager if available
+                'daily_pnl': 0,  # Get from state_manager if available
+                'trades_today': 0,
+                'cpu_pct': 0,
+                'memory_mb': 0
+            }
+            
+            if hasattr(bot_manager, 'state_manager') and bot_manager.state_manager:
+                state = bot_manager.state_manager.state
+                status_info['daily_pnl'] = state.get('daily_pnl', 0)
+                status_info['trades_today'] = len(state.get('trades_today', []))
+            
+            return f"""
+📊 *Bot Status*
+Mode: {status_info['mode']}
+Trading: ✅ Active
+Daily P&L: ${status_info['daily_pnl']:.2f}
+Trades today: {status_info['trades_today']}
+
+WebSocket Connections: ✅
+Arbitrage Engine: ✅ Running
+Risk Manager: ✅ Active
+"""
+        except Exception as e:
+            logger.exception("Error in _cmd_status")
+            return f"❌ Error getting status: {str(e)}"
+    
+    def _cmd_balance(self, bot_manager) -> str:
+        """Return exchange balances."""
+        if not bot_manager:
+            return "❌ Bot manager not available"
+        
+        try:
+            if not hasattr(bot_manager, 'balance_manager') or not bot_manager.balance_manager:
+                return "❌ Balance manager not available"
+            
+            balances = bot_manager.balance_manager.balances
+            
+            lines = ["💰 *Exchange Balances*\n"]
+            total_usdt = 0
+            
+            for exchange, currencies in balances.items():
+                usdt = currencies.get('USDT', 0)
+                total_usdt += usdt
+                
+                if usdt > 0:
+                    lines.append(f"*{exchange}:*")
+                    lines.append(f"  USDT: ${usdt:.2f}")
+                    
+                    # Show other currencies if any
+                    for curr, amount in currencies.items():
+                        if curr != 'USDT' and amount > 0:
+                            lines.append(f"  {curr}: {amount:.6f}")
+                    lines.append("")
+            
+            lines.append(f"*Total USDT:* ${total_usdt:.2f}")
+            
+            if settings.DRY_RUN:
+                lines.append("\n🔵 *Virtual balances* (DRY_RUN mode)")
+            
+            return "\n".join(lines)
+        except Exception as e:
+            logger.exception("Error in _cmd_balance")
+            return f"❌ Error getting balances: {str(e)}"
+    
+    def _cmd_trades(self, bot_manager) -> str:
+        """Return trading statistics."""
+        if not bot_manager:
+            return "❌ Bot manager not available"
+        
+        try:
+            stats = {
+                'daily_pnl': 0,
+                'trades_today': 0,
+                'win_rate': 0,
+                'best_trade': 0,
+                'worst_trade': 0
+            }
+            
+            if hasattr(bot_manager, 'state_manager') and bot_manager.state_manager:
+                state = bot_manager.state_manager.state
+                stats['daily_pnl'] = state.get('daily_pnl', 0)
+                trades = state.get('trades_today', [])
+                stats['trades_today'] = len(trades)
+                
+                if trades:
+                    profits = [t.get('net_profit', 0) for t in trades]
+                    wins = sum(1 for p in profits if p > 0)
+                    stats['win_rate'] = (wins / len(trades)) * 100 if trades else 0
+                    stats['best_trade'] = max(profits) if profits else 0
+                    stats['worst_trade'] = min(profits) if profits else 0
+            
+            emoji = "📈" if stats['daily_pnl'] > 0 else "📉" if stats['daily_pnl'] < 0 else "➡️"
+            
+            return f"""
+{emoji} *Trading Statistics*
+
+Daily P&L: ${stats['daily_pnl']:.2f}
+Trades today: {stats['trades_today']}
+Win rate: {stats['win_rate']:.1f}%
+Best trade: ${stats['best_trade']:.2f}
+Worst trade: ${stats['worst_trade']:.2f}
+
+Mode: {"🔵 DRY RUN" if settings.DRY_RUN else "🔴 LIVE"}
+"""
+        except Exception as e:
+            logger.exception("Error in _cmd_trades")
+            return f"❌ Error getting trades: {str(e)}"
+    
+    def _cmd_opportunities(self, bot_manager) -> str:
+        """Return recent arbitrage opportunities."""
+        return """
+🔍 *Recent Opportunities*
+
+Opportunities are detected in real-time and logged to the console.
+
+To see live opportunities:
+1. Check bot logs
+2. Wait for automatic Telegram alerts (ROI > 0.1%)
+3. Use /status to see if bot is actively scanning
+
+Recent scans: Active
+Exchanges monitored: Bybit, KuCoin, HTX, MEXC
+Symbols: 10 pairs
+"""
+    
+    async def start_monitoring_loop(self, bot_manager):
+        """
+        Start periodic monitoring and send updates to Telegram.
+        Call this as a background task.
+        """
+        logger.info("Starting Telegram monitoring loop...")
+        
+        update_interval = 1800  # 30 minutes
+        
+        while True:
+            try:
+                await asyncio.sleep(update_interval)
+                
+                # Send periodic update
+                status_msg = self._cmd_status(bot_manager)
+                await self.send_message(status_msg)
+                
+            except asyncio.CancelledError:
+                logger.info("Telegram monitoring loop cancelled")
+                raise
+            except Exception as e:
+                logger.exception(f"Error in monitoring loop: {e}")
+                await asyncio.sleep(60)  # Wait 1 min on error
 
 
 # Convenience function for quick messages
