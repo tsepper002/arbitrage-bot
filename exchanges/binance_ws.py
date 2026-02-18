@@ -125,7 +125,16 @@ class BinanceWS:
                 if not self._stopping:
                     logger.warning(f"{self.exchange_name} WebSocket connection closed, reconnecting...")
             except Exception as e:
-                logger.error(f"{self.exchange_name} WebSocket error: {e}")
+                error_str = str(e)
+                # Handle HTTP 451 (Unavailable For Legal Reasons) - geographic restriction
+                if '451' in error_str:
+                    logger.error(f"❌ {self.exchange_name} unavailable in your region (HTTP 451 - geographic restriction)")
+                    logger.info(f"ℹ️  Bot will continue without {self.exchange_name}")
+                    self._stopping = True  # Don't reconnect
+                    self.running = False
+                    break
+                else:
+                    logger.error(f"{self.exchange_name} WebSocket error: {e}")
             
             if self.running and not self._stopping:
                 logger.info(f"Reconnecting in {reconnect_delay} seconds...")

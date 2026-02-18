@@ -61,8 +61,31 @@ class BalanceManager:
         success_count = sum(1 for r in results if not isinstance(r, Exception))
         logger.info(f"✅ Initialized balances for {success_count}/{len(results)} exchanges")
         
+        # If DRY_RUN mode and no balances loaded, use mock data
+        if settings.DRY_RUN and success_count == 0:
+            logger.info("ℹ️  DRY_RUN mode: Using mock balances for testing (real network unavailable)")
+            self._use_mock_balances()
+            success_count = len(self.rest_clients)
+        
         self.initialized = True
         return success_count > 0
+    
+    def _use_mock_balances(self):
+        """Use mock balance data for DRY_RUN testing when network unavailable."""
+        mock_balance = {
+            'USDT': 100.0,  # $100 per exchange for testing
+            'BTC': 0.001,   # ~$68 worth
+            'ETH': 0.05,    # ~$97 worth
+            'BNB': 0.15,    # ~$92 worth
+            'SOL': 1.0      # ~$85 worth
+        }
+        
+        for exchange_name in self.rest_clients.keys():
+            self.balances[exchange_name] = mock_balance.copy()
+            self.last_sync[exchange_name] = time.time()
+            logger.info(f"📊 {exchange_name}: Mock balance = ${mock_balance['USDT']:.2f} USDT + crypto")
+        
+        logger.info("✅ Mock balances loaded for all exchanges")
     
     async def _fetch_balance(self, exchange_name: str, client) -> Dict[str, float]:
         """
