@@ -55,18 +55,9 @@ EXCHANGE_PARAMS: Dict[str, Dict[str, Any]] = {
         "min_size": 0.0001,
         "supports_depth": True,
     },
-    "XT": {
-        "maker": 0.002,  # 0.2% maker fee
-        "taker": 0.002,  # 0.2% taker fee
-        "withdraw_fee": 1.0,  # Approximate USDT withdrawal fee
-        "withdraw_fee_currency": "USDT",
-        "min_notional": 1.0,
-        "min_size": 0.0001,
-        "supports_depth": True,
-    },
 }
 
-# Optionally try to refresh fees via REST public/private APIs.
+# Optionally try to refresh feesvia REST public/private APIs.
 # Implemented as best-effort: networks and endpoints change over time.
 def fetch_kucoin_fees() -> Optional[Dict[str, Any]]:
     """

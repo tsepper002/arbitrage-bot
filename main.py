@@ -155,13 +155,14 @@ file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)
 # Configure root logger
 logging.basicConfig(
     level=logging.DEBUG,  # Root level must be DEBUG to capture all
-    handlers=[console_handler, file_handler]
+    handlers=[console_handler, file_handler],
+    force=True  # Override any basicConfig calls from exchange modules
 )
 logger = logging.getLogger("arbitrage_bot")
 
 # Force all exchange loggers to INFO level (not DEBUG) for console
 # This prevents WebSocket modules from spamming console with DEBUG messages
-for logger_name in ['kucoin_ws', 'bybit_ws', 'htx_ws', 'mexc_ws', 'binance_ws', 'arbitrage_ws']:
+for logger_name in ['kucoin_ws', 'bybit_ws', 'htx_ws', 'mexc_ws', 'binance_ws', 'arbitrage_ws', 'MEXC', 'websockets', 'exchange_config', 'arbitrage_engine']:
     exchange_logger = logging.getLogger(logger_name)
     exchange_logger.setLevel(logging.INFO)  # Only INFO+ will be logged
 
@@ -781,6 +782,12 @@ class IntegratedArbitrageBot:
             #     self.tasks.append(triangular_task)
             #     logger.info("✅ Triangular arbitrage task started")
             
+            # Strategy dispatcher slow scan task (scans 10 auxiliary strategies every 5 min)
+            if self.strategy_dispatcher:
+                strategy_task = asyncio.create_task(self._strategy_dispatcher_loop())
+                self.tasks.append(strategy_task)
+                logger.info("✅ Strategy dispatcher task started (14 strategies)")
+            
             # Main arbitrage engine task
             engine_task = asyncio.create_task(self.engine.run(symbols))
             self.tasks.append(engine_task)
@@ -907,6 +914,25 @@ class IntegratedArbitrageBot:
         except asyncio.CancelledError:
             return
     
+    async def _strategy_dispatcher_loop(self):
+        """Background task for running strategy dispatcher scans."""
+        try:
+            while True:
+                # Fast scan: update statistics (called every scan cycle)
+                if self.strategy_dispatcher:
+                    await self.strategy_dispatcher.scan_fast()
+                
+                # Slow scan: run auxiliary strategies periodically
+                if self.strategy_dispatcher and self.strategy_dispatcher.should_scan_slow():
+                    slow_opps = await self.strategy_dispatcher.scan_slow()
+                    if slow_opps:
+                        logger.info(f"🎯 Strategy dispatcher found {len(slow_opps)} opportunities from auxiliary strategies")
+                
+                await asyncio.sleep(settings.SCAN_INTERVAL_SEC)
+                
+        except asyncio.CancelledError:
+            return
+    
     async def shutdown(self):
         """Graceful shutdown."""
         logger.info("\n🛑 Shutting down gracefully...")
@@ -926,6 +952,9 @@ class IntegratedArbitrageBot:
             logger.info("FINAL STATISTICS")
             logger.info("="*80)
             self.engine.executor.print_statistics()
+            # Print strategy dispatcher statistics
+            if self.strategy_dispatcher:
+                self.strategy_dispatcher.print_stats()
             # Print final strategy summary
             if self.strategy_manager:
                 self.strategy_manager.print_all_strategies_info()

@@ -157,8 +157,8 @@ class StrategyDispatcher:
         
         try:
             # Check if grid strategy exists in bot_manager
-            if hasattr(self.bot_manager, 'grid_strategy'):
-                grid_strategy = self.bot_manager.grid_strategy
+            if hasattr(self.bot_manager, 'grid_trading'):
+                grid_strategy = self.bot_manager.grid_trading
                 if hasattr(grid_strategy, 'check_positions'):
                     result = await grid_strategy.check_positions()
                     if result:
@@ -200,8 +200,8 @@ class StrategyDispatcher:
         opportunities = []
         
         try:
-            if hasattr(self.bot_manager, 'market_making_strategy'):
-                mm_strategy = self.bot_manager.market_making_strategy
+            if hasattr(self.bot_manager, 'market_making'):
+                mm_strategy = self.bot_manager.market_making
                 if hasattr(mm_strategy, 'calculate_spread'):
                     spread = await mm_strategy.calculate_spread()
                     if spread and spread > 0.001:  # 0.1% min spread
@@ -222,8 +222,8 @@ class StrategyDispatcher:
         opportunities = []
         
         try:
-            if hasattr(self.bot_manager, 'pairs_strategy'):
-                pairs_strategy = self.bot_manager.pairs_strategy
+            if hasattr(self.bot_manager, 'pairs_trading'):
+                pairs_strategy = self.bot_manager.pairs_trading
                 if hasattr(pairs_strategy, 'find_divergence'):
                     result = await pairs_strategy.find_divergence()
                     if result:
@@ -244,8 +244,8 @@ class StrategyDispatcher:
         opportunities = []
         
         try:
-            if hasattr(self.bot_manager, 'funding_strategy'):
-                funding_strategy = self.bot_manager.funding_strategy
+            if hasattr(self.bot_manager, 'funding_rate_enhanced'):
+                funding_strategy = self.bot_manager.funding_rate_enhanced
                 if hasattr(funding_strategy, 'check_funding_rates'):
                     result = await funding_strategy.check_funding_rates()
                     if result:
@@ -266,8 +266,8 @@ class StrategyDispatcher:
         opportunities = []
         
         try:
-            if hasattr(self.bot_manager, 'volatility_arb_strategy'):
-                vol_strategy = self.bot_manager.volatility_arb_strategy
+            if hasattr(self.bot_manager, 'volatility_arb'):
+                vol_strategy = self.bot_manager.volatility_arb
                 if hasattr(vol_strategy, 'detect_volatility_mispricing'):
                     result = await vol_strategy.detect_volatility_mispricing()
                     if result:
@@ -288,8 +288,8 @@ class StrategyDispatcher:
         opportunities = []
         
         try:
-            if hasattr(self.bot_manager, 'index_arb_strategy'):
-                index_strategy = self.bot_manager.index_arb_strategy
+            if hasattr(self.bot_manager, 'index_arb'):
+                index_strategy = self.bot_manager.index_arb
                 if hasattr(index_strategy, 'calculate_index_vs_components'):
                     result = await index_strategy.calculate_index_vs_components()
                     if result:
@@ -310,8 +310,8 @@ class StrategyDispatcher:
         opportunities = []
         
         try:
-            if hasattr(self.bot_manager, 'spread_betting_strategy'):
-                spread_strategy = self.bot_manager.spread_betting_strategy
+            if hasattr(self.bot_manager, 'spread_betting'):
+                spread_strategy = self.bot_manager.spread_betting
                 if hasattr(spread_strategy, 'calculate_z_score'):
                     result = await spread_strategy.calculate_z_score()
                     if result and abs(result.get('z_score', 0)) > 2:
