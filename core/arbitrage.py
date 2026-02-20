@@ -36,7 +36,8 @@ class ArbitrageEngine:
                  persist_path: Optional[str] = None,
                  max_exposure_usdt: Optional[float] = None,
                  safety_factor: Optional[float] = None,
-                 topk: Optional[int] = None):
+                 topk: Optional[int] = None,
+                 rest_clients: Optional[Dict] = None):
         self.store = store
         self.params = EXCHANGE_PARAMS
         
@@ -61,7 +62,7 @@ class ArbitrageEngine:
                 self.max_exposure_usdt = 200.0
 
         # Initialize order executor
-        self.executor = OrderExecutor()
+        self.executor = OrderExecutor(rest_clients=rest_clients)
 
         # Initialize strategy dispatcher (all 14 strategies)
         self.dispatcher = StrategyDispatcher(store)

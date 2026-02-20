@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """
-main.py — diagnostic monitor + startup.
-Enhanced with health monitoring and configurable settings.
+main.py — Cryptocurrency Arbitrage Bot entry point.
+
+Supports two modes:
+  - dry-run (default): Safe simulation with virtual capital, no real orders
+  - live: Real order placement via authenticated REST API clients
 
 Usage:
     python main.py                  # default (dry-run)
     python main.py --mode dry-run   # explicit dry-run
-    python main.py --mode live      # live trading (requires setup)
+    python main.py --mode live      # live trading (requires API keys)
 """
 import argparse
 import asyncio
 import logging
-from typing import List
-import sys
 import os
+import sys
+from typing import List, Dict, Optional
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -66,13 +69,41 @@ def apply_cli_overrides(args):
 
 from core.price_store import PriceStore
 from core.arbitrage import ArbitrageEngine
+from core.state import ExchangeState, STATE
 from exchanges.bybit_ws import BybitWS
 from exchanges.kucoin_ws import KucoinWS
 from exchanges.htx_ws import HtxWS
 from exchanges.mexc import MEXC
+from exchanges.bybit_rest import BybitREST
 from utils.telegram import TelegramNotifier
+from utils.throttle import Throttle
 
 logger = logging.getLogger("arbitrage_bot")
+
+# API rate limiter shared across the bot (0.3s = max ~3 calls/sec per exchange)
+api_throttle = Throttle(interval=0.3)
+
+
+def _init_rest_clients() -> Dict:
+    """
+    Initialize authenticated REST API clients for live trading.
+    Reads API keys from environment variables.
+
+    Returns:
+        Dict of exchange_name -> REST client instance
+    """
+    clients: Dict = {}
+
+    # Bybit REST
+    bybit_key = os.getenv("BYBIT_API_KEY", "")
+    bybit_secret = os.getenv("BYBIT_API_SECRET", "")
+    if bybit_key and bybit_secret:
+        clients["Bybit"] = BybitREST(api_key=bybit_key, api_secret=bybit_secret)
+        logger.info("✅ Bybit REST client initialized for live trading")
+    else:
+        logger.warning("⚠️  Bybit API keys not configured (set BYBIT_API_KEY, BYBIT_API_SECRET)")
+
+    return clients
 
 
 async def _monitor_store(store: PriceStore, interval: float = None):
@@ -110,6 +141,21 @@ async def _monitor_store(store: PriceStore, interval: float = None):
         return
 
 
+async def _monitor_exchange_health(interval: float = 30.0):
+    """Periodically log exchange health from STATE registry."""
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            online = [name for name, st in STATE.items() if st.online]
+            offline = [name for name, st in STATE.items() if not st.online]
+            if offline:
+                logger.warning(f"Exchange health: ✅ {', '.join(online) or 'none'} | ❌ {', '.join(offline)}")
+            else:
+                logger.debug(f"Exchange health: all {len(online)} online")
+    except asyncio.CancelledError:
+        return
+
+
 async def main(args=None):
     # Apply CLI overrides before anything else
     if args is not None:
@@ -136,28 +182,47 @@ async def main(args=None):
     num_exchanges = 4  # Bybit, KuCoin, HTX, MEXC
     logger.info(f"Starting arbitrage bot with {num_exchanges} exchanges for {len(symbols)} symbols: {', '.join(symbols)}")
 
+    # Initialize REST clients for live trading
+    rest_clients: Dict = {}
+    if not settings.DRY_RUN:
+        rest_clients = _init_rest_clients()
+        if not rest_clients:
+            logger.error("🔴 No REST clients configured! Live orders will fail.")
+            logger.error("   Set BYBIT_API_KEY/BYBIT_API_SECRET or switch to --mode dry-run")
+    else:
+        logger.info("🔵 Skipping REST client initialization (dry-run mode)")
+
     loop = asyncio.get_running_loop()
     store = PriceStore()
+
+    # Register exchange states
+    for ex_name in ["Bybit", "KuCoin", "HTX", "MEXC"]:
+        STATE[ex_name] = ExchangeState(ex_name)
 
     # Initialize exchange connections with staggered start
     stagger = 0.1
     logger.info("Initializing exchange connections...")
     bybit = BybitWS(symbols, store, loop, exchange_name="Bybit", stagger_start=stagger)
+    STATE["Bybit"].set_online()
     await asyncio.sleep(0.1)
     kucoin = KucoinWS(symbols, store, loop, exchange_name="KuCoin", stagger_start=stagger)
+    STATE["KuCoin"].set_online()
     await asyncio.sleep(0.1)
     htx = HtxWS(symbols, store, loop, exchange_name="HTX", stagger_start=stagger)
+    STATE["HTX"].set_online()
 
     mexc = MEXC(store, symbols)
+    STATE["MEXC"].set_online()
     mexc_task = asyncio.create_task(mexc.run())
 
     exchanges = [bybit, kucoin, htx]
 
-    # Start monitoring task
+    # Start monitoring tasks
     monitor_task = asyncio.create_task(_monitor_store(store))
+    health_task = asyncio.create_task(_monitor_exchange_health())
 
-    # Start arbitrage engine
-    engine = ArbitrageEngine(store)
+    # Start arbitrage engine (with REST clients for live trading)
+    engine = ArbitrageEngine(store, rest_clients=rest_clients)
 
     # Initialize Telegram notifier
     notifier = TelegramNotifier()
@@ -166,7 +231,7 @@ async def main(args=None):
     engine_task = asyncio.create_task(engine.run(symbols))
 
     try:
-        await asyncio.gather(engine_task, monitor_task)
+        await asyncio.gather(engine_task, monitor_task, health_task)
     except asyncio.CancelledError:
         pass
     except KeyboardInterrupt:
@@ -174,13 +239,27 @@ async def main(args=None):
     finally:
         # Cleanup
         monitor_task.cancel()
+        health_task.cancel()
         mexc.stop()
         mexc_task.cancel()
         
         # Print final statistics
         logger.info("\n" + "="*60)
         engine.executor.print_statistics()
+        engine.dispatcher.print_stats()
         logger.info("="*60)
+
+        # Send shutdown Telegram notification
+        try:
+            stats = engine.executor.get_statistics()
+            await notifier.send_message(
+                f"🛑 Bot stopped\n"
+                f"Total trades: {stats['total_orders']}\n"
+                f"Total profit: ${stats['total_profit']:.4f}\n"
+                f"Mode: {'DRY RUN' if settings.DRY_RUN else 'LIVE'}"
+            )
+        except Exception:
+            pass
         
         # Stop exchange connections
         for c in exchanges:

@@ -6,6 +6,7 @@ Provides a safe interface for order placement with detailed logging.
 import asyncio
 import time
 import logging
+import os
 from typing import List, Optional, Tuple, Dict
 from datetime import datetime
 import settings
@@ -18,15 +19,16 @@ class OrderExecutor:
     """
     Handles order execution with two modes:
     - dry_run (default): Simulates orders, logs actions without sending to exchanges
-    - live: Placeholder for real order placement (requires authenticated API clients)
+    - live: Places real orders via authenticated REST API clients
     """
     
-    def __init__(self, dry_run: Optional[bool] = None):
+    def __init__(self, dry_run: Optional[bool] = None, rest_clients: Optional[Dict] = None):
         """
         Initialize order executor.
         
         Args:
             dry_run: If True, simulate orders. If None, uses settings.DRY_RUN
+            rest_clients: Dict of exchange_name -> REST client instance (for live trading)
         """
         self.dry_run = dry_run if dry_run is not None else settings.DRY_RUN
         self.order_history: List[Dict] = []
@@ -37,12 +39,16 @@ class OrderExecutor:
         self.virtual_balance_usdt = settings.VIRTUAL_CAPITAL_USDT if self.dry_run else 0.0
         self.initial_virtual_balance = self.virtual_balance_usdt
         
+        # REST clients for live trading (exchange_name -> client)
+        self.rest_clients: Dict = rest_clients or {}
+        
         self.telegram = TelegramNotifier()
 
         if self.dry_run:
             logger.info("🔵 OrderExecutor initialized in DRY RUN mode (safe simulation)")
         else:
-            logger.warning("🔴 OrderExecutor initialized in LIVE mode - REAL ORDERS WILL BE PLACED!")
+            configured = list(self.rest_clients.keys()) if self.rest_clients else []
+            logger.warning(f"🔴 OrderExecutor initialized in LIVE mode — exchanges: {configured or 'NONE'}")
     
     def can_trade(self, symbol: str) -> Tuple[bool, Optional[str]]:
         """
@@ -191,60 +197,104 @@ class OrderExecutor:
     
     def _execute_live(self, opp: Dict) -> Dict:
         """
-        Placeholder for live order execution.
-        
-        IMPORTANT: This requires:
-        1. Authenticated API clients for each exchange
-        2. Account balances and verification
-        3. Proper error handling and order tracking
-        4. Risk management checks
-        
-        Current implementation returns error - implement when infrastructure is ready.
+        Execute a real trade via authenticated REST API clients.
+
+        Flow:
+        1. Verify REST clients are available for both exchanges
+        2. Place buy order on the cheaper exchange
+        3. Place sell order on the more expensive exchange
+        4. Record the trade and send Telegram notification
         """
         symbol = opp['symbol']
         buy_ex = opp['buy_ex']
         sell_ex = opp['sell_ex']
-        
-        logger.error(
-            f"🔴 LIVE ORDER EXECUTION NOT IMPLEMENTED\n"
-            f"   Attempted to execute: {symbol} on {buy_ex} -> {sell_ex}\n"
-            f"   This requires authenticated exchange clients and should be implemented carefully.\n"
-            f"   Set DRY_RUN=True in settings.py to use simulation mode."
+        qty = opp['qty']
+        buy_price = opp['buy_avg']
+        sell_price = opp['sell_avg']
+        net_profit = opp['net']
+        roi_pct = opp['roi_pct']
+
+        # Verify REST clients are available
+        buy_client = self.rest_clients.get(buy_ex)
+        sell_client = self.rest_clients.get(sell_ex)
+
+        if not buy_client or not sell_client:
+            missing = []
+            if not buy_client:
+                missing.append(buy_ex)
+            if not sell_client:
+                missing.append(sell_ex)
+            logger.error(
+                f"🔴 Cannot execute live trade: no REST client for {', '.join(missing)}\n"
+                f"   Set DRY_RUN=True or configure API keys for these exchanges."
+            )
+            return {
+                'status': 'error',
+                'reason': f'No REST client configured for: {", ".join(missing)}',
+                'opportunity': opp,
+            }
+
+        logger.info(
+            f"🔴 [LIVE] EXECUTING ARBITRAGE TRADE\n"
+            f"   Symbol: {symbol}\n"
+            f"   Buy:  {qty:.6f} @ ${buy_price:.6f} on {buy_ex}\n"
+            f"   Sell: {qty:.6f} @ ${sell_price:.6f} on {sell_ex}\n"
+            f"   Expected Net: ${net_profit:.4f} ({roi_pct:.3f}% ROI)"
         )
-        
-        return {
-            'status': 'error',
-            'reason': 'Live trading not implemented - requires authenticated exchange clients',
-            'opportunity': opp,
-            'message': 'Enable DRY_RUN mode or implement authenticated trading infrastructure'
-        }
-        
-        # TEMPLATE for future implementation:
-        # try:
-        #     # 1. Verify sufficient balances
-        #     # buy_balance = await self.get_balance(buy_ex, quote_currency)
-        #     # sell_balance = await self.get_balance(sell_ex, base_currency)
-        #     
-        #     # 2. Place buy order
-        #     # buy_order = await self.place_order(buy_ex, symbol, 'buy', qty, buy_price)
-        #     
-        #     # 3. Wait for buy fill confirmation
-        #     # await self.wait_for_fill(buy_order)
-        #     
-        #     # 4. Place sell order
-        #     # sell_order = await self.place_order(sell_ex, symbol, 'sell', qty, sell_price)
-        #     
-        #     # 5. Wait for sell fill confirmation
-        #     # await self.wait_for_fill(sell_order)
-        #     
-        #     # 6. Record successful trade
-        #     # self._record_trade(symbol, order_details)
-        #     
-        #     # return {'status': 'success', 'order_info': order_details}
-        # except Exception as e:
-        #     # Handle errors, possibly cancel unfilled orders
-        #     # logger.exception(f"Live order execution failed: {e}")
-        #     # return {'status': 'error', 'reason': str(e)}
+
+        # Convert symbol format for exchange APIs (BTC-USDT -> BTCUSDT for most)
+        api_symbol = symbol.replace("-", "")
+
+        try:
+            loop = asyncio.get_event_loop()
+
+            # Place buy order
+            buy_result = loop.run_until_complete(
+                buy_client.place_order(api_symbol, qty, buy_price)
+            )
+            logger.info(f"🟢 [LIVE] Buy order placed on {buy_ex}: {buy_result}")
+
+            # Place sell order
+            sell_result = loop.run_until_complete(
+                sell_client.place_order(api_symbol, qty, sell_price)
+            )
+            logger.info(f"🟢 [LIVE] Sell order placed on {sell_ex}: {sell_result}")
+
+            # Record trade
+            order_info = {
+                'mode': 'live',
+                'symbol': symbol,
+                'buy_exchange': buy_ex,
+                'sell_exchange': sell_ex,
+                'quantity': qty,
+                'buy_price': buy_price,
+                'sell_price': sell_price,
+                'net_profit': net_profit,
+                'roi_pct': roi_pct,
+                'buy_order_result': buy_result,
+                'sell_order_result': sell_result,
+            }
+            self._record_trade(symbol, order_info)
+
+            # Send Telegram notification
+            try:
+                asyncio.ensure_future(self.telegram.notify_opportunity(opp))
+            except RuntimeError:
+                pass
+
+            return {
+                'status': 'executed',
+                'order_info': order_info,
+                'message': f'Live orders placed on {buy_ex} and {sell_ex}',
+            }
+
+        except Exception as e:
+            logger.exception(f"🔴 [LIVE] Order execution failed: {e}")
+            return {
+                'status': 'error',
+                'reason': str(e),
+                'opportunity': opp,
+            }
     
     def get_statistics(self) -> Dict:
         """Get execution statistics."""

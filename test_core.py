@@ -1057,6 +1057,170 @@ def test_strategy_dispatcher():
     print(f"\n✅ Strategy dispatcher integration verified")
 
 
+def test_live_trading_path():
+    """
+    TEST 17: Live trading execution path.
+    Verifies that OrderExecutor correctly handles live mode with REST clients.
+    """
+    print("\n" + "="*60)
+    print("TEST 17: Live Trading Execution Path")
+    print("="*60)
+
+    # Mock REST client
+    class MockRESTClient:
+        def __init__(self, name):
+            self.name = name
+            self.orders_placed = []
+        async def place_order(self, symbol, amount, price):
+            self.orders_placed.append({"symbol": symbol, "amount": amount, "price": price})
+            return {"order_id": f"MOCK_{self.name}_{len(self.orders_placed)}", "status": "filled"}
+
+    # Test 1: Live executor with REST clients
+    mock_bybit = MockRESTClient("Bybit")
+    mock_mexc = MockRESTClient("MEXC")
+    executor = OrderExecutor(dry_run=False, rest_clients={"Bybit": mock_bybit, "MEXC": mock_mexc})
+    assert not executor.dry_run, "Should be live mode"
+    print(f"  ✅ Live executor initialized with {len(executor.rest_clients)} REST clients")
+
+    # Test 2: Live execution with REST clients
+    opp = {
+        "symbol": "BTC-USDT",
+        "buy_ex": "Bybit",
+        "sell_ex": "MEXC",
+        "qty": 0.001,
+        "buy_avg": 50000.0,
+        "sell_avg": 50100.0,
+        "net": 0.05,
+        "roi_pct": 0.1,
+    }
+    import asyncio
+    loop = asyncio.get_event_loop()
+    result = executor.execute_arbitrage(opp)
+    assert result["status"] == "executed", f"Expected 'executed', got {result['status']}"
+    assert len(mock_bybit.orders_placed) == 1, "Buy order should have been placed"
+    assert len(mock_mexc.orders_placed) == 1, "Sell order should have been placed"
+    print(f"  ✅ Live trade executed: buy on Bybit, sell on MEXC")
+    print(f"     Buy order: {mock_bybit.orders_placed[0]}")
+    print(f"     Sell order: {mock_mexc.orders_placed[0]}")
+
+    # Test 3: Live execution without REST client → error
+    executor_no_client = OrderExecutor(dry_run=False, rest_clients={})
+    result2 = executor_no_client.execute_arbitrage(opp)
+    assert result2["status"] == "error", f"Expected 'error', got {result2['status']}"
+    assert "No REST client" in result2["reason"]
+    print(f"  ✅ Missing REST client correctly returns error: {result2['reason']}")
+
+    # Test 4: Live execution with partial REST clients → error
+    executor_partial = OrderExecutor(dry_run=False, rest_clients={"Bybit": mock_bybit})
+    result3 = executor_partial.execute_arbitrage(opp)
+    assert result3["status"] == "error", f"Expected 'error', got {result3['status']}"
+    assert "MEXC" in result3["reason"]
+    print(f"  ✅ Partial REST client correctly returns error for missing exchange")
+
+    print(f"\n✅ Live trading path verified")
+
+
+def test_exchange_state():
+    """
+    TEST 18: Exchange state monitoring.
+    """
+    print("\n" + "="*60)
+    print("TEST 18: Exchange State Monitoring")
+    print("="*60)
+
+    from core.state import ExchangeState, STATE
+
+    # Test state tracking
+    state = ExchangeState("TestExchange")
+    assert not state.online, "Should start offline"
+    
+    state.set_online()
+    assert state.online, "Should be online after set_online()"
+    assert state.error is None
+    
+    state.set_offline("Connection timeout")
+    assert not state.online
+    assert state.error == "Connection timeout"
+    print(f"  ✅ ExchangeState tracking works: online/offline with error")
+
+    # Test as_dict
+    d = state.as_dict()
+    assert d["name"] == "TestExchange"
+    assert d["online"] is False
+    assert d["error"] == "Connection timeout"
+    print(f"  ✅ ExchangeState.as_dict(): {d}")
+
+    # Test STATE registry
+    STATE["TestExchange"] = state
+    assert "TestExchange" in STATE
+    print(f"  ✅ STATE registry: {len(STATE)} exchanges tracked")
+
+    print(f"\n✅ Exchange state monitoring verified")
+
+
+def test_throttle():
+    """
+    TEST 19: API rate throttling.
+    """
+    import time
+    print("\n" + "="*60)
+    print("TEST 19: API Rate Throttle")
+    print("="*60)
+
+    from utils.throttle import Throttle
+
+    throttle = Throttle(interval=0.1)
+
+    # First call should be allowed
+    assert throttle.allow("Bybit") is True
+    print(f"  ✅ First call allowed")
+
+    # Immediate second call should be blocked
+    assert throttle.allow("Bybit") is False
+    print(f"  ✅ Immediate repeat blocked")
+
+    # Different key should be allowed
+    assert throttle.allow("KuCoin") is True
+    print(f"  ✅ Different key allowed concurrently")
+
+    # After interval, should be allowed again
+    time.sleep(0.15)
+    assert throttle.allow("Bybit") is True
+    print(f"  ✅ After interval (0.1s) → allowed again")
+
+    print(f"\n✅ API rate throttle verified")
+
+
+def test_engine_rest_clients():
+    """
+    TEST 20: ArbitrageEngine passes REST clients to OrderExecutor.
+    """
+    print("\n" + "="*60)
+    print("TEST 20: Engine ↔ OrderExecutor REST Client Wiring")
+    print("="*60)
+
+    from core.price_store import PriceStore
+    from core.arbitrage import ArbitrageEngine
+
+    store = PriceStore()
+
+    # Without REST clients (dry-run default)
+    engine1 = ArbitrageEngine(store)
+    assert engine1.executor.dry_run is True
+    assert engine1.executor.rest_clients == {}
+    print(f"  ✅ Default engine: dry_run=True, no REST clients")
+
+    # With REST clients
+    class MockClient:
+        async def place_order(self, s, a, p): return {}
+
+    engine2 = ArbitrageEngine(store, rest_clients={"Bybit": MockClient()})
+    assert "Bybit" in engine2.executor.rest_clients
+    print(f"  ✅ Engine with REST clients: passed to OrderExecutor")
+
+    print(f"\n✅ Engine REST client wiring verified")
+
+
 def main():
     """Run all tests."""
     print("\n" + "="*70)
@@ -1080,6 +1244,10 @@ def main():
         test_multi_exchange_best_pair()
         test_all_14_strategies()
         test_strategy_dispatcher()
+        test_live_trading_path()
+        test_exchange_state()
+        test_throttle()
+        test_engine_rest_clients()
         
         print("\n" + "="*70)
         print(" ✅ ALL TESTS PASSED")
