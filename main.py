@@ -2,7 +2,13 @@
 """
 main.py — diagnostic monitor + startup.
 Enhanced with health monitoring and configurable settings.
+
+Usage:
+    python main.py                  # default (dry-run)
+    python main.py --mode dry-run   # explicit dry-run
+    python main.py --mode live      # live trading (requires setup)
 """
+import argparse
 import asyncio
 import logging
 from typing import List
@@ -12,24 +18,59 @@ import os
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import settings
+
+
+def parse_args(argv=None):
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Cryptocurrency Arbitrage Bot",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Examples:\n"
+               "  python main.py --mode dry-run      Run in safe simulation mode\n"
+               "  python main.py --mode live          Run with real orders (requires setup)\n"
+               "  python main.py --symbols BTC-USDT,ETH-USDT\n",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["dry-run", "live"],
+        default=None,
+        help="Execution mode: 'dry-run' (default, safe) or 'live' (real orders)",
+    )
+    parser.add_argument(
+        "--symbols",
+        type=str,
+        default=None,
+        help="Comma-separated trading pairs, e.g. BTC-USDT,ETH-USDT",
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default=None,
+        help="Override log level",
+    )
+    return parser.parse_args(argv)
+
+
+def apply_cli_overrides(args):
+    """Apply CLI arguments as overrides to settings module."""
+    if args.mode is not None:
+        settings.DRY_RUN = args.mode == "dry-run"
+    if args.symbols is not None:
+        settings.TRADING_SYMBOLS = [s.strip() for s in args.symbols.split(",") if s.strip()]
+    if args.log_level is not None:
+        settings.LOG_LEVEL = args.log_level
+
+
 from core.price_store import PriceStore
 from core.arbitrage import ArbitrageEngine
 from exchanges.bybit_ws import BybitWS
 from exchanges.kucoin_ws import KucoinWS
 from exchanges.htx_ws import HtxWS
 from exchanges.mexc import MEXC
-import settings
 from utils.telegram import TelegramNotifier
 
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
 logger = logging.getLogger("arbitrage_bot")
-
-# Print configuration at startup
-logger.info("\n" + settings.get_config_summary())
 
 
 async def _monitor_store(store: PriceStore, interval: float = None):
@@ -67,7 +108,20 @@ async def _monitor_store(store: PriceStore, interval: float = None):
         return
 
 
-async def main():
+async def main(args=None):
+    # Apply CLI overrides before anything else
+    if args is not None:
+        apply_cli_overrides(args)
+
+    # Configure logging (after overrides)
+    logging.basicConfig(
+        level=getattr(logging, settings.LOG_LEVEL),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
+
+    # Print configuration at startup
+    logger.info("\n" + settings.get_config_summary())
+
     # Use symbols from settings
     symbols: List[str] = settings.TRADING_SYMBOLS
 
@@ -130,6 +184,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        cli_args = parse_args()
+        asyncio.run(main(cli_args))
     except KeyboardInterrupt:
         pass

@@ -43,12 +43,34 @@ Required packages:
 
 ## Quick Start
 
+### One-liner: pull & run (Windows)
+
+```cmd
+cd C:\Users\HP_PC\arbitrage-bot && git pull && pip install -r requirements.txt && python main.py --mode dry-run
+```
+
+Or simply double-click **`start.bat`** (included in the repo).
+
+```cmd
+start.bat              &REM dry-run (default)
+start.bat live         &REM live trading
+```
+
 ### 1. Basic Usage (Dry Run Mode - Safe)
 
 By default, the bot runs in **dry-run mode**, which simulates all trades without placing real orders:
 
 ```bash
-python -m main
+python main.py --mode dry-run
+```
+
+Other CLI options:
+
+```bash
+python main.py --mode live                          # live trading (requires setup)
+python main.py --symbols BTC-USDT,ETH-USDT          # override trading pairs
+python main.py --log-level DEBUG                     # verbose logging
+python main.py --mode dry-run --symbols BTC-USDT     # combine options
 ```
 
 This will:

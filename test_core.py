@@ -279,6 +279,48 @@ def test_health_monitoring():
     print("\n✅ Health monitoring tests passed")
 
 
+def test_cli_arguments():
+    """Test command-line argument parsing."""
+    print("\n" + "="*60)
+    print("TEST 9: CLI Argument Parsing")
+    print("="*60)
+
+    from main import parse_args, apply_cli_overrides
+
+    # --mode dry-run sets DRY_RUN=True
+    args = parse_args(["--mode", "dry-run"])
+    assert args.mode == "dry-run"
+    saved = settings.DRY_RUN
+    apply_cli_overrides(args)
+    assert settings.DRY_RUN is True, "dry-run should set DRY_RUN=True"
+    print("✅ --mode dry-run works")
+
+    # --mode live sets DRY_RUN=False
+    args = parse_args(["--mode", "live"])
+    apply_cli_overrides(args)
+    assert settings.DRY_RUN is False, "live should set DRY_RUN=False"
+    print("✅ --mode live works")
+
+    # no --mode keeps existing value
+    settings.DRY_RUN = True
+    args = parse_args([])
+    apply_cli_overrides(args)
+    assert settings.DRY_RUN is True, "no --mode should keep default"
+    print("✅ no --mode keeps default")
+
+    # --symbols override
+    args = parse_args(["--symbols", "BTC-USDT,ETH-USDT"])
+    apply_cli_overrides(args)
+    assert settings.TRADING_SYMBOLS == ["BTC-USDT", "ETH-USDT"]
+    print("✅ --symbols override works")
+
+    # Restore defaults
+    settings.DRY_RUN = saved
+    settings.TRADING_SYMBOLS = os.getenv("ARB_SYMBOLS", "BTC-USDT,ETH-USDT,SOL-USDT,BNB-USDT,XRP-USDT,DOGE-USDT,LTC-USDT,ADA-USDT,MATIC-USDT,DOT-USDT").split(",")
+
+    print("\n✅ CLI argument tests passed")
+
+
 def main():
     """Run all tests."""
     print("\n" + "="*70)
@@ -294,6 +336,7 @@ def main():
         test_bybit_rest()
         test_telegram_notifier()
         test_health_monitoring()
+        test_cli_arguments()
         
         print("\n" + "="*70)
         print(" ✅ ALL TESTS PASSED")
