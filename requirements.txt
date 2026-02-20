@@ -13,7 +13,7 @@ ccxt>=4.0.0
 psutil>=5.9.0
 
 # Cryptography for API authentication
-cryptography>=41.0.0
+cryptography>=46.0.5
 
 # Data handling
 python-dotenv>=1.0.0
