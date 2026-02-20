@@ -172,6 +172,7 @@ class StrategyDispatcher:
             self.strategy_stats['TRIANGULAR']['calls'] += 1
             tri = getattr(self.bot_manager, 'triangular_arb', None)
             if tri and hasattr(tri, 'routes'):
+                from core.exchange_config import EXCHANGE_PARAMS
                 for route in tri.routes:
                     # route = (leg1, leg2, leg3) e.g. ("BTC-USDT","ETH-BTC","ETH-USDT")
                     legs_ok = all(snap.get(s) for s in route)
@@ -194,7 +195,9 @@ class StrategyDispatcher:
                                 if mid1 > 0 and cost > 0:
                                     implied = (mid2 / mid1) if mid1 > 0 else 0
                                     roi = ((implied / cost) - 1) * 100 if cost > 0 else 0
-                                    fee_pct = 0.3  # 3 legs × 0.1% taker
+                                    # Use exchange-specific taker fee × 3 legs
+                                    ex_fee = EXCHANGE_PARAMS.get(ex, {}).get("taker", 0.001)
+                                    fee_pct = ex_fee * 3 * 100  # 3 legs, convert to %
                                     net_roi = roi - fee_pct
                                     if net_roi > settings.MIN_NET_ROI_PCT:
                                         opportunities.append({
@@ -209,12 +212,14 @@ class StrategyDispatcher:
 
             # --- SMART_ORDER: detect when spread is wide enough for limit orders ---
             self.strategy_stats['SMART_ORDER']['calls'] += 1
+            from core.exchange_config import EXCHANGE_PARAMS as EP
             for symbol, exmap in snap.items():
                 for ex, rec in exmap.items():
                     bid, ask = rec.get("bid"), rec.get("ask")
                     if bid and ask and ask > 0:
                         spread_pct = (ask - bid) / ask * 100
-                        fee_pct = 0.1  # typical taker fee
+                        # Use exchange-specific taker fee
+                        fee_pct = EP.get(ex, {}).get("taker", 0.001) * 100
                         # Spread wide enough to profit from limit orders
                         if spread_pct > fee_pct * 2:
                             opportunities.append({
