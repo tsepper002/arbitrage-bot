@@ -449,8 +449,8 @@ def test_arbitrage_engine_logic():
     engine3 = ArbitrageEngine(store3, min_net_pct=0.05, safety_factor=1.0)
 
     async def run_fee_test():
-        # Tiny spread: buy at 1000.00, sell at 1000.10 → $0.10 gross per unit
-        # Taker fees ~0.06% each side → fees ≈ $1.20 per unit → net negative
+        # Tiny spread: buy at 1000.00, sell at 1000.10 → $0.10 gross per 1 SOL
+        # Taker fees ~0.06% each side → total fees ≈ $1.20 for 1 SOL → net negative
         await store3.update_levels(
             "Bybit", "SOL-USDT",
             bids_levels=[(999.0, 10.0)],
@@ -476,6 +476,7 @@ def test_arbitrage_engine_logic():
     print("✅ All 4 exchanges have valid fee configurations")
 
     # --- Test 6: order executor correctly handles the opportunity ---
+    assert engine.executor is not None, "Engine should have an executor"
     result = engine.executor.execute_arbitrage(best)
     assert result['status'] == 'simulated', f"Dry run should simulate, got {result['status']}"
     assert result['order_info']['net_profit'] > 0, "Recorded profit should be positive"
