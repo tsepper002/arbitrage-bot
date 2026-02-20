@@ -39,6 +39,7 @@ class ArbitrageEngine:
                  executor: Optional[OrderExecutor] = None,
                  risk_manager = None,
                  strategy_manager = None,
+                 strategy_dispatcher = None,
                  flash_crash_protector = None,
                  wash_trading_filter = None,
                  orderbook_imbalance_detector = None,
@@ -74,6 +75,7 @@ class ArbitrageEngine:
         # Optional integrations
         self.risk_manager = risk_manager
         self.strategy_manager = strategy_manager
+        self.strategy_dispatcher = strategy_dispatcher
         
         # Professional components
         self.flash_crash_protector = flash_crash_protector
@@ -335,6 +337,9 @@ class ArbitrageEngine:
                 # Scan for opportunities
                 opps = await self.scan_once(s)
                 if opps:
+                    # Feed opportunity count back to strategy dispatcher
+                    if self.strategy_dispatcher:
+                        self.strategy_dispatcher.record_engine_opportunities(len(opps))
                     for o in opps:
                         # Check risk manager before executing
                         if self.risk_manager:

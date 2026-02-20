@@ -66,9 +66,16 @@ class MEXC:
 
                         try:
                             ts = time.time()
-                            bids_levels = [(float(b[0]), float(b[1])) for b in bids]
-                            asks_levels = [(float(a[0]), float(a[1])) for a in asks]
-                        except (ValueError, IndexError, TypeError):
+                            # MEXC v3 sends depth entries as {"p": price, "v": volume} dicts
+                            # or as [price, volume] arrays — handle both formats
+                            sample = bids[0]
+                            if isinstance(sample, dict):
+                                bids_levels = [(float(b["p"]), float(b["v"])) for b in bids]
+                                asks_levels = [(float(a["p"]), float(a["v"])) for a in asks]
+                            else:
+                                bids_levels = [(float(b[0]), float(b[1])) for b in bids]
+                                asks_levels = [(float(a[0]), float(a[1])) for a in asks]
+                        except (ValueError, IndexError, TypeError, KeyError):
                             continue
 
                         # Convert MEXC symbol (BTCUSDT) back to standard format (BTC-USDT)

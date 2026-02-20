@@ -708,6 +708,7 @@ class IntegratedArbitrageBot:
                 executor=executor,
                 risk_manager=self.risk_manager,
                 strategy_manager=self.strategy_manager,
+                strategy_dispatcher=self.strategy_dispatcher,
                 flash_crash_protector=self.flash_crash_protector,
                 wash_trading_filter=self.wash_trading_filter,
                 orderbook_imbalance_detector=self.orderbook_imbalance_detector,
@@ -990,15 +991,18 @@ class IntegratedArbitrageBot:
         """Background task for running strategy dispatcher scans."""
         try:
             while True:
-                # Fast scan: update statistics (called every scan cycle)
+                # Fast scan: runs TRIANGULAR, SMART_ORDER, VOLATILITY strategies
+                # (CROSS_EXCHANGE is handled by ArbitrageEngine.run())
                 if self.strategy_dispatcher:
-                    await self.strategy_dispatcher.scan_fast()
+                    fast_opps = await self.strategy_dispatcher.scan_fast()
+                    if fast_opps:
+                        logger.info(f"🎯 Fast strategies found {len(fast_opps)} opportunities")
                 
-                # Slow scan: run auxiliary strategies periodically
+                # Slow scan: run auxiliary strategies periodically (every 60s)
                 if self.strategy_dispatcher and self.strategy_dispatcher.should_scan_slow():
                     slow_opps = await self.strategy_dispatcher.scan_slow()
                     if slow_opps:
-                        logger.info(f"🎯 Strategy dispatcher found {len(slow_opps)} opportunities from auxiliary strategies")
+                        logger.info(f"🎯 Slow strategies found {len(slow_opps)} opportunities")
                 
                 await asyncio.sleep(settings.SCAN_INTERVAL_SEC)
                 

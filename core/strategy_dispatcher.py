@@ -32,7 +32,7 @@ class StrategyDispatcher:
     def __init__(self, bot_manager):
         self.bot_manager = bot_manager
         self.last_slow_scan = 0
-        self.slow_scan_interval = 300  # 5 minutes
+        self.slow_scan_interval = 60  # 1 minute
         
         # Price history for strategies that need time series
         # symbol -> deque of (timestamp, mid_price)
@@ -143,27 +143,114 @@ class StrategyDispatcher:
         history = self._price_history.get(symbol, deque())
         return [price for _, price in history]
     
+    def record_engine_opportunities(self, count: int):
+        """Called by main loop to feed ArbitrageEngine results into stats."""
+        self.strategy_stats['CROSS_EXCHANGE']['opportunities'] += count
+
     async def scan_fast(self) -> List[Dict[str, Any]]:
         """
         Scan fast strategies (arbitrage).
         Called every scan loop (~0.15s).
+        CROSS_EXCHANGE is handled by ArbitrageEngine.scan_once() — stats
+        are fed back via record_engine_opportunities().
+        TRIANGULAR, SMART_ORDER, VOLATILITY are scanned here.
         """
         opportunities = []
-        
+
         try:
-            # Fast strategies are handled by ArbitrageEngine.scan_once()
-            # We track call counts here for statistics
             self.strategy_stats['CROSS_EXCHANGE']['calls'] += 1
-            self.strategy_stats['TRIANGULAR']['calls'] += 1
-            self.strategy_stats['SMART_ORDER']['calls'] += 1
-            self.strategy_stats['VOLATILITY']['calls'] += 1
-            
-            # Update price history on every fast scan for slow strategies to use
+
+            # Update price history on every fast scan for slow strategies
             self._update_price_history()
-            
+
+            store = self._get_price_store()
+            if not store:
+                return opportunities
+            snap = store.snapshot()
+
+            # --- TRIANGULAR: A→B→C→A within same exchange ---
+            self.strategy_stats['TRIANGULAR']['calls'] += 1
+            tri = getattr(self.bot_manager, 'triangular_arb', None)
+            if tri and hasattr(tri, 'routes'):
+                for route in tri.routes:
+                    # route = (leg1, leg2, leg3) e.g. ("BTC-USDT","ETH-BTC","ETH-USDT")
+                    legs_ok = all(snap.get(s) for s in route)
+                    if not legs_ok:
+                        continue
+                    for ex in snap.get(route[0], {}):
+                        # check same exchange has all 3 legs
+                        if all(ex in snap.get(s, {}) for s in route):
+                            p = []
+                            for s in route:
+                                rec = snap[s][ex]
+                                bid, ask = rec.get("bid"), rec.get("ask")
+                                if bid and ask:
+                                    p.append((bid, ask))
+                            if len(p) == 3:
+                                # buy leg0 (use ask), sell via leg1+leg2
+                                cost = p[0][1]  # ask of leg0
+                                mid1 = (p[1][0] + p[1][1]) / 2
+                                mid2 = (p[2][0] + p[2][1]) / 2
+                                if mid1 > 0 and cost > 0:
+                                    implied = (mid2 / mid1) if mid1 > 0 else 0
+                                    roi = ((implied / cost) - 1) * 100 if cost > 0 else 0
+                                    fee_pct = 0.3  # 3 legs × 0.1% taker
+                                    net_roi = roi - fee_pct
+                                    if net_roi > settings.MIN_NET_ROI_PCT:
+                                        opportunities.append({
+                                            'strategy': 'TRIANGULAR',
+                                            'type': 'triangular',
+                                            'exchange': ex,
+                                            'route': route,
+                                            'data': {'roi_pct': net_roi}
+                                        })
+                                        self.strategy_stats['TRIANGULAR']['opportunities'] += 1
+                                        logger.info(f"   🔺 TRI: {ex} {route} net_roi={net_roi:.3f}%")
+
+            # --- SMART_ORDER: detect when spread is wide enough for limit orders ---
+            self.strategy_stats['SMART_ORDER']['calls'] += 1
+            for symbol, exmap in snap.items():
+                for ex, rec in exmap.items():
+                    bid, ask = rec.get("bid"), rec.get("ask")
+                    if bid and ask and ask > 0:
+                        spread_pct = (ask - bid) / ask * 100
+                        fee_pct = 0.1  # typical taker fee
+                        # Spread wide enough to profit from limit orders
+                        if spread_pct > fee_pct * 2:
+                            opportunities.append({
+                                'strategy': 'SMART_ORDER',
+                                'type': 'limit_opportunity',
+                                'symbol': symbol,
+                                'exchange': ex,
+                                'data': {'spread_pct': spread_pct, 'ratio': spread_pct / fee_pct}
+                            })
+                            self.strategy_stats['SMART_ORDER']['opportunities'] += 1
+                            break  # one per symbol
+
+            # --- VOLATILITY: detect high short-term volatility ---
+            self.strategy_stats['VOLATILITY']['calls'] += 1
+            for symbol in list(self._price_history.keys()):
+                prices = self._get_prices_list(symbol)
+                if len(prices) < 10:
+                    continue
+                recent = prices[-10:]
+                mean_p = sum(recent) / len(recent)
+                if mean_p <= 0:
+                    continue
+                variance = sum((p - mean_p) ** 2 for p in recent) / len(recent)
+                volatility = (variance ** 0.5) / mean_p * 100
+                if volatility > 0.15:  # > 0.15% volatility in 10 ticks
+                    opportunities.append({
+                        'strategy': 'VOLATILITY',
+                        'type': 'high_volatility',
+                        'symbol': symbol,
+                        'data': {'volatility_pct': volatility}
+                    })
+                    self.strategy_stats['VOLATILITY']['opportunities'] += 1
+
         except Exception as e:
             logger.error(f"Error in fast strategy scan: {e}")
-        
+
         return opportunities
     
     async def scan_slow(self) -> List[Dict[str, Any]]:

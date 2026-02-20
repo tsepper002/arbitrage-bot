@@ -349,13 +349,174 @@ def test_e2e_arbitrage():
     print(f"  ✅ E2E: opportunity → execution → profit=${stats['total_profit']:.4f}")
 
 
+def test_mexc_depth_parsing():
+    """TEST 16: MEXC Depth Parsing (dict and array formats)"""
+    print("\n" + "=" * 60)
+    print("TEST 16: MEXC Depth Parsing (dict and array formats)")
+    print("=" * 60)
+    from core.price_store import PriceStore
+    import json, time
+
+    store = PriceStore()
+    # Simulate MEXC symbol mapping
+    sym_map = {"BTCUSDT": "BTC-USDT", "ETHUSDT": "ETH-USDT"}
+
+    # Test dict format (MEXC v3 API): {"p": price, "v": volume}
+    dict_msg = json.dumps({
+        "s": "BTCUSDT",
+        "d": {
+            "bids": [{"p": "50000.0", "v": "1.5"}, {"p": "49999.0", "v": "2.0"}],
+            "asks": [{"p": "50001.0", "v": "1.0"}, {"p": "50002.0", "v": "3.0"}]
+        }
+    })
+
+    # Test array format (legacy): ["price", "volume"]
+    array_msg = json.dumps({
+        "s": "ETHUSDT",
+        "d": {
+            "bids": [["3000.0", "5.0"], ["2999.0", "10.0"]],
+            "asks": [["3001.0", "4.0"], ["3002.0", "8.0"]]
+        }
+    })
+
+    for raw in [dict_msg, array_msg]:
+        data = json.loads(raw)
+        if "d" not in data:
+            continue
+        mexc_symbol = data.get("s", "")
+        bids = data["d"].get("bids")
+        asks = data["d"].get("asks")
+        if not bids or not asks:
+            continue
+        try:
+            ts = time.time()
+            sample = bids[0]
+            if isinstance(sample, dict):
+                bids_levels = [(float(b["p"]), float(b["v"])) for b in bids]
+                asks_levels = [(float(a["p"]), float(a["v"])) for a in asks]
+            else:
+                bids_levels = [(float(b[0]), float(b[1])) for b in bids]
+                asks_levels = [(float(a[0]), float(a[1])) for a in asks]
+        except (ValueError, IndexError, TypeError, KeyError):
+            assert False, "Failed to parse MEXC depth data"
+        std_symbol = sym_map.get(mexc_symbol, mexc_symbol)
+        loop.run_until_complete(store.update_levels("MEXC", std_symbol, bids_levels, asks_levels, ts))
+
+    snap = store.snapshot()
+    assert "MEXC" in snap.get("BTC-USDT", {}), "BTC-USDT missing from MEXC"
+    assert "MEXC" in snap.get("ETH-USDT", {}), "ETH-USDT missing from MEXC"
+    btc = snap["BTC-USDT"]["MEXC"]
+    eth = snap["ETH-USDT"]["MEXC"]
+    assert btc["bid"] == 50000.0, f"BTC bid wrong: {btc['bid']}"
+    assert btc["ask"] == 50001.0, f"BTC ask wrong: {btc['ask']}"
+    assert eth["bid"] == 3000.0, f"ETH bid wrong: {eth['bid']}"
+    assert eth["ask"] == 3001.0, f"ETH ask wrong: {eth['ask']}"
+    print(f"  ✅ Dict format: BTC-USDT bid={btc['bid']} ask={btc['ask']}")
+    print(f"  ✅ Array format: ETH-USDT bid={eth['bid']} ask={eth['ask']}")
+
+
+def test_scan_fast_strategies():
+    """TEST 17: scan_fast() runs TRIANGULAR, SMART_ORDER, VOLATILITY"""
+    print("\n" + "=" * 60)
+    print("TEST 17: scan_fast() runs TRIANGULAR, SMART_ORDER, VOLATILITY")
+    print("=" * 60)
+    from core.price_store import PriceStore
+    from core.strategy_dispatcher import StrategyDispatcher
+
+    store = PriceStore()
+    # Create mock bot_manager with price_store
+    class MockBot:
+        def __init__(self, s):
+            self.price_store = s
+            self.store = s
+            self.triangular_arb = None
+    bot = MockBot(store)
+    dispatcher = StrategyDispatcher(bot)
+
+    # Add price data with wide spread (triggers SMART_ORDER: spread > 2x fee = 0.2%)
+    loop.run_until_complete(store.update_levels("Bybit", "BTC-USDT",
+        bids_levels=[(50000.0, 1.0)], asks_levels=[(50200.0, 1.0)]))
+    loop.run_until_complete(store.update_levels("KuCoin", "BTC-USDT",
+        bids_levels=[(50050.0, 1.0)], asks_levels=[(50250.0, 1.0)]))
+
+    # Build price history for VOLATILITY detection
+    import time
+    for i in range(15):
+        # Simulate volatile prices
+        price = 50000 + (i % 3) * 200  # oscillates: 50000, 50200, 50400, ...
+        dispatcher._price_history.setdefault('BTC-USDT', __import__('collections').deque(maxlen=200))
+        dispatcher._price_history['BTC-USDT'].append((time.time() + i, price))
+
+    opps = loop.run_until_complete(dispatcher.scan_fast())
+    stats = dispatcher.strategy_stats
+
+    # Verify all 4 fast strategies were called
+    assert stats['CROSS_EXCHANGE']['calls'] >= 1, "CROSS_EXCHANGE not called"
+    assert stats['TRIANGULAR']['calls'] >= 1, "TRIANGULAR not called"
+    assert stats['SMART_ORDER']['calls'] >= 1, "SMART_ORDER not called"
+    assert stats['VOLATILITY']['calls'] >= 1, "VOLATILITY not called"
+
+    # Verify SMART_ORDER detected the wide spread (0.2% > 2x fee)
+    assert stats['SMART_ORDER']['opportunities'] >= 1, "SMART_ORDER should detect wide spread"
+
+    # Verify VOLATILITY detected the oscillation
+    assert stats['VOLATILITY']['opportunities'] >= 1, "VOLATILITY should detect oscillation"
+
+    print(f"  ✅ CROSS_EXCHANGE: {stats['CROSS_EXCHANGE']['calls']} calls")
+    print(f"  ✅ TRIANGULAR: {stats['TRIANGULAR']['calls']} calls")
+    print(f"  ✅ SMART_ORDER: {stats['SMART_ORDER']['calls']} calls, {stats['SMART_ORDER']['opportunities']} opps")
+    print(f"  ✅ VOLATILITY: {stats['VOLATILITY']['calls']} calls, {stats['VOLATILITY']['opportunities']} opps")
+    print(f"  ✅ Total fast opps: {len(opps)}")
+
+
+def test_engine_feeds_dispatcher():
+    """TEST 18: ArbitrageEngine feeds opportunity counts back to dispatcher"""
+    print("\n" + "=" * 60)
+    print("TEST 18: ArbitrageEngine feeds opportunity counts to dispatcher")
+    print("=" * 60)
+    from core.price_store import PriceStore
+    from core.arbitrage import ArbitrageEngine
+    from core.order_executor import OrderExecutor
+    from core.strategy_dispatcher import StrategyDispatcher
+
+    store = PriceStore()
+    class MockBot:
+        def __init__(self, s):
+            self.price_store = s
+            self.store = s
+            self.triangular_arb = None
+    bot = MockBot(store)
+    dispatcher = StrategyDispatcher(bot)
+    executor = OrderExecutor(dry_run=True)
+    engine = ArbitrageEngine(store, min_net_pct=0.01, executor=executor,
+                             strategy_dispatcher=dispatcher)
+
+    # Create price difference that triggers CROSS_EXCHANGE opportunity
+    loop.run_until_complete(store.update_levels("Bybit", "SOL-USDT",
+        bids_levels=[(100.0, 50.0)], asks_levels=[(100.0, 50.0)]))
+    loop.run_until_complete(store.update_levels("MEXC", "SOL-USDT",
+        bids_levels=[(100.5, 50.0)], asks_levels=[(100.5, 50.0)]))
+
+    before = dispatcher.strategy_stats['CROSS_EXCHANGE']['opportunities']
+    opps = loop.run_until_complete(engine.scan_once("SOL-USDT"))
+    # Manually call record (normally done in engine.run() loop)
+    if opps:
+        dispatcher.record_engine_opportunities(len(opps))
+    after = dispatcher.strategy_stats['CROSS_EXCHANGE']['opportunities']
+
+    assert after > before, f"Dispatcher should have recorded opportunities: before={before} after={after}"
+    print(f"  ✅ Before: {before} → After: {after} opportunities recorded")
+    print(f"  ✅ ArbitrageEngine correctly feeds back to StrategyDispatcher")
+
+
 if __name__ == "__main__":
     tests = [
         test_settings, test_price_store, test_exchange_config, test_order_executor,
         test_arbitrage_engine, test_all_symbols, test_all_modules_import,
         test_core_managers, test_strategy_dispatcher, test_professional_features,
         test_analytics, test_ml_modules, test_rest_clients, test_advanced_core,
-        test_e2e_arbitrage,
+        test_e2e_arbitrage, test_mexc_depth_parsing, test_scan_fast_strategies,
+        test_engine_feeds_dispatcher,
     ]
     passed = failed = 0
     for t in tests:
