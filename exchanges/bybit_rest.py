@@ -37,7 +37,6 @@ class BybitREST(BaseExchange):
             "X-BAPI-TIMESTAMP": timestamp,
             "X-BAPI-SIGN": signature,
             "X-BAPI-RECV-WINDOW": self.recv_window,
-            "Content-Type": "application/json",
         }
 
     async def get_price(self, symbol: str) -> float:
@@ -55,13 +54,17 @@ class BybitREST(BaseExchange):
         Fetch account balance using Bybit v5 authenticated API.
         Requires valid api_key and api_secret.
 
-        Includes ``apiTimestamp`` in the query string so that the request
-        is accepted by Bybit API gateways that require it as a parameter.
+        The signature is computed from only the API-specific parameters
+        (``accountType``).  The gateway-level ``apiTimestamp`` parameter is
+        appended to the URL but excluded from the signature so that the
+        server-side verification matches.
         """
         timestamp = str(int(time.time() * 1000))
-        query_string = f"accountType={account_type}&apiTimestamp={timestamp}"
-        headers = self._auth_headers(query_string, timestamp=timestamp)
-        url = f"{self.base_url}/v5/account/wallet-balance?{query_string}"
+        # Only API params are used for signing
+        api_params = f"accountType={account_type}"
+        headers = self._auth_headers(api_params, timestamp=timestamp)
+        # Include apiTimestamp in the URL for gateways that require it
+        url = f"{self.base_url}/v5/account/wallet-balance?{api_params}&apiTimestamp={timestamp}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:
                 data = await response.json()
