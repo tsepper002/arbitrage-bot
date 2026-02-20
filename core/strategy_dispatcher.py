@@ -123,15 +123,14 @@ class StrategyDispatcher:
             if symbol not in self._price_history:
                 self._price_history[symbol] = deque(maxlen=self._max_history)
             
-            # Get best mid price across all exchanges
+            # Get first valid mid price across exchanges
             best_mid = None
             for ex, rec in exmap.items():
                 bid = rec.get("bid")
                 ask = rec.get("ask")
                 if bid and ask:
-                    mid = (bid + ask) / 2
-                    if best_mid is None or mid > 0:
-                        best_mid = mid
+                    best_mid = (bid + ask) / 2
+                    break  # Use first valid price
             
             if best_mid:
                 history = self._price_history[symbol]
@@ -325,8 +324,10 @@ class StrategyDispatcher:
         if min_len < 20:
             return opportunities
         
-        # Calculate ratio and z-score
-        ratios = [p1 / p2 for p1, p2 in zip(prices1[-min_len:], prices2[-min_len:])]
+        # Calculate ratio and z-score (skip zero prices)
+        ratios = [p1 / p2 for p1, p2 in zip(prices1[-min_len:], prices2[-min_len:]) if p2 > 0]
+        if len(ratios) < 20:
+            return opportunities
         
         # Feed ratio into strategy's internal state if possible
         entry_z = getattr(pairs, 'entry_z', 2.0)
@@ -505,8 +506,10 @@ class StrategyDispatcher:
         if min_len < 30:
             return opportunities
         
-        # Calculate spread (difference ratio)
-        spreads = [(p1 - p2) / p1 for p1, p2 in zip(prices1[-min_len:], prices2[-min_len:])]
+        # Calculate spread (difference ratio, skip zero prices)
+        spreads = [(p1 - p2) / p1 for p1, p2 in zip(prices1[-min_len:], prices2[-min_len:]) if p1 > 0]
+        if len(spreads) < 30:
+            return opportunities
         
         mean_s = sum(spreads) / len(spreads)
         std_s = (sum((s - mean_s) ** 2 for s in spreads) / len(spreads)) ** 0.5
@@ -582,7 +585,8 @@ class StrategyDispatcher:
             
             current_price = prices[-1]
             # Use price change as volume proxy (we don't have real volume data)
-            volume_proxy = abs(prices[-1] - prices[-2]) / prices[-2] if len(prices) >= 2 else 0
+            prev_price = prices[-2] if len(prices) >= 2 else 0
+            volume_proxy = abs(current_price - prev_price) / prev_price if prev_price > 0 else 0
             
             # BreakoutStrategy.analyze(symbol, price, volume) returns signal dict or None
             if hasattr(breakout, 'analyze'):

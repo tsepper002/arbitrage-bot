@@ -40,6 +40,7 @@ class MEXC:
                     self._last_msg_time = time.time()
 
                     for s in self._mexc_symbols:
+                        # @5 = 5 levels of depth (more stable than @1 which drops on thin books)
                         msg = {
                             "method": "SUBSCRIPTION",
                             "params": [f"spot@public.limit.depth.v3.api@{s}@5"],
