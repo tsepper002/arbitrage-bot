@@ -292,9 +292,17 @@ class StartupValidator:
         """Check 5: Verify WebSocket connections (need at least 3 of 4)"""
         logger.info("Checking WebSocket connections...")
         
+        # If no WS connections dict provided, skip (WS init happens in Phase 5)
+        if not self.ws_connections:
+            self.validation_results.append(ValidationResult(
+                check_name="WebSocket Connections",
+                passed=True,
+                message="WebSocket connections will be established in Phase 5"
+            ))
+            return
+        
         # Wait for WebSocket connections to fully establish
-        # 2 seconds is typically sufficient for initial handshake and subscription
-        await asyncio.sleep(2)  # Allow time for WS handshake + subscriptions
+        await asyncio.sleep(2)
         
         connected = []
         disconnected = []
@@ -307,7 +315,6 @@ class StartupValidator:
                 disconnected.append(exchange)
         
         if len(connected) < self.min_ws_connections:
-            # In DRY_RUN mode, WebSocket failures are not critical (can use simulated data)
             is_critical = not self.dry_run
             self.validation_results.append(ValidationResult(
                 check_name="WebSocket Connections",

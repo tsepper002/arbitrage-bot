@@ -809,21 +809,93 @@ class IntegratedArbitrageBot:
             raise
     
     async def _monitor_loop(self):
-        """Monitor and log store statistics."""
+        """Compact status dashboard — updates in-place, no jumping."""
         interval = settings.MONITOR_INTERVAL_SEC
+        cycle = 0
         try:
             while True:
                 await asyncio.sleep(interval)
+                cycle += 1
                 
-                snap = self.store.snapshot()
-                if snap:
-                    total_exchanges = sum(len(exmap) for exmap in snap.values())
-                    logger.info(f"📊 [STORE] {len(snap)} symbols, {total_exchanges} exchange connections")
+                # Gather data
+                snap = self.store.snapshot() if self.store else {}
+                total_exchanges = sum(len(exmap) for exmap in snap.values()) if snap else 0
+                active_symbols = len(snap) if snap else 0
                 
-                # Print strategy performance
-                # Print detailed strategy information
-                if self.strategy_manager:
-                    self.strategy_manager.print_all_strategies_info()
+                # Exchange connectivity
+                exchanges_with_data = set()
+                for exmap in snap.values():
+                    exchanges_with_data.update(exmap.keys())
+                
+                # Executor stats
+                executor = getattr(self.engine, 'executor', None) if self.engine else None
+                exec_stats = executor.get_statistics() if executor else {}
+                total_trades = exec_stats.get('total_orders', 0)
+                total_profit = exec_stats.get('total_profit', 0.0)
+                avg_roi = exec_stats.get('average_roi', 0.0)
+                
+                # Strategy dispatcher stats
+                disp_stats = {}
+                total_scans = 0
+                total_opps = 0
+                if self.strategy_dispatcher:
+                    disp_stats = self.strategy_dispatcher.strategy_stats
+                    total_scans = sum(s['calls'] for s in disp_stats.values())
+                    total_opps = sum(s['opportunities'] for s in disp_stats.values())
+                
+                # Mode label
+                mode = "🔵 DRY RUN" if settings.DRY_RUN else "🔴 LIVE"
+                
+                # Print compact dashboard
+                print(f"\n{'='*70}")
+                print(f" {mode} | Cycle #{cycle} | {active_symbols} symbols | {total_exchanges} connections")
+                print(f"{'='*70}")
+                
+                # Connected exchanges
+                all_exchanges = ['Bybit', 'KuCoin', 'HTX', 'MEXC', 'Binance']
+                connected = [ex for ex in all_exchanges if ex in exchanges_with_data]
+                disconnected = [ex for ex in all_exchanges if ex not in exchanges_with_data]
+                print(f" ✅ Connected: {', '.join(connected) if connected else 'none'}")
+                if disconnected:
+                    print(f" ❌ Disconnected: {', '.join(disconnected)}")
+                
+                # Strategies summary (compact)
+                print(f"{'─'*70}")
+                print(f" {'Strategy':<20} {'Scans':>8} {'Opps':>8} {'Rate':>8}")
+                print(f"{'─'*70}")
+                for name, stats in disp_stats.items():
+                    if stats['calls'] > 0:
+                        rate = (stats['opportunities'] / stats['calls'] * 100) if stats['calls'] > 0 else 0
+                        print(f" {name:<20} {stats['calls']:>8} {stats['opportunities']:>8} {rate:>7.1f}%")
+                    else:
+                        print(f" {name:<20} {'—':>8} {'—':>8} {'—':>8}")
+                
+                # Totals
+                print(f"{'─'*70}")
+                print(f" {'TOTAL':<20} {total_scans:>8} {total_opps:>8}")
+                print(f"{'─'*70}")
+                print(f" 💰 Trades: {total_trades} | Profit: ${total_profit:.4f} | Avg ROI: {avg_roi:.3f}%")
+                
+                # Balance info
+                if self.balance_manager:
+                    total_bal = self.balance_manager.get_total_balance('USDT')
+                    virt = " (virtual)" if settings.DRY_RUN else ""
+                    print(f" 💵 Capital: ${total_bal:.2f} USDT{virt}")
+                
+                print(f"{'='*70}")
+                
+                # Every 1000 cycles, print detailed summary
+                if cycle % 1000 == 0:
+                    print(f"\n{'*'*70}")
+                    print(f"  📊 MILESTONE: {cycle} CYCLES COMPLETED")
+                    print(f"{'*'*70}")
+                    if executor:
+                        executor.print_statistics()
+                    if self.strategy_dispatcher:
+                        self.strategy_dispatcher.print_stats()
+                    if self.risk_manager:
+                        logger.info(f"Risk status: Daily P&L: ${self.risk_manager.daily_pnl:.2f}")
+                    print(f"{'*'*70}\n")
                 
         except asyncio.CancelledError:
             return

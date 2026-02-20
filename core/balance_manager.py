@@ -44,12 +44,20 @@ class BalanceManager:
     async def initialize(self):
         """
         Fetch initial balances from all exchanges.
+        In DRY_RUN mode, uses virtual balances immediately (no real API calls).
         Must be called before trading starts.
         """
         if not self.rest_clients:
             logger.warning("⚠️  No REST clients configured - balance tracking disabled")
             return False
         
+        if settings.DRY_RUN:
+            # DRY_RUN: use virtual balances immediately, no real API calls needed
+            self._use_virtual_balances()
+            self.initialized = True
+            return True
+        
+        # LIVE mode: fetch real balances from exchanges
         logger.info(f"🔄 Fetching initial balances from {len(self.rest_clients)} exchanges...")
         
         tasks = []
@@ -61,51 +69,30 @@ class BalanceManager:
         success_count = sum(1 for r in results if not isinstance(r, Exception))
         logger.info(f"✅ Initialized balances for {success_count}/{len(results)} exchanges")
         
-        # If DRY_RUN mode and no balances loaded, use mock data
-        if settings.DRY_RUN and success_count == 0:
-            logger.info("ℹ️  DRY_RUN mode: Using mock balances for testing (real network unavailable)")
-            self._use_mock_balances()
-            success_count = len(self.rest_clients)
-        
         self.initialized = True
         return success_count > 0
     
-    def _use_mock_balances(self):
-        """Use mock balance data for DRY_RUN testing when network unavailable."""
+    def _use_virtual_balances(self):
+        """Use virtual balances for DRY_RUN mode. No real API calls needed."""
+        capital = settings.VIRTUAL_CAPITAL_PER_EXCHANGE
         mock_balance = {
-            'USDT': 30.0,   # $30 per exchange for testing (user requested)
-            'BTC': 0.0003,  # ~$20 worth
-            'ETH': 0.01,    # ~$19 worth
-            'BNB': 0.03,    # ~$18 worth
-            'SOL': 0.2      # ~$17 worth
+            'USDT': capital,
+            'BTC': round(capital * 0.3 / 68500, 6),
+            'ETH': round(capital * 0.2 / 2000, 4),
+            'BNB': round(capital * 0.1 / 630, 4),
+            'SOL': round(capital * 0.1 / 85, 2)
         }
         
         for exchange_name in self.rest_clients.keys():
             self.balances[exchange_name] = mock_balance.copy()
             self.last_sync[exchange_name] = time.time()
-            logger.info(f"📊 {exchange_name}: Mock balance = ${mock_balance['USDT']:.2f} USDT + crypto")
         
-        # SHOW VIRTUAL BALANCES PROMINENTLY
-        logger.info("=" * 70)
-        logger.info("🔵 DRY_RUN MODE - VIRTUAL BALANCES")
-        logger.info("=" * 70)
-        for exchange_name in self.rest_clients.keys():
-            balance = self.balances[exchange_name]
-            total = sum(balance.values() * price for currency, price in [
-                ('USDT', 1.0), ('BTC', 68500), ('ETH', 3500), 
-                ('BNB', 350), ('SOL', 85)
-            ] if currency in balance)
-            usdt = balance.get('USDT', 0)
-            logger.info(f"  {exchange_name:12} | USDT: ${usdt:>8.2f} | Total: ${total:>8.2f} (VIRTUAL)")
-        
-        total_capital = sum(sum(b.values() * price for currency, price in [
-            ('USDT', 1.0), ('BTC', 68500), ('ETH', 3500), 
-            ('BNB', 350), ('SOL', 85)
-        ] if currency in b) for b in self.balances.values())
-        logger.info("=" * 70)
-        logger.info(f"💰 Total Virtual Capital: ${total_capital:.2f}")
-        logger.info("=" * 70)
-        logger.info("✅ Mock balances loaded for all exchanges")
+        num_exchanges = len(self.rest_clients)
+        total_virtual = capital * num_exchanges
+        logger.info(f"🔵 DRY RUN: Virtual balances loaded — ${capital:.0f} USDT × {num_exchanges} exchanges = ${total_virtual:.0f} total")
+        for exchange_name in sorted(self.rest_clients.keys()):
+            logger.info(f"   {exchange_name:12s} ✅ ${capital:.2f} USDT (virtual)")
+        logger.info(f"✅ Virtual balances ready for simulation")
     
     async def _fetch_balance(self, exchange_name: str, client) -> Dict[str, float]:
         """
@@ -148,9 +135,13 @@ class BalanceManager:
         """
         Sync all balances from exchanges.
         Called periodically to maintain accuracy.
+        Skipped in DRY_RUN mode (virtual balances don't need syncing).
         """
         if not self.rest_clients:
             return
+        
+        if settings.DRY_RUN:
+            return  # Virtual balances don't need syncing
         
         current_time = time.time()
         tasks = []
@@ -293,8 +284,9 @@ class BalanceManager:
     
     def print_summary(self):
         """Print balance summary to console."""
+        mode_label = " (VIRTUAL)" if settings.DRY_RUN else ""
         print(f"\n{'='*60}")
-        print(f"  Balance Summary")
+        print(f"  Balance Summary{mode_label}")
         print(f"{'='*60}")
         
         if not self.balances:
