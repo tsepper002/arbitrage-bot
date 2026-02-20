@@ -31,6 +31,10 @@ class OrderExecutor:
         self.trade_count_per_minute: Dict[int, int] = {}  # minute timestamp -> count
         self.last_trade_time_per_symbol: Dict[str, float] = {}  # symbol -> last trade timestamp
         
+        # Virtual capital tracking for dry run
+        self.virtual_balance_usdt = settings.VIRTUAL_CAPITAL_USDT if self.dry_run else 0.0
+        self.initial_virtual_balance = self.virtual_balance_usdt
+        
         if self.dry_run:
             logger.info("🔵 OrderExecutor initialized in DRY RUN mode (safe simulation)")
         else:
@@ -127,6 +131,16 @@ class OrderExecutor:
         net_profit = opp['net']
         roi_pct = opp['roi_pct']
         
+        # Check virtual capital
+        trade_cost = qty * buy_price
+        if trade_cost > self.virtual_balance_usdt:
+            logger.info(f"⚠️ [DRY RUN] Insufficient virtual capital: need ${trade_cost:.2f}, have ${self.virtual_balance_usdt:.2f}")
+            return {
+                'status': 'blocked',
+                'reason': f'Insufficient virtual capital: ${self.virtual_balance_usdt:.2f} < ${trade_cost:.2f}',
+                'opportunity': opp
+            }
+        
         logger.info(
             f"💰 [DRY RUN] ARBITRAGE OPPORTUNITY DETECTED\n"
             f"   Symbol: {symbol}\n"
@@ -148,9 +162,15 @@ class OrderExecutor:
             'roi_pct': roi_pct,
             'buy_order_id': f"DRY_{int(time.time())}_{buy_ex}",
             'sell_order_id': f"DRY_{int(time.time())}_{sell_ex}",
+            'virtual_balance': self.virtual_balance_usdt,
         }
         
         self._record_trade(symbol, order_info)
+        
+        # Update virtual balance: subtract buy cost, add sell proceeds
+        self.virtual_balance_usdt = self.virtual_balance_usdt - trade_cost + (qty * sell_price)
+        order_info['virtual_balance'] = self.virtual_balance_usdt
+        logger.info(f"💼 [DRY RUN] Virtual Balance: ${self.virtual_balance_usdt:.2f} USDT")
         
         return {
             'status': 'simulated',
@@ -225,7 +245,9 @@ class OrderExecutor:
                 'total_orders': 0,
                 'total_profit': 0.0,
                 'average_roi': 0.0,
-                'mode': 'dry_run' if self.dry_run else 'live'
+                'mode': 'dry_run' if self.dry_run else 'live',
+                'virtual_balance': self.virtual_balance_usdt,
+                'virtual_pnl': self.virtual_balance_usdt - self.initial_virtual_balance,
             }
         
         avg_roi = sum(o.get('roi_pct', 0) for o in self.order_history) / total_orders
@@ -236,6 +258,8 @@ class OrderExecutor:
             'average_roi': avg_roi,
             'mode': 'dry_run' if self.dry_run else 'live',
             'symbols_traded': list(set(o['symbol'] for o in self.order_history)),
+            'virtual_balance': self.virtual_balance_usdt,
+            'virtual_pnl': self.virtual_balance_usdt - self.initial_virtual_balance,
         }
     
     def print_statistics(self):
@@ -251,4 +275,7 @@ class OrderExecutor:
         print(f"  Average ROI: {stats['average_roi']:.3f}%")
         if stats.get('symbols_traded'):
             print(f"  Symbols Traded: {', '.join(stats['symbols_traded'])}")
+        if self.dry_run:
+            print(f"  Virtual Balance: ${self.virtual_balance_usdt:.2f} USDT")
+            print(f"  Virtual P&L: ${self.virtual_balance_usdt - self.initial_virtual_balance:.2f} USDT")
         print(f"{'='*60}\n")

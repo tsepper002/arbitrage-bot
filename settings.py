@@ -45,6 +45,9 @@ def _get_env_int(key: str, default: int) -> int:
 # Default is False for safety - all orders will be simulated
 DRY_RUN = _get_env_bool("ARB_DRY_RUN", True)
 
+# Starting virtual capital for dry run mode (USDT)
+VIRTUAL_CAPITAL_USDT = _get_env_float("ARB_VIRTUAL_CAPITAL_USDT", 10000.0)
+
 # ============================================================================
 # RISK MANAGEMENT PARAMETERS
 # ============================================================================
@@ -137,6 +140,7 @@ def get_config_summary() -> str:
     return """
 === Arbitrage Bot Configuration ===
 Execution Mode: {mode}
+Virtual Capital: ${vcap} USDT
 Min Net ROI: {roi}%
 Max Exposure: ${exp} USDT
 Safety Factor: {sf}
@@ -150,6 +154,7 @@ Trading Symbols: {syms} pairs
 ===================================
 """.format(
         mode='DRY RUN (Safe)' if DRY_RUN else 'LIVE TRADING (Real money!)',
+        vcap=VIRTUAL_CAPITAL_USDT if DRY_RUN else 'N/A',
         roi=MIN_NET_ROI_PCT,
         exp=MAX_EXPOSURE_USDT,
         sf=SAFETY_FACTOR,
