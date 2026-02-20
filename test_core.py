@@ -235,12 +235,12 @@ def test_telegram_notifier():
 
     # Should be disabled by default (no token/chat_id)
     notifier = TelegramNotifier()
-    assert notifier.enabled == False, "Should be disabled without credentials"
+    assert notifier.enabled is False, "Should be disabled without credentials"
     print("✅ Telegram disabled by default")
 
     # Should be disabled even with token but no TELEGRAM_ENABLED
     notifier2 = TelegramNotifier(token="fake_token", chat_id="fake_chat")
-    assert notifier2.enabled == False, "Should be disabled when TELEGRAM_ENABLED is False"
+    assert notifier2.enabled is False, "Should be disabled when TELEGRAM_ENABLED is False"
     print("✅ Telegram disabled when TELEGRAM_ENABLED is False")
 
     print("\n✅ Telegram notifier tests passed")

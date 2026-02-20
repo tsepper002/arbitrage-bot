@@ -173,7 +173,6 @@ class OrderExecutor:
 
         # Send Telegram notification (fire and forget)
         try:
-            asyncio.get_running_loop()
             asyncio.ensure_future(self.telegram.notify_opportunity(opp))
         except RuntimeError:
             # No running event loop (e.g. called from sync test context)

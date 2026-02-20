@@ -71,7 +71,8 @@ async def main():
     # Use symbols from settings
     symbols: List[str] = settings.TRADING_SYMBOLS
 
-    logger.info(f"Starting arbitrage bot with 4 exchanges for {len(symbols)} symbols: {', '.join(symbols)}")
+    num_exchanges = 4  # Bybit, KuCoin, HTX, MEXC
+    logger.info(f"Starting arbitrage bot with {num_exchanges} exchanges for {len(symbols)} symbols: {', '.join(symbols)}")
 
     loop = asyncio.get_running_loop()
     store = PriceStore()
@@ -98,7 +99,7 @@ async def main():
 
     # Initialize Telegram notifier
     notifier = TelegramNotifier()
-    await notifier.notify_startup(len(symbols), 4)
+    await notifier.notify_startup(len(symbols), num_exchanges)
 
     engine_task = asyncio.create_task(engine.run(symbols))
 
