@@ -92,7 +92,7 @@ from professional_features.order_flow_tracker import OrderFlowTracker
 from exchanges.bybit_ws import BybitWS
 from exchanges.kucoin_ws import KucoinWS
 from exchanges.htx_ws import HtxWS
-from exchanges.mexc_ws import MexcWS
+from exchanges.mexc import MEXC
 from exchanges.binance_ws import BinanceWS
 
 # REST clients
@@ -173,6 +173,7 @@ class IntegratedArbitrageBot:
         self.loop = None
         self.store = None
         self.exchanges = []
+        self._mexc_task = None  # MEXC uses asyncio task instead of thread
         self.rest_clients: Dict[str, any] = {}
         self.balance_manager = None
         self.risk_manager = None
@@ -521,16 +522,9 @@ class IntegratedArbitrageBot:
             htx = HtxWS(symbols, self.store, self.loop, exchange_name="HTX", stagger_start=stagger)
             await asyncio.sleep(stagger)
             
-            # MexcWS now accepts price_store and loop like other exchanges
-            mexc = MexcWS(
-                symbol=symbols[0] if symbols else "BTC-USDT",  # First symbol
-                price_store=self.store,
-                loop=self.loop,
-                api_key=None,
-                secret_key=None,
-                ws_url="wss://wbs.mexc.com/ws",  # FIXED: Spot API endpoint (was contract)
-                exchange_name="MEXC"
-            )
+            # MEXC uses async coroutine (not thread), start it as a task
+            mexc = MEXC(self.store, symbols)
+            self._mexc_task = asyncio.create_task(mexc.run())
             await asyncio.sleep(stagger)
             
             binance = BinanceWS(symbols, self.store, self.loop, exchange_name="Binance", stagger_start=stagger)
@@ -948,6 +942,11 @@ class IntegratedArbitrageBot:
         
         # Stop exchange connections
         logger.info("Stopping WebSocket connections...")
+        
+        # Cancel MEXC asyncio task
+        if self._mexc_task and not self._mexc_task.done():
+            self._mexc_task.cancel()
+        
         for exchange in self.exchanges:
             try:
                 exchange_name = getattr(exchange, 'name', getattr(exchange, 'exchange_name', str(type(exchange).__name__)))
