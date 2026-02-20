@@ -946,6 +946,10 @@ class IntegratedArbitrageBot:
         # Cancel MEXC asyncio task
         if self._mexc_task and not self._mexc_task.done():
             self._mexc_task.cancel()
+            try:
+                await self._mexc_task
+            except asyncio.CancelledError:
+                pass
         
         for exchange in self.exchanges:
             try:
