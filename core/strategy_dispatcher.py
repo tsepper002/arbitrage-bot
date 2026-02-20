@@ -51,9 +51,11 @@ class StrategyDispatcher:
             'BREAKOUT': {'calls': 0, 'opportunities': 0},
         }
         
-        logger.info("✅ StrategyDispatcher initialized with 14 strategies")
-        logger.info("   Fast strategies (4): CROSS_EXCHANGE, TRIANGULAR, SMART_ORDER, VOLATILITY")
-        logger.info("   Slow strategies (10): Grid, DCA, Market Making, Pairs, Funding, Vol Arb, Index, Spread, Momentum, Breakout")
+        fast_names = ['CROSS_EXCHANGE', 'TRIANGULAR', 'SMART_ORDER', 'VOLATILITY']
+        slow_names = [k for k in self.strategy_stats if k not in fast_names]
+        logger.info(f"✅ StrategyDispatcher initialized with {len(self.strategy_stats)} strategies")
+        logger.info(f"   Fast strategies ({len(fast_names)}): {', '.join(fast_names)}")
+        logger.info(f"   Slow strategies ({len(slow_names)}): {', '.join(slow_names)}")
     
     async def scan_fast(self) -> List[Dict[str, Any]]:
         """
