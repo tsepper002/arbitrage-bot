@@ -865,7 +865,7 @@ class IntegratedArbitrageBot:
                 print(f"{'─'*70}")
                 for name, stats in disp_stats.items():
                     if stats['calls'] > 0:
-                        rate = (stats['opportunities'] / stats['calls'] * 100) if stats['calls'] > 0 else 0
+                        rate = stats['opportunities'] / stats['calls'] * 100
                         print(f" {name:<20} {stats['calls']:>8} {stats['opportunities']:>8} {rate:>7.1f}%")
                     else:
                         print(f" {name:<20} {'—':>8} {'—':>8} {'—':>8}")

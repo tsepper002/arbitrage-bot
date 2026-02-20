@@ -75,6 +75,8 @@ class BalanceManager:
     def _use_virtual_balances(self):
         """Use virtual balances for DRY_RUN mode. No real API calls needed."""
         capital = settings.VIRTUAL_CAPITAL_PER_EXCHANGE
+        # Virtual balances: USDT is the main trading currency
+        # Crypto amounts are approximate percentages for simulation only
         mock_balance = {
             'USDT': capital,
             'BTC': round(capital * 0.3 / 68500, 6),
