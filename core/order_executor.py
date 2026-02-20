@@ -95,7 +95,7 @@ class OrderExecutor:
         for m in old_minutes:
             del self.trade_count_per_minute[m]
     
-    def execute_arbitrage(self, opportunity: Dict) -> Dict:
+    async def execute_arbitrage(self, opportunity: Dict) -> Dict:
         """
         Execute an arbitrage opportunity.
         
@@ -128,7 +128,7 @@ class OrderExecutor:
         if self.dry_run:
             return self._execute_dry_run(opportunity)
         else:
-            return self._execute_live(opportunity)
+            return await self._execute_live(opportunity)
     
     def _execute_dry_run(self, opp: Dict) -> Dict:
         """Simulate order execution with detailed logging."""
@@ -195,7 +195,7 @@ class OrderExecutor:
             'message': 'Orders simulated successfully (dry run mode)'
         }
     
-    def _execute_live(self, opp: Dict) -> Dict:
+    async def _execute_live(self, opp: Dict) -> Dict:
         """
         Execute a real trade via authenticated REST API clients.
 
@@ -246,18 +246,12 @@ class OrderExecutor:
         api_symbol = symbol.replace("-", "")
 
         try:
-            loop = asyncio.get_event_loop()
-
             # Place buy order
-            buy_result = loop.run_until_complete(
-                buy_client.place_order(api_symbol, qty, buy_price)
-            )
+            buy_result = await buy_client.place_order(api_symbol, qty, buy_price)
             logger.info(f"🟢 [LIVE] Buy order placed on {buy_ex}: {buy_result}")
 
             # Place sell order
-            sell_result = loop.run_until_complete(
-                sell_client.place_order(api_symbol, qty, sell_price)
-            )
+            sell_result = await sell_client.place_order(api_symbol, qty, sell_price)
             logger.info(f"🟢 [LIVE] Sell order placed on {sell_ex}: {sell_result}")
 
             # Record trade
@@ -276,9 +270,9 @@ class OrderExecutor:
             }
             self._record_trade(symbol, order_info)
 
-            # Send Telegram notification
+            # Send Telegram notification (fire and forget)
             try:
-                asyncio.ensure_future(self.telegram.notify_opportunity(opp))
+                asyncio.create_task(self.telegram.notify_opportunity(opp))
             except RuntimeError:
                 pass
 

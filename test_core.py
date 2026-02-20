@@ -5,10 +5,16 @@ Tests configuration, order executor, and risk management features.
 """
 import sys
 import os
+import asyncio
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import settings
 from core.order_executor import OrderExecutor
+
+# Async helper for synchronous test context
+def _run(coro):
+    """Run an async coroutine from synchronous test code."""
+    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 def test_configuration():
@@ -48,7 +54,7 @@ def test_order_executor_dry_run():
     }
     
     # Test execution
-    result = executor.execute_arbitrage(opportunity)
+    result = _run(executor.execute_arbitrage(opportunity))
     assert result['status'] == 'simulated', "Should simulate in dry run mode"
     print(f"✅ Dry run execution: {result['status']}")
     
@@ -82,18 +88,18 @@ def test_rate_limiting():
     
     # Execute multiple times
     for i in range(3):
-        result = executor.execute_arbitrage(opportunity)
+        result = _run(executor.execute_arbitrage(opportunity))
         print(f"  Trade {i+1}: {result['status']}")
     
     # Should be blocked by cooldown
-    result = executor.execute_arbitrage(opportunity)
+    result = _run(executor.execute_arbitrage(opportunity))
     assert result['status'] == 'blocked', "Should be blocked by cooldown"
     print(f"✅ Cooldown working: {result['reason']}")
     
     # Test different symbol (should work)
     opportunity2 = opportunity.copy()
     opportunity2['symbol'] = 'ETH-USDT'
-    result = executor.execute_arbitrage(opportunity2)
+    result = _run(executor.execute_arbitrage(opportunity2))
     assert result['status'] == 'simulated', "Different symbol should work"
     print(f"✅ Different symbol executed: {result['status']}")
     
@@ -124,7 +130,7 @@ def test_virtual_capital():
         'net': 0.82,
         'roi_pct': 0.273
     }
-    result = executor.execute_arbitrage(opp)
+    result = _run(executor.execute_arbitrage(opp))
     assert result['status'] == 'simulated', "Should simulate trade"
 
     # Virtual balance should increase by (sell_proceeds - buy_cost)
@@ -152,7 +158,7 @@ def test_virtual_capital():
         'net': 40.0,
         'roi_pct': 0.04
     }
-    result = executor2.execute_arbitrage(big_opp)
+    result = _run(executor2.execute_arbitrage(big_opp))
     assert result['status'] == 'blocked', "Should block trade exceeding virtual capital"
     assert 'virtual capital' in result['reason'].lower(), "Reason should mention virtual capital"
     print(f"✅ Insufficient capital blocked: {result['reason']}")
@@ -1093,9 +1099,7 @@ def test_live_trading_path():
         "net": 0.05,
         "roi_pct": 0.1,
     }
-    import asyncio
-    loop = asyncio.get_event_loop()
-    result = executor.execute_arbitrage(opp)
+    result = _run(executor.execute_arbitrage(opp))
     assert result["status"] == "executed", f"Expected 'executed', got {result['status']}"
     assert len(mock_bybit.orders_placed) == 1, "Buy order should have been placed"
     assert len(mock_mexc.orders_placed) == 1, "Sell order should have been placed"
@@ -1105,14 +1109,14 @@ def test_live_trading_path():
 
     # Test 3: Live execution without REST client → error
     executor_no_client = OrderExecutor(dry_run=False, rest_clients={})
-    result2 = executor_no_client.execute_arbitrage(opp)
+    result2 = _run(executor_no_client.execute_arbitrage(opp))
     assert result2["status"] == "error", f"Expected 'error', got {result2['status']}"
     assert "No REST client" in result2["reason"]
     print(f"  ✅ Missing REST client correctly returns error: {result2['reason']}")
 
     # Test 4: Live execution with partial REST clients → error
     executor_partial = OrderExecutor(dry_run=False, rest_clients={"Bybit": mock_bybit})
-    result3 = executor_partial.execute_arbitrage(opp)
+    result3 = _run(executor_partial.execute_arbitrage(opp))
     assert result3["status"] == "error", f"Expected 'error', got {result3['status']}"
     assert "MEXC" in result3["reason"]
     print(f"  ✅ Partial REST client correctly returns error for missing exchange")

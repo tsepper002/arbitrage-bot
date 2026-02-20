@@ -80,9 +80,6 @@ from utils.throttle import Throttle
 
 logger = logging.getLogger("arbitrage_bot")
 
-# API rate limiter shared across the bot (0.3s = max ~3 calls/sec per exchange)
-api_throttle = Throttle(interval=0.3)
-
 
 def _init_rest_clients() -> Dict:
     """

@@ -261,7 +261,7 @@ class ArbitrageEngine:
                     for o in opps:
                         o.setdefault("strategy", "CROSS_EXCHANGE")
                         # Execute or log the opportunity
-                        result = self.executor.execute_arbitrage(o)
+                        result = await self.executor.execute_arbitrage(o)
                         
                         if result['status'] == 'simulated':
                             # Already logged by executor
@@ -274,7 +274,7 @@ class ArbitrageEngine:
             # Run all 14 strategies via dispatcher
             strategy_opps = await self.dispatcher.scan_all(symbols_to_scan)
             for o in strategy_opps:
-                result = self.executor.execute_arbitrage(o)
+                result = await self.executor.execute_arbitrage(o)
                 if result['status'] == 'simulated':
                     pass
                 elif result['status'] == 'blocked':
