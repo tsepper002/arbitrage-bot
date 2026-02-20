@@ -316,7 +316,9 @@ def test_cli_arguments():
 
     # Restore defaults
     settings.DRY_RUN = saved
-    settings.TRADING_SYMBOLS = os.getenv("ARB_SYMBOLS", "BTC-USDT,ETH-USDT,SOL-USDT,BNB-USDT,XRP-USDT,DOGE-USDT,LTC-USDT,ADA-USDT,MATIC-USDT,DOT-USDT").split(",")
+    import importlib
+    importlib.reload(settings)
+    settings.DRY_RUN = saved
 
     print("\n✅ CLI argument tests passed")
 

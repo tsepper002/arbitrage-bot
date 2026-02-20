@@ -57,7 +57,9 @@ def apply_cli_overrides(args):
     if args.mode is not None:
         settings.DRY_RUN = args.mode == "dry-run"
     if args.symbols is not None:
-        settings.TRADING_SYMBOLS = [s.strip() for s in args.symbols.split(",") if s.strip()]
+        parsed = [s.strip() for s in args.symbols.split(",") if s.strip()]
+        if parsed:
+            settings.TRADING_SYMBOLS = parsed
     if args.log_level is not None:
         settings.LOG_LEVEL = args.log_level
 

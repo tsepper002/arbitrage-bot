@@ -46,7 +46,7 @@ Required packages:
 ### One-liner: pull & run (Windows)
 
 ```cmd
-cd C:\Users\HP_PC\arbitrage-bot && git pull && pip install -r requirements.txt && python main.py --mode dry-run
+cd C:\path\to\arbitrage-bot && git pull && pip install -r requirements.txt && python main.py --mode dry-run
 ```
 
 Or simply double-click **`start.bat`** (included in the repo).
