@@ -36,6 +36,15 @@ EXCHANGE_PARAMS: Dict[str, Dict[str, Any]] = {
         "min_size": 0.0001,
         "supports_depth": False,
     },
+    "MEXC": {
+        "maker": 0.0000,  # MEXC spot: 0% maker fee
+        "taker": 0.0010,
+        "withdraw_fee": None,
+        "withdraw_fee_currency": "USDT",
+        "min_notional": 1.0,
+        "min_size": 0.0001,
+        "supports_depth": False,
+    },
 }
 
 # Optionally try to refresh fees via REST public/private APIs.

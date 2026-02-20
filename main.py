@@ -17,6 +17,7 @@ from core.arbitrage import ArbitrageEngine
 from exchanges.bybit_ws import BybitWS
 from exchanges.kucoin_ws import KucoinWS
 from exchanges.htx_ws import HtxWS
+from exchanges.mexc import MEXC
 import settings
 
 # Configure logging
@@ -69,7 +70,7 @@ async def main():
     # Use symbols from settings
     symbols: List[str] = settings.TRADING_SYMBOLS
 
-    logger.info(f"Starting arbitrage bot for {len(symbols)} symbols: {', '.join(symbols)}")
+    logger.info(f"Starting arbitrage bot with 4 exchanges for {len(symbols)} symbols: {', '.join(symbols)}")
 
     loop = asyncio.get_running_loop()
     store = PriceStore()
@@ -82,7 +83,10 @@ async def main():
     kucoin = KucoinWS(symbols, store, loop, exchange_name="KuCoin", stagger_start=stagger)
     await asyncio.sleep(0.1)
     htx = HtxWS(symbols, store, loop, exchange_name="HTX", stagger_start=stagger)
-    
+
+    mexc = MEXC(store, symbols)
+    mexc_task = asyncio.create_task(mexc.run())
+
     exchanges = [bybit, kucoin, htx]
 
     # Start monitoring task
@@ -101,6 +105,8 @@ async def main():
     finally:
         # Cleanup
         monitor_task.cancel()
+        mexc.stop()
+        mexc_task.cancel()
         
         # Print final statistics
         logger.info("\n" + "="*60)
