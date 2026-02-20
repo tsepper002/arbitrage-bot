@@ -54,17 +54,12 @@ class BybitREST(BaseExchange):
         Fetch account balance using Bybit v5 authenticated API.
         Requires valid api_key and api_secret.
 
-        The signature is computed from only the API-specific parameters
-        (``accountType``).  The gateway-level ``apiTimestamp`` parameter is
-        appended to the URL but excluded from the signature so that the
-        server-side verification matches.
+        Authentication is done entirely via X-BAPI-* headers.
+        The query string contains only API parameters (accountType).
         """
-        timestamp = str(int(time.time() * 1000))
-        # Only API params are used for signing
-        api_params = f"accountType={account_type}"
-        headers = self._auth_headers(api_params, timestamp=timestamp)
-        # Include apiTimestamp in the URL for gateways that require it
-        url = f"{self.base_url}/v5/account/wallet-balance?{api_params}&apiTimestamp={timestamp}"
+        query_string = f"accountType={account_type}"
+        headers = self._auth_headers(query_string)
+        url = f"{self.base_url}/v5/account/wallet-balance?{query_string}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:
                 data = await response.json()

@@ -5,6 +5,9 @@ REM  Usage:
 REM    start.bat                  — pull latest code & run dry-run
 REM    start.bat live             — pull latest code & run live
 REM    start.bat dry-run          — pull latest code & run dry-run
+REM
+REM  API keys go in .env file (not in settings.py!)
+REM  Copy .env.example to .env and fill in your keys.
 REM ============================================================
 
 cd /d "%~dp0"
@@ -14,11 +17,13 @@ echo  Arbitrage Bot — Quick Start
 echo ============================================================
 
 echo.
-echo === Pulling latest changes ===
+echo === Stashing local changes and pulling latest code ===
+git stash
 git pull
 if errorlevel 1 (
     echo [WARNING] git pull failed — running with local code
 )
+git stash pop 2>nul
 
 echo.
 echo === Installing / updating dependencies ===

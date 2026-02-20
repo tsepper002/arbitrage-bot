@@ -9,13 +9,22 @@ Supports two modes:
 Usage:
     python main.py                  # default (dry-run)
     python main.py --mode dry-run   # explicit dry-run
-    python main.py --mode live      # live trading (requires API keys)
+    python main.py --mode live      # live trading (requires API keys in .env)
 """
+
+# Configure UTF-8 encoding before any output (avoids Windows cp1251 issues)
+import sys
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 import argparse
 import asyncio
 import logging
 import os
-import sys
 from typing import List, Dict, Optional
 
 # Add parent directory to path for imports
@@ -84,7 +93,7 @@ logger = logging.getLogger("arbitrage_bot")
 def _init_rest_clients() -> Dict:
     """
     Initialize authenticated REST API clients for live trading.
-    Reads API keys from environment variables.
+    Reads API keys from settings (which loads from .env file or env vars).
 
     Returns:
         Dict of exchange_name -> REST client instance
@@ -92,13 +101,11 @@ def _init_rest_clients() -> Dict:
     clients: Dict = {}
 
     # Bybit REST
-    bybit_key = os.getenv("BYBIT_API_KEY", "")
-    bybit_secret = os.getenv("BYBIT_API_SECRET", "")
-    if bybit_key and bybit_secret:
-        clients["Bybit"] = BybitREST(api_key=bybit_key, api_secret=bybit_secret)
+    if settings.BYBIT_API_KEY and settings.BYBIT_API_SECRET:
+        clients["Bybit"] = BybitREST(api_key=settings.BYBIT_API_KEY, api_secret=settings.BYBIT_API_SECRET)
         logger.info("✅ Bybit REST client initialized for live trading")
     else:
-        logger.warning("⚠️  Bybit API keys not configured (set BYBIT_API_KEY, BYBIT_API_SECRET)")
+        logger.warning("⚠️  Bybit API keys not configured (set ARB_BYBIT_KEY, ARB_BYBIT_SECRET in .env)")
 
     return clients
 

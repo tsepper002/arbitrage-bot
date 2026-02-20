@@ -29,6 +29,10 @@ logs/
 arbs.csv
 *.csv
 
+# Secrets — NEVER commit API keys!
+.env
+secrets.py
+
 # OS
 .DS_Store
 Thumbs.db
