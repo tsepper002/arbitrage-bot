@@ -133,6 +133,18 @@ OPPORTUNITIES_CSV_PATH = os.getenv("ARB_OPPORTUNITIES_CSV", "arbs.csv")
 LOG_LEVEL = os.getenv("ARB_LOG_LEVEL", "INFO")
 
 # ============================================================================
+# TELEGRAM NOTIFICATIONS
+# ============================================================================
+# Telegram bot token (from @BotFather)
+TELEGRAM_BOT_TOKEN = os.getenv("ARB_TELEGRAM_BOT_TOKEN", "")
+
+# Telegram chat ID to send notifications to
+TELEGRAM_CHAT_ID = os.getenv("ARB_TELEGRAM_CHAT_ID", "")
+
+# Enable/disable Telegram notifications
+TELEGRAM_ENABLED = _get_env_bool("ARB_TELEGRAM_ENABLED", False) and bool(TELEGRAM_BOT_TOKEN) and bool(TELEGRAM_CHAT_ID)
+
+# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 def get_config_summary() -> str:

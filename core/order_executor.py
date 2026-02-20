@@ -3,11 +3,13 @@
 Order execution layer with dry_run and live modes.
 Provides a safe interface for order placement with detailed logging.
 """
+import asyncio
 import time
 import logging
 from typing import List, Optional, Tuple, Dict
 from datetime import datetime
 import settings
+from utils.telegram import TelegramNotifier
 
 logger = logging.getLogger("order_executor")
 
@@ -35,6 +37,8 @@ class OrderExecutor:
         self.virtual_balance_usdt = settings.VIRTUAL_CAPITAL_USDT if self.dry_run else 0.0
         self.initial_virtual_balance = self.virtual_balance_usdt
         
+        self.telegram = TelegramNotifier()
+
         if self.dry_run:
             logger.info("🔵 OrderExecutor initialized in DRY RUN mode (safe simulation)")
         else:
@@ -166,7 +170,15 @@ class OrderExecutor:
         }
         
         self._record_trade(symbol, order_info)
-        
+
+        # Send Telegram notification (fire and forget)
+        try:
+            asyncio.get_running_loop()
+            asyncio.ensure_future(self.telegram.notify_opportunity(opp))
+        except RuntimeError:
+            # No running event loop (e.g. called from sync test context)
+            pass
+
         # Update virtual balance: subtract buy cost, add sell proceeds
         self.virtual_balance_usdt = self.virtual_balance_usdt - trade_cost + (qty * sell_price)
         order_info['virtual_balance'] = self.virtual_balance_usdt

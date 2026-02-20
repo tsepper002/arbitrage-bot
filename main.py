@@ -19,6 +19,7 @@ from exchanges.kucoin_ws import KucoinWS
 from exchanges.htx_ws import HtxWS
 from exchanges.mexc import MEXC
 import settings
+from utils.telegram import TelegramNotifier
 
 # Configure logging
 logging.basicConfig(
@@ -94,6 +95,11 @@ async def main():
 
     # Start arbitrage engine
     engine = ArbitrageEngine(store)
+
+    # Initialize Telegram notifier
+    notifier = TelegramNotifier()
+    await notifier.notify_startup(len(symbols), 4)
+
     engine_task = asyncio.create_task(engine.run(symbols))
 
     try:
