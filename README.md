@@ -17,7 +17,7 @@ A robust, efficient arbitrage bot for detecting and executing cross-exchange arb
 If you have merge conflicts or are switching from an old branch, run these commands **once**:
 
 ```powershell
-cd C:\Users\HP_PC\arbitrage-bot
+cd C:\path\to\arbitrage-bot
 git merge --abort
 git stash
 git fetch origin
@@ -35,7 +35,7 @@ Or simply double-click **`update.bat`** (included in the repo) — it does all o
 ### After the first setup, daily usage is just:
 
 ```powershell
-cd C:\Users\HP_PC\arbitrage-bot
+cd C:\path\to\arbitrage-bot
 py main.py --mode dry-run
 ```
 

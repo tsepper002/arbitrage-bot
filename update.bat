@@ -15,6 +15,9 @@ REM ============================================================
 
 cd /d "%~dp0"
 
+REM Branch to switch to (change this if needed)
+set BRANCH=copilot/fix-bot-start-issues-again
+
 echo ============================================================
 echo  Arbitrage Bot — Branch Update
 echo ============================================================
@@ -39,12 +42,12 @@ git fetch origin
 
 REM Step 4: Switch to the working branch
 echo [4/6] Switching to working branch...
-git checkout copilot/fix-bot-start-issues-again 2>nul
+git checkout %BRANCH% 2>nul
 if errorlevel 1 (
     echo       Creating local tracking branch...
-    git checkout -b copilot/fix-bot-start-issues-again origin/copilot/fix-bot-start-issues-again
+    git checkout -b %BRANCH% origin/%BRANCH%
 )
-git pull origin copilot/fix-bot-start-issues-again
+git pull origin %BRANCH%
 
 REM Step 5: Install dependencies
 echo [5/6] Installing dependencies...
