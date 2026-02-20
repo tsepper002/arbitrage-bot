@@ -29,7 +29,7 @@ class StrategyDispatcher:
         }
         logger.info(f"StrategyDispatcher initialized with {len(self.strategies)} strategies")
         logger.info(f"  Fast strategies ({len(FAST_STRATEGIES)}): {', '.join(s.strategy_type for s in FAST_STRATEGIES)}")
-        logger.info(f"  Slow strategies ({len(SLOW_STRATEGIES)}): {', '.join(s.name for s in SLOW_STRATEGIES)}")
+        logger.info(f"  Slow strategies ({len(SLOW_STRATEGIES)}): {', '.join(s.strategy_type for s in SLOW_STRATEGIES)}")
 
     async def scan_all(self, symbols: List[str]) -> List[Dict]:
         """
@@ -55,7 +55,7 @@ class StrategyDispatcher:
                     self._stats[strategy.strategy_type]["total_net"] += o.get("net", 0)
                 all_opps.extend(opps)
             except Exception as e:
-                logger.debug(f"Strategy {strategy.name} error: {e}")
+                logger.debug(f"Strategy {strategy.strategy_type} error: {e}")
 
         # Run slow strategies periodically
         if now - self._last_slow_run >= self._slow_interval:
@@ -70,7 +70,7 @@ class StrategyDispatcher:
                         self._stats[strategy.strategy_type]["total_net"] += o.get("net", 0)
                     all_opps.extend(opps)
                 except Exception as e:
-                    logger.debug(f"Strategy {strategy.name} error: {e}")
+                    logger.debug(f"Strategy {strategy.strategy_type} error: {e}")
 
         # Sort all opportunities by net profit
         all_opps.sort(key=lambda x: x.get("net", 0), reverse=True)
