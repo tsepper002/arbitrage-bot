@@ -115,6 +115,12 @@ async def main(args=None):
     if args is not None:
         apply_cli_overrides(args)
 
+    # Show prominent mode banner immediately
+    if settings.DRY_RUN:
+        print("🔵 DRY RUN MODE - Safe simulation (no real trades)")
+    else:
+        print("🔴 LIVE TRADING MODE - Real orders will be placed!")
+
     # Configure logging (after overrides)
     logging.basicConfig(
         level=getattr(logging, settings.LOG_LEVEL),

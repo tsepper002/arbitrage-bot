@@ -25,17 +25,19 @@ class BybitREST(BaseExchange):
             hashlib.sha256,
         ).hexdigest()
 
-    def _auth_headers(self, query_string: str = "") -> dict:
+    def _auth_headers(self, query_string: str = "", timestamp: str = None) -> dict:
         """Generate authenticated headers for Bybit v5 API."""
         if not self.api_key or not self.api_secret:
             raise ValueError("API key and secret are required for authenticated endpoints")
-        timestamp = str(int(time.time() * 1000))
+        if timestamp is None:
+            timestamp = str(int(time.time() * 1000))
         signature = self._generate_signature(timestamp, query_string)
         return {
             "X-BAPI-API-KEY": self.api_key,
             "X-BAPI-TIMESTAMP": timestamp,
             "X-BAPI-SIGN": signature,
             "X-BAPI-RECV-WINDOW": self.recv_window,
+            "Content-Type": "application/json",
         }
 
     async def get_price(self, symbol: str) -> float:
@@ -52,9 +54,13 @@ class BybitREST(BaseExchange):
         """
         Fetch account balance using Bybit v5 authenticated API.
         Requires valid api_key and api_secret.
+
+        Includes ``apiTimestamp`` in the query string so that the request
+        is accepted by Bybit API gateways that require it as a parameter.
         """
-        query_string = f"accountType={account_type}"
-        headers = self._auth_headers(query_string)
+        timestamp = str(int(time.time() * 1000))
+        query_string = f"accountType={account_type}&apiTimestamp={timestamp}"
+        headers = self._auth_headers(query_string, timestamp=timestamp)
         url = f"{self.base_url}/v5/account/wallet-balance?{query_string}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:

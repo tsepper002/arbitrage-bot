@@ -9,15 +9,29 @@ REM ============================================================
 
 cd /d "%~dp0"
 
+echo ============================================================
+echo  Arbitrage Bot — Quick Start
+echo ============================================================
+
+echo.
 echo === Pulling latest changes ===
 git pull
+if errorlevel 1 (
+    echo [WARNING] git pull failed — running with local code
+)
 
+echo.
 echo === Installing / updating dependencies ===
-pip install -r requirements.txt
+pip install -q -r requirements.txt
+if errorlevel 1 (
+    echo [WARNING] pip install failed — some features may not work
+)
 
 set MODE=dry-run
 if /I "%~1"=="live" set MODE=live
 if /I "%~1"=="dry-run" set MODE=dry-run
 
+echo.
 echo === Starting bot in %MODE% mode ===
+echo.
 python main.py --mode %MODE%

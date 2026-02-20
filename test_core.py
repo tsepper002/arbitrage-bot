@@ -213,7 +213,13 @@ def test_bybit_rest():
     assert "X-BAPI-TIMESTAMP" in headers, "Should include timestamp header"
     assert "X-BAPI-SIGN" in headers, "Should include signature header"
     assert "X-BAPI-RECV-WINDOW" in headers, "Should include recv window header"
-    print("✅ Auth headers generated correctly")
+    assert headers.get("Content-Type") == "application/json", "Should include Content-Type header"
+    print("✅ Auth headers generated correctly (including Content-Type)")
+
+    # Test auth headers with pre-supplied timestamp
+    headers2 = rest_auth._auth_headers("accountType=UNIFIED&apiTimestamp=9999", timestamp="9999")
+    assert headers2["X-BAPI-TIMESTAMP"] == "9999", "Should use supplied timestamp"
+    print("✅ Auth headers accept pre-supplied timestamp")
 
     # Test that empty credentials raise error
     try:
@@ -323,6 +329,29 @@ def test_cli_arguments():
     print("\n✅ CLI argument tests passed")
 
 
+def test_startup_files():
+    """Test that startup scripts exist and are valid."""
+    print("\n" + "="*60)
+    print("TEST 10: Startup Scripts")
+    print("="*60)
+
+    assert os.path.isfile(os.path.join(os.path.dirname(__file__), "start.bat")), "start.bat should exist"
+    print("✅ start.bat exists")
+
+    assert os.path.isfile(os.path.join(os.path.dirname(__file__), "start.ps1")), "start.ps1 should exist"
+    print("✅ start.ps1 exists")
+
+    # Verify start.bat contains mode handling
+    with open(os.path.join(os.path.dirname(__file__), "start.bat")) as f:
+        bat = f.read()
+    assert "dry-run" in bat, "start.bat should support dry-run mode"
+    assert "git pull" in bat, "start.bat should pull latest code"
+    assert "pip install" in bat, "start.bat should install dependencies"
+    print("✅ start.bat has correct content")
+
+    print("\n✅ Startup scripts tests passed")
+
+
 def main():
     """Run all tests."""
     print("\n" + "="*70)
@@ -339,6 +368,7 @@ def main():
         test_telegram_notifier()
         test_health_monitoring()
         test_cli_arguments()
+        test_startup_files()
         
         print("\n" + "="*70)
         print(" ✅ ALL TESTS PASSED")
