@@ -3,6 +3,7 @@
 HTX (Huobi) REST API client for authenticated operations.
 Implements order placement, cancellation, balance queries, and withdrawals.
 """
+import asyncio
 import time
 import hmac
 import hashlib
@@ -20,12 +21,19 @@ logger = logging.getLogger("htx_rest")
 class HTXRESTClient(BaseRESTClient):
     """HTX (Huobi) exchange REST API client."""
     
-    BASE_URL = "https://api.huobi.pro"
+    # Try new domain first (api.htx.com), fall back to legacy (api.huobi.pro)
+    BASE_URLS = ["https://api.htx.com", "https://api.huobi.pro"]
     
     def __init__(self, api_key: str, api_secret: str):
         super().__init__(api_key, api_secret, "HTX")
         self._session: Optional[aiohttp.ClientSession] = None
         self._account_id: Optional[str] = None
+        self._active_base_url: str = self.BASE_URLS[0]
+        self._active_host: str = "api.htx.com"
+    
+    @property
+    def BASE_URL(self) -> str:
+        return self._active_base_url
     
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -35,7 +43,7 @@ class HTXRESTClient(BaseRESTClient):
                 family=socket.AF_INET,
                 resolver=aiohttp.ThreadedResolver()
             )
-            timeout = aiohttp.ClientTimeout(total=15, sock_connect=5)
+            timeout = aiohttp.ClientTimeout(total=10, sock_connect=5)
             self._session = aiohttp.ClientSession(connector=connector, timeout=timeout)
         return self._session
     
@@ -71,29 +79,43 @@ class HTXRESTClient(BaseRESTClient):
         }
     
     async def _get_account_id(self) -> str:
-        """Get spot account ID (cached)."""
+        """Get spot account ID (cached). Tries multiple API domains."""
         if self._account_id:
             return self._account_id
         
         path = "/v1/account/accounts"
-        params = self._get_common_params()
-        params["Signature"] = self._generate_signature("GET", "api.huobi.pro", path, params)
         
-        url = f"{self.BASE_URL}{path}"
-        session = await self._get_session()
+        for base_url in self.BASE_URLS:
+            host = base_url.replace("https://", "")
+            try:
+                params = self._get_common_params()
+                params["Signature"] = self._generate_signature("GET", host, path, params)
+                
+                url = f"{base_url}{path}"
+                session = await self._get_session()
+                
+                async with session.get(url, params=params) as resp:
+                    data = await resp.json()
+                    if data.get("status") != "ok":
+                        logger.warning(f"HTX {host} account query failed: {data.get('err-msg', data.get('status', 'unknown'))}")
+                        continue
+                    
+                    # Find spot account
+                    for account in data.get("data", []):
+                        if account.get("type") == "spot":
+                            self._account_id = str(account.get("id"))
+                            self._active_base_url = base_url
+                            self._active_host = host
+                            logger.info(f"HTX: using {host} (account {self._account_id})")
+                            return self._account_id
+                    
+                    logger.warning(f"HTX {host}: spot account not found in response")
+            except asyncio.TimeoutError:
+                logger.warning(f"HTX {host}: connection timed out")
+            except Exception as e:
+                logger.warning(f"HTX {host}: {e}")
         
-        async with session.get(url, params=params) as resp:
-            data = await resp.json()
-            if data.get("status") != "ok":
-                raise Exception(f"HTX get account failed: {data}")
-            
-            # Find spot account
-            for account in data.get("data", []):
-                if account.get("type") == "spot":
-                    self._account_id = str(account.get("id"))
-                    return self._account_id
-            
-            raise Exception("HTX spot account not found")
+        raise Exception(f"HTX: failed to get account from all domains ({', '.join(self.BASE_URLS)})")
     
     def normalize_symbol(self, symbol: str) -> str:
         """Convert BTC-USDT to btcusdt (lowercase, no hyphen)."""
@@ -125,7 +147,7 @@ class HTXRESTClient(BaseRESTClient):
         
         # Add authentication
         params = self._get_common_params()
-        params["Signature"] = self._generate_signature("POST", "api.huobi.pro", path, params)
+        params["Signature"] = self._generate_signature("POST", self._active_host, path, params)
         
         url = f"{self.BASE_URL}{path}"
         session = await self._get_session()
@@ -142,7 +164,7 @@ class HTXRESTClient(BaseRESTClient):
         path = f"/v1/order/orders/{order_id}/submitcancel"
         
         params = self._get_common_params()
-        params["Signature"] = self._generate_signature("POST", "api.huobi.pro", path, params)
+        params["Signature"] = self._generate_signature("POST", self._active_host, path, params)
         
         url = f"{self.BASE_URL}{path}"
         session = await self._get_session()
@@ -158,7 +180,7 @@ class HTXRESTClient(BaseRESTClient):
         path = f"/v1/order/orders/{order_id}"
         
         params = self._get_common_params()
-        params["Signature"] = self._generate_signature("GET", "api.huobi.pro", path, params)
+        params["Signature"] = self._generate_signature("GET", self._active_host, path, params)
         
         url = f"{self.BASE_URL}{path}"
         session = await self._get_session()
@@ -176,7 +198,7 @@ class HTXRESTClient(BaseRESTClient):
         path = f"/v1/account/accounts/{account_id}/balance"
         
         params = self._get_common_params()
-        params["Signature"] = self._generate_signature("GET", "api.huobi.pro", path, params)
+        params["Signature"] = self._generate_signature("GET", self._active_host, path, params)
         
         url = f"{self.BASE_URL}{path}"
         session = await self._get_session()
@@ -218,7 +240,7 @@ class HTXRESTClient(BaseRESTClient):
             withdrawal_data["addr-tag"] = memo
         
         params = self._get_common_params()
-        params["Signature"] = self._generate_signature("POST", "api.huobi.pro", path, params)
+        params["Signature"] = self._generate_signature("POST", self._active_host, path, params)
         
         url = f"{self.BASE_URL}{path}"
         session = await self._get_session()
@@ -243,7 +265,7 @@ class HTXRESTClient(BaseRESTClient):
             path = "/v2/account/deposit/address"
             params = self._get_common_params()
             params["currency"] = currency.lower()
-            params["Signature"] = self._generate_signature("GET", "api.huobi.pro", path, params)
+            params["Signature"] = self._generate_signature("GET", self._active_host, path, params)
             
             url = f"{self.BASE_URL}{path}"
             session = await self._get_session()

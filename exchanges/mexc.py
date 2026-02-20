@@ -19,6 +19,9 @@ class MEXC:
         # Reverse mapping: BTCUSDT -> BTC-USDT for PriceStore
         self._sym_map = {s.replace("-", ""): s for s in symbols}
         self._stop = False
+        self._backoff = 1.0  # Start with 1s backoff
+        self._max_backoff = 60.0
+        self._last_msg_time = 0
 
     def stop(self):
         self._stop = True
@@ -26,25 +29,34 @@ class MEXC:
     async def run(self):
         while not self._stop:
             try:
-                async with websockets.connect(self.WS_URL, ping_interval=20) as ws:
+                async with websockets.connect(
+                    self.WS_URL,
+                    ping_interval=20,
+                    ping_timeout=10,
+                    close_timeout=5,
+                ) as ws:
                     log.info("MEXC WS connected")
+                    self._backoff = 1.0  # Reset backoff on successful connect
+                    self._last_msg_time = time.time()
 
                     for s in self._mexc_symbols:
                         msg = {
                             "method": "SUBSCRIPTION",
-                            "params": [f"spot@public.limit.depth.v3.api@{s}@1"],
+                            "params": [f"spot@public.limit.depth.v3.api@{s}@5"],
                         }
                         await ws.send(json.dumps(msg))
 
                     async for raw in ws:
                         if self._stop:
                             break
+                        
+                        self._last_msg_time = time.time()
                         data = json.loads(raw)
 
                         if "d" not in data:
                             continue
 
-                        mexc_symbol = data["s"]
+                        mexc_symbol = data.get("s", "")
                         bids = data["d"].get("bids")
                         asks = data["d"].get("asks")
 
@@ -62,7 +74,11 @@ class MEXC:
                         std_symbol = self._sym_map.get(mexc_symbol, mexc_symbol)
                         await self.store.update_levels("MEXC", std_symbol, bids_levels, asks_levels, ts)
 
+            except websockets.exceptions.ConnectionClosedError as e:
+                log.warning(f"MEXC WS closed: {e.code} {e.reason}")
             except Exception as e:
-                log.warning(f"MEXC reconnecting: {e}")
-                if not self._stop:
-                    await asyncio.sleep(3)
+                log.warning(f"MEXC reconnecting ({self._backoff:.0f}s): {type(e).__name__}: {e}")
+            
+            if not self._stop:
+                await asyncio.sleep(self._backoff)
+                self._backoff = min(self._backoff * 1.5, self._max_backoff)
