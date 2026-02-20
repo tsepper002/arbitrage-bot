@@ -12,9 +12,12 @@ import settings
 from core.order_executor import OrderExecutor
 
 # Async helper for synchronous test context
+_loop = asyncio.new_event_loop()
+asyncio.set_event_loop(_loop)
+
 def _run(coro):
     """Run an async coroutine from synchronous test code."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return _loop.run_until_complete(coro)
 
 
 def test_configuration():

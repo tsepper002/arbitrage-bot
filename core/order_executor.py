@@ -181,8 +181,7 @@ class OrderExecutor:
         try:
             asyncio.ensure_future(self.telegram.notify_opportunity(opp))
         except RuntimeError:
-            # No running event loop (e.g. called from sync test context)
-            pass
+            logger.debug("Telegram notification skipped: no running event loop")
 
         # Update virtual balance: subtract buy cost, add sell proceeds
         self.virtual_balance_usdt = self.virtual_balance_usdt - trade_cost + (qty * sell_price)
@@ -274,7 +273,7 @@ class OrderExecutor:
             try:
                 asyncio.create_task(self.telegram.notify_opportunity(opp))
             except RuntimeError:
-                pass
+                logger.debug("Telegram notification skipped: no running event loop")
 
             return {
                 'status': 'executed',
