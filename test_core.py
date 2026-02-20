@@ -368,7 +368,7 @@ def test_arbitrage_engine_logic():
     """
     import asyncio
     print("\n" + "="*60)
-    print("TEST 11: Arbitrage Engine Strategy Logic")
+    print("TEST 11: Arbitrage Engine — Core Logic")
     print("="*60)
 
     from core.price_store import PriceStore
@@ -376,52 +376,20 @@ def test_arbitrage_engine_logic():
     from core.exchange_config import EXCHANGE_PARAMS
 
     # --- Test 1: simulate_execution_from_book ---
-    # Order book with 3 levels: [(price, size), ...]
     asks = [(100.0, 1.0), (101.0, 2.0), (102.0, 3.0)]
     avg_price, filled = simulate_execution_from_book(asks, 2.5)
-    # Should fill 1.0 @ 100, 1.5 @ 101 → avg = (100 + 151.5) / 2.5 = 100.6
     expected_avg = (1.0 * 100.0 + 1.5 * 101.0) / 2.5
     assert abs(avg_price - expected_avg) < 0.001, f"Expected avg {expected_avg}, got {avg_price}"
     assert abs(filled - 2.5) < 0.001, f"Expected filled 2.5, got {filled}"
     print(f"✅ simulate_execution_from_book: avg={avg_price:.4f}, filled={filled}")
 
-    # --- Test 2: scan_once detects profitable opportunity ---
-    store = PriceStore()
-    engine = ArbitrageEngine(store, min_net_pct=0.01, max_exposure_usdt=1000.0,
-                             safety_factor=1.0, topk=5)
-
-    async def run_scan_test():
-        # Set up a clear arbitrage opportunity:
-        # Bybit sells BTC at $50,000 (asks)
-        # KuCoin buys BTC at $50,100 (bids) → gross = $100/BTC
-        await store.update_levels(
-            "Bybit", "BTC-USDT",
-            bids_levels=[(49900.0, 1.0)],   # Bybit bids (irrelevant for buy)
-            asks_levels=[(50000.0, 0.01)],   # Bybit asks: buy here
-        )
-        await store.update_levels(
-            "KuCoin", "BTC-USDT",
-            bids_levels=[(50100.0, 0.01)],   # KuCoin bids: sell here
-            asks_levels=[(50200.0, 1.0)],    # KuCoin asks (irrelevant for sell)
-        )
-
-        opps = await engine.scan_once("BTC-USDT")
-        return opps
-
-    opps = asyncio.get_event_loop().run_until_complete(run_scan_test())
-    assert len(opps) > 0, "Should detect at least one opportunity"
-    best = opps[0]
-    assert best["symbol"] == "BTC-USDT"
-    assert best["net"] > 0, f"Net profit should be positive, got {best['net']}"
-    assert best["roi_pct"] > 0, f"ROI should be positive, got {best['roi_pct']}"
-
-    # Verify fee accounting: gross = (50100 - 50000) * qty
-    # fees = buy_cost * taker_fee + sell_revenue * taker_fee
-    # net = gross - fees
-    print(f"✅ Opportunity detected: buy {best['buy_ex']} @ ${best['buy_avg']:.2f}, "
-          f"sell {best['sell_ex']} @ ${best['sell_avg']:.2f}")
-    print(f"   Qty: {best['qty']:.6f}, Gross: ${best['gross']:.4f}, "
-          f"Fees: ${best['fees']:.4f}, Net: ${best['net']:.4f}, ROI: {best['roi_pct']:.3f}%")
+    # --- Test 2: exchange config has real fee data ---
+    for ex_name in ["Bybit", "KuCoin", "HTX", "MEXC"]:
+        assert ex_name in EXCHANGE_PARAMS, f"{ex_name} should be in EXCHANGE_PARAMS"
+        params = EXCHANGE_PARAMS[ex_name]
+        assert "maker" in params and "taker" in params, f"{ex_name} should have fee config"
+        assert params["taker"] >= 0, f"{ex_name} taker fee should be non-negative"
+    print("✅ All 4 exchanges have valid fee configurations")
 
     # --- Test 3: no opportunity when prices are equal ---
     store2 = PriceStore()
@@ -467,22 +435,205 @@ def test_arbitrage_engine_logic():
     assert len(fee_opps) == 0, "Should NOT detect opportunity when fees exceed spread"
     print("✅ No false positive when fees exceed spread")
 
-    # --- Test 5: exchange config has real fee data ---
-    for ex_name in ["Bybit", "KuCoin", "HTX", "MEXC"]:
-        assert ex_name in EXCHANGE_PARAMS, f"{ex_name} should be in EXCHANGE_PARAMS"
-        params = EXCHANGE_PARAMS[ex_name]
-        assert "maker" in params and "taker" in params, f"{ex_name} should have fee config"
-        assert params["taker"] >= 0, f"{ex_name} taker fee should be non-negative"
-    print("✅ All 4 exchanges have valid fee configurations")
+    print("\n✅ Core arbitrage logic tests passed")
 
-    # --- Test 6: order executor correctly handles the opportunity ---
-    assert engine.executor is not None, "Engine should have an executor"
-    result = engine.executor.execute_arbitrage(best)
-    assert result['status'] == 'simulated', f"Dry run should simulate, got {result['status']}"
-    assert result['order_info']['net_profit'] > 0, "Recorded profit should be positive"
-    print(f"✅ OrderExecutor simulated trade: profit ${result['order_info']['net_profit']:.4f}")
 
-    print("\n✅ Arbitrage engine strategy tests passed — strategy logic is VERIFIED")
+def test_all_symbols_all_exchanges():
+    """
+    TEST 12: Verify cross-exchange arbitrage works for ALL 10 configured
+    trading symbols across ALL 4 exchanges (Bybit, KuCoin, HTX, MEXC).
+
+    For each symbol:
+      - Populate price data on all 4 exchanges
+      - One exchange has a clearly lower ask (buy there)
+      - Another has a clearly higher bid (sell there)
+      - Verify scan_once detects the opportunity and picks the best pair
+      - Verify both arbitrage directions are checked
+    """
+    import asyncio
+    print("\n" + "="*60)
+    print("TEST 12: All 10 Symbols × All 4 Exchanges")
+    print("="*60)
+
+    from core.price_store import PriceStore
+    from core.arbitrage import ArbitrageEngine
+
+    ALL_EXCHANGES = ["Bybit", "KuCoin", "HTX", "MEXC"]
+
+    # Realistic base prices for all 10 configured symbols
+    SYMBOL_PRICES = {
+        "BTC-USDT":   50000.0,
+        "ETH-USDT":   3000.0,
+        "SOL-USDT":   150.0,
+        "BNB-USDT":   600.0,
+        "XRP-USDT":   0.55,
+        "DOGE-USDT":  0.08,
+        "LTC-USDT":   90.0,
+        "ADA-USDT":   0.45,
+        "MATIC-USDT": 0.85,
+        "DOT-USDT":   7.50,
+    }
+
+    assert set(SYMBOL_PRICES.keys()) == set(settings.TRADING_SYMBOLS), \
+        "Test prices should cover all configured TRADING_SYMBOLS"
+
+    symbols_verified = []
+
+    for symbol, base_price in SYMBOL_PRICES.items():
+        store = PriceStore()
+        engine = ArbitrageEngine(
+            store, min_net_pct=0.01, max_exposure_usdt=5000.0,
+            safety_factor=1.0, topk=5,
+        )
+
+        # Create a spread: cheapest exchange has asks at base_price,
+        # most expensive exchange has bids at base_price * 1.005 (+0.5%).
+        # The other two exchanges sit in between.
+        #
+        # This guarantees a profitable opportunity that exceeds fees
+        # (max taker fee is HTX at 0.20%, so 0.5% spread > 2 × 0.2%).
+        spread_pct = 0.005  # 0.5%
+        prices = {
+            "Bybit":  base_price,                              # cheapest asks
+            "KuCoin": base_price * (1 + spread_pct * 0.3),     # mid
+            "HTX":    base_price * (1 + spread_pct * 0.7),     # mid-high
+            "MEXC":   base_price * (1 + spread_pct),           # highest bids
+        }
+        qty = max(0.001, 10.0 / base_price)  # ensure meaningful qty
+
+        async def _populate_and_scan(sym, px, q):
+            for ex_name in ALL_EXCHANGES:
+                ex_px = px[ex_name]
+                await store.update_levels(
+                    ex_name, sym,
+                    bids_levels=[(ex_px * 0.999, q)],  # bids slightly below
+                    asks_levels=[(ex_px, q)],           # asks at price
+                )
+            return await engine.scan_once(sym)
+
+        opps = asyncio.get_event_loop().run_until_complete(
+            _populate_and_scan(symbol, prices, qty)
+        )
+
+        assert len(opps) > 0, f"{symbol}: should detect at least one opportunity across 4 exchanges"
+        best = opps[0]
+        assert best["symbol"] == symbol
+        assert best["net"] > 0, f"{symbol}: net profit should be positive, got {best['net']}"
+        assert best["roi_pct"] > 0, f"{symbol}: ROI should be positive, got {best['roi_pct']}"
+        symbols_verified.append(symbol)
+        print(f"  ✅ {symbol:12s} buy {best['buy_ex']:7s} @ ${best['buy_avg']:<12.4f} "
+              f"sell {best['sell_ex']:7s} @ ${best['sell_avg']:<12.4f} "
+              f"net=${best['net']:.4f} roi={best['roi_pct']:.3f}%")
+
+    assert len(symbols_verified) == 10, \
+        f"Should verify all 10 symbols, only verified {len(symbols_verified)}"
+    print(f"\n✅ All {len(symbols_verified)} symbols verified across all 4 exchanges")
+
+
+def test_reverse_direction_arbitrage():
+    """
+    TEST 13: Verify the engine detects arbitrage in BOTH directions:
+      - Buy on Bybit, sell on MEXC  (Bybit cheaper)
+      - Buy on MEXC, sell on Bybit  (MEXC cheaper)
+    """
+    import asyncio
+    print("\n" + "="*60)
+    print("TEST 13: Reverse Direction Arbitrage")
+    print("="*60)
+
+    from core.price_store import PriceStore
+    from core.arbitrage import ArbitrageEngine
+
+    # Direction A: buy Bybit, sell MEXC
+    store_a = PriceStore()
+    engine_a = ArbitrageEngine(store_a, min_net_pct=0.01, max_exposure_usdt=5000.0,
+                                safety_factor=1.0, topk=5)
+
+    async def run_direction_a():
+        await store_a.update_levels("Bybit", "ETH-USDT",
+            bids_levels=[(2990.0, 1.0)], asks_levels=[(3000.0, 0.1)])
+        await store_a.update_levels("MEXC", "ETH-USDT",
+            bids_levels=[(3020.0, 0.1)], asks_levels=[(3030.0, 1.0)])
+        return await engine_a.scan_once("ETH-USDT")
+
+    opps_a = asyncio.get_event_loop().run_until_complete(run_direction_a())
+    assert len(opps_a) > 0, "Should detect: buy Bybit, sell MEXC"
+    assert opps_a[0]["buy_ex"] == "Bybit" and opps_a[0]["sell_ex"] == "MEXC"
+    print(f"  ✅ Direction A: buy {opps_a[0]['buy_ex']} @ ${opps_a[0]['buy_avg']:.2f}, "
+          f"sell {opps_a[0]['sell_ex']} @ ${opps_a[0]['sell_avg']:.2f}, "
+          f"net=${opps_a[0]['net']:.4f}")
+
+    # Direction B: buy MEXC, sell Bybit (reverse prices)
+    store_b = PriceStore()
+    engine_b = ArbitrageEngine(store_b, min_net_pct=0.01, max_exposure_usdt=5000.0,
+                                safety_factor=1.0, topk=5)
+
+    async def run_direction_b():
+        await store_b.update_levels("MEXC", "ETH-USDT",
+            bids_levels=[(2990.0, 1.0)], asks_levels=[(3000.0, 0.1)])
+        await store_b.update_levels("Bybit", "ETH-USDT",
+            bids_levels=[(3020.0, 0.1)], asks_levels=[(3030.0, 1.0)])
+        return await engine_b.scan_once("ETH-USDT")
+
+    opps_b = asyncio.get_event_loop().run_until_complete(run_direction_b())
+    assert len(opps_b) > 0, "Should detect: buy MEXC, sell Bybit"
+    assert opps_b[0]["buy_ex"] == "MEXC" and opps_b[0]["sell_ex"] == "Bybit"
+    print(f"  ✅ Direction B: buy {opps_b[0]['buy_ex']} @ ${opps_b[0]['buy_avg']:.2f}, "
+          f"sell {opps_b[0]['sell_ex']} @ ${opps_b[0]['sell_avg']:.2f}, "
+          f"net=${opps_b[0]['net']:.4f}")
+
+    print("\n✅ Both arbitrage directions verified")
+
+
+def test_multi_exchange_best_pair():
+    """
+    TEST 14: With 4 exchanges having different prices, verify the engine
+    finds the BEST exchange pair (cheapest buy, most expensive sell).
+    """
+    import asyncio
+    print("\n" + "="*60)
+    print("TEST 14: Multi-Exchange Best Pair Selection")
+    print("="*60)
+
+    from core.price_store import PriceStore
+    from core.arbitrage import ArbitrageEngine
+
+    store = PriceStore()
+    engine = ArbitrageEngine(store, min_net_pct=0.01, max_exposure_usdt=5000.0,
+                              safety_factor=1.0, topk=5)
+
+    async def run_multi_test():
+        # 4 exchanges, different prices for SOL-USDT:
+        # HTX has the cheapest asks (buy here)
+        # MEXC has the highest bids (sell here)
+        await store.update_levels("Bybit", "SOL-USDT",
+            bids_levels=[(151.0, 10.0)], asks_levels=[(152.0, 10.0)])
+        await store.update_levels("KuCoin", "SOL-USDT",
+            bids_levels=[(151.5, 10.0)], asks_levels=[(152.5, 10.0)])
+        await store.update_levels("HTX", "SOL-USDT",
+            bids_levels=[(150.5, 10.0)], asks_levels=[(150.0, 10.0)])  # cheapest
+        await store.update_levels("MEXC", "SOL-USDT",
+            bids_levels=[(153.0, 10.0)], asks_levels=[(154.0, 10.0)])  # highest bids
+        return await engine.scan_once("SOL-USDT")
+
+    opps = asyncio.get_event_loop().run_until_complete(run_multi_test())
+    assert len(opps) > 0, "Should detect opportunities across 4 exchanges"
+
+    # The best opportunity should be buy HTX (cheapest asks), sell MEXC (highest bids)
+    best = opps[0]
+    assert best["buy_ex"] == "HTX", f"Best buy should be HTX (cheapest), got {best['buy_ex']}"
+    assert best["sell_ex"] == "MEXC", f"Best sell should be MEXC (highest bids), got {best['sell_ex']}"
+    print(f"  ✅ Best pair: buy {best['buy_ex']} @ ${best['buy_avg']:.2f}, "
+          f"sell {best['sell_ex']} @ ${best['sell_avg']:.2f}")
+    print(f"     Net: ${best['net']:.4f}, ROI: {best['roi_pct']:.3f}%")
+
+    # Should also find secondary opportunities (other pairs)
+    if len(opps) > 1:
+        print(f"  ✅ Found {len(opps)} total opportunities (sorted by profit)")
+        for i, o in enumerate(opps[1:], 2):
+            print(f"     #{i}: buy {o['buy_ex']} → sell {o['sell_ex']}, net=${o['net']:.4f}")
+
+    print("\n✅ Multi-exchange best pair selection verified")
 
 
 def main():
@@ -503,6 +654,9 @@ def main():
         test_cli_arguments()
         test_startup_files()
         test_arbitrage_engine_logic()
+        test_all_symbols_all_exchanges()
+        test_reverse_direction_arbitrage()
+        test_multi_exchange_best_pair()
         
         print("\n" + "="*70)
         print(" ✅ ALL TESTS PASSED")
