@@ -6,6 +6,7 @@ Implements order placement, cancellation, balance queries, and withdrawals.
 import time
 import hmac
 import hashlib
+import json
 import socket
 from typing import Dict, Any, Optional, List
 import aiohttp
@@ -84,7 +85,6 @@ class BybitRESTClient(BaseRESTClient):
         """Place an order on Bybit using v5 API with header authentication."""
         url = f"{self.BASE_URL}/v5/order/create"
         
-        import json as _json
         body = {
             "category": "spot",
             "symbol": self.normalize_symbol(symbol),
@@ -97,7 +97,7 @@ class BybitRESTClient(BaseRESTClient):
             body["price"] = str(price)
             body["timeInForce"] = time_in_force
         
-        body_str = _json.dumps(body)
+        body_str = json.dumps(body)
         headers = self._get_auth_headers(body_str)
         headers["Content-Type"] = "application/json"
         
@@ -112,14 +112,13 @@ class BybitRESTClient(BaseRESTClient):
         """Cancel an order on Bybit using v5 API."""
         url = f"{self.BASE_URL}/v5/order/cancel"
         
-        import json as _json
         body = {
             "category": "spot",
             "symbol": self.normalize_symbol(symbol),
             "orderId": order_id,
         }
         
-        body_str = _json.dumps(body)
+        body_str = json.dumps(body)
         headers = self._get_auth_headers(body_str)
         headers["Content-Type"] = "application/json"
         
@@ -145,7 +144,11 @@ class BybitRESTClient(BaseRESTClient):
             return data.get("result", {})
     
     async def get_balance(self, currency: Optional[str] = None) -> Dict[str, float]:
-        """Get account balances from Bybit using v5 API with header authentication."""
+        """Get account balances from Bybit using v5 API with header authentication.
+        
+        Uses UNIFIED account type which covers both spot and derivatives wallets.
+        Bybit v5 migrated all accounts to unified trading accounts.
+        """
         url = f"{self.BASE_URL}/v5/account/wallet-balance"
         
         query_string = "accountType=UNIFIED"
@@ -195,7 +198,6 @@ class BybitRESTClient(BaseRESTClient):
         """Withdraw funds from Bybit using v5 API."""
         url = f"{self.BASE_URL}/v5/asset/withdraw/create"
         
-        import json as _json
         body = {
             "coin": currency,
             "amount": str(amount),
@@ -207,7 +209,7 @@ class BybitRESTClient(BaseRESTClient):
         if memo:
             body["tag"] = memo
         
-        body_str = _json.dumps(body)
+        body_str = json.dumps(body)
         headers = self._get_auth_headers(body_str)
         headers["Content-Type"] = "application/json"
         
