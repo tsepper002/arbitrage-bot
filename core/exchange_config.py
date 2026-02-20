@@ -57,7 +57,7 @@ EXCHANGE_PARAMS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# Optionally try to refresh feesvia REST public/private APIs.
+# Optionally try to refresh fees via REST public/private APIs.
 # Implemented as best-effort: networks and endpoints change over time.
 def fetch_kucoin_fees() -> Optional[Dict[str, Any]]:
     """
