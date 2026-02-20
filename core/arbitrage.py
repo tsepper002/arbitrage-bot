@@ -8,6 +8,7 @@ from typing import List, Tuple, Optional, Dict, Set
 from .exchange_config import EXCHANGE_PARAMS
 from . import trader_config
 from .order_executor import OrderExecutor
+from .strategy_dispatcher import StrategyDispatcher
 import settings
 
 logger = logging.getLogger("arbitrage_engine")
@@ -61,6 +62,9 @@ class ArbitrageEngine:
 
         # Initialize order executor
         self.executor = OrderExecutor()
+
+        # Initialize strategy dispatcher (all 14 strategies)
+        self.dispatcher = StrategyDispatcher(store)
 
         # Event-driven scanning state
         self.updated_symbols: Set[str] = set()
@@ -254,6 +258,7 @@ class ArbitrageEngine:
                 opps = await self.scan_once(s)
                 if opps:
                     for o in opps:
+                        o.setdefault("strategy", "CROSS_EXCHANGE")
                         # Execute or log the opportunity
                         result = self.executor.execute_arbitrage(o)
                         
@@ -264,10 +269,22 @@ class ArbitrageEngine:
                             logger.debug(f"Trade blocked: {result['reason']}")
                         elif result['status'] == 'error':
                             logger.error(f"Execution error: {result.get('reason', 'Unknown')}")
+
+            # Run all 14 strategies via dispatcher
+            strategy_opps = await self.dispatcher.scan_all(symbols_to_scan)
+            for o in strategy_opps:
+                result = self.executor.execute_arbitrage(o)
+                if result['status'] == 'simulated':
+                    pass
+                elif result['status'] == 'blocked':
+                    logger.debug(f"Strategy {o.get('strategy', '?')} blocked: {result['reason']}")
+                elif result['status'] == 'error':
+                    logger.error(f"Strategy {o.get('strategy', '?')} error: {result.get('reason', 'Unknown')}")
             
             # Print statistics periodically
             if time.time() - last_stats_print > 60.0:
                 self.executor.print_statistics()
+                self.dispatcher.print_stats()
                 last_stats_print = time.time()
             
             # Sleep based on configured interval
