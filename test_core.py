@@ -100,10 +100,156 @@ def test_rate_limiting():
     print("\n✅ Rate limiting tests passed")
 
 
+def test_virtual_capital():
+    """Test virtual capital tracking in dry run mode."""
+    print("\n" + "="*60)
+    print("TEST 4: Virtual Capital Tracking")
+    print("="*60)
+
+    executor = OrderExecutor(dry_run=True)
+
+    # Should start with default virtual capital
+    assert executor.virtual_balance_usdt == settings.VIRTUAL_CAPITAL_USDT, "Should start with configured virtual capital"
+    assert executor.initial_virtual_balance == settings.VIRTUAL_CAPITAL_USDT, "Initial balance should match"
+    print(f"✅ Starting virtual balance: ${executor.virtual_balance_usdt:.2f}")
+
+    # Execute a profitable trade
+    opp = {
+        'symbol': 'ETH-USDT',
+        'buy_ex': 'Bybit',
+        'sell_ex': 'MEXC',
+        'qty': 0.1,
+        'buy_avg': 3000.0,
+        'sell_avg': 3010.0,
+        'net': 0.82,
+        'roi_pct': 0.273
+    }
+    result = executor.execute_arbitrage(opp)
+    assert result['status'] == 'simulated', "Should simulate trade"
+
+    # Virtual balance should increase by (sell_proceeds - buy_cost)
+    expected_balance = settings.VIRTUAL_CAPITAL_USDT - (0.1 * 3000.0) + (0.1 * 3010.0)
+    assert abs(executor.virtual_balance_usdt - expected_balance) < 0.01, \
+        f"Virtual balance should be ~${expected_balance:.2f}, got ${executor.virtual_balance_usdt:.2f}"
+    print(f"✅ Virtual balance after trade: ${executor.virtual_balance_usdt:.2f}")
+
+    # Stats should show virtual P&L
+    stats = executor.get_statistics()
+    assert 'virtual_balance' in stats, "Stats should include virtual_balance"
+    assert 'virtual_pnl' in stats, "Stats should include virtual_pnl"
+    assert stats['virtual_pnl'] > 0, "P&L should be positive after profitable trade"
+    print(f"✅ Virtual P&L: ${stats['virtual_pnl']:.4f}")
+
+    # Test insufficient capital blocking
+    executor2 = OrderExecutor(dry_run=True)
+    big_opp = {
+        'symbol': 'BTC-USDT',
+        'buy_ex': 'KuCoin',
+        'sell_ex': 'Bybit',
+        'qty': 1.0,
+        'buy_avg': 100000.0,
+        'sell_avg': 100100.0,
+        'net': 40.0,
+        'roi_pct': 0.04
+    }
+    result = executor2.execute_arbitrage(big_opp)
+    assert result['status'] == 'blocked', "Should block trade exceeding virtual capital"
+    assert 'virtual capital' in result['reason'].lower(), "Reason should mention virtual capital"
+    print(f"✅ Insufficient capital blocked: {result['reason']}")
+
+    print("\n✅ Virtual capital tests passed")
+
+
+def test_mexc_config():
+    """Test that MEXC is properly configured."""
+    print("\n" + "="*60)
+    print("TEST 5: MEXC Exchange Config")
+    print("="*60)
+
+    from core.exchange_config import EXCHANGE_PARAMS
+
+    assert 'MEXC' in EXCHANGE_PARAMS, "MEXC should be in EXCHANGE_PARAMS"
+    mexc_params = EXCHANGE_PARAMS['MEXC']
+    assert 'maker' in mexc_params, "MEXC should have maker fee"
+    assert 'taker' in mexc_params, "MEXC should have taker fee"
+    assert mexc_params['taker'] > 0, "MEXC taker fee should be positive"
+    print(f"✅ MEXC config: maker={mexc_params['maker']}, taker={mexc_params['taker']}")
+
+    # Test MEXC class has stop method
+    from exchanges.mexc import MEXC
+    mexc = MEXC(None, [])
+    assert hasattr(mexc, 'stop'), "MEXC should have stop method"
+    assert hasattr(mexc, 'run'), "MEXC should have run method"
+    print("✅ MEXC class has required methods")
+
+    print("\n✅ MEXC config tests passed")
+
+
+def test_bybit_rest():
+    """Test BybitREST v5 API client."""
+    print("\n" + "="*60)
+    print("TEST 6: Bybit REST v5 Client")
+    print("="*60)
+
+    from exchanges.bybit_rest import BybitREST
+
+    # Test instantiation without credentials
+    rest = BybitREST()
+    assert rest.base_url == "https://api.bybit.com", "Should use correct base URL"
+    assert hasattr(rest, 'get_balance'), "Should have get_balance method"
+    assert hasattr(rest, '_generate_signature'), "Should have signature generation"
+    print("✅ BybitREST instantiation OK")
+
+    # Test signature generation with test credentials
+    rest_auth = BybitREST(api_key="test_key", api_secret="test_secret")
+    sig = rest_auth._generate_signature("1234567890", "accountType=UNIFIED")
+    assert isinstance(sig, str), "Signature should be a string"
+    assert len(sig) == 64, "HMAC-SHA256 hex digest should be 64 chars"
+    print(f"✅ Signature generation works: {sig[:16]}...")
+
+    # Test auth headers
+    headers = rest_auth._auth_headers("accountType=UNIFIED")
+    assert "X-BAPI-API-KEY" in headers, "Should include API key header"
+    assert "X-BAPI-TIMESTAMP" in headers, "Should include timestamp header"
+    assert "X-BAPI-SIGN" in headers, "Should include signature header"
+    assert "X-BAPI-RECV-WINDOW" in headers, "Should include recv window header"
+    print("✅ Auth headers generated correctly")
+
+    # Test that empty credentials raise error
+    try:
+        rest._auth_headers("test")
+        assert False, "Should raise ValueError for empty credentials"
+    except ValueError as e:
+        print(f"✅ Empty credentials rejected: {e}")
+
+    print("\n✅ Bybit REST tests passed")
+
+
+def test_telegram_notifier():
+    """Test Telegram notifier initialization."""
+    print("\n" + "="*60)
+    print("TEST 7: Telegram Notifier")
+    print("="*60)
+
+    from utils.telegram import TelegramNotifier
+
+    # Should be disabled by default (no token/chat_id)
+    notifier = TelegramNotifier()
+    assert notifier.enabled == False, "Should be disabled without credentials"
+    print("✅ Telegram disabled by default")
+
+    # Should be disabled even with token but no TELEGRAM_ENABLED
+    notifier2 = TelegramNotifier(token="fake_token", chat_id="fake_chat")
+    assert notifier2.enabled == False, "Should be disabled when TELEGRAM_ENABLED is False"
+    print("✅ Telegram disabled when TELEGRAM_ENABLED is False")
+
+    print("\n✅ Telegram notifier tests passed")
+
+
 def test_health_monitoring():
     """Test WebSocket health monitoring helpers."""
     print("\n" + "="*60)
-    print("TEST 4: Health Monitoring")
+    print("TEST 8: Health Monitoring")
     print("="*60)
     
     from exchanges.ws_helpers import WSHealthMonitor, WSReconnectHelper
@@ -143,6 +289,10 @@ def main():
         test_configuration()
         test_order_executor_dry_run()
         test_rate_limiting()
+        test_virtual_capital()
+        test_mexc_config()
+        test_bybit_rest()
+        test_telegram_notifier()
         test_health_monitoring()
         
         print("\n" + "="*70)
