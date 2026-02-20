@@ -35,7 +35,7 @@ class HTXRESTClient(BaseRESTClient):
                 family=socket.AF_INET,
                 resolver=aiohttp.ThreadedResolver()
             )
-            timeout = aiohttp.ClientTimeout(total=30, sock_connect=10)
+            timeout = aiohttp.ClientTimeout(total=15, sock_connect=5)
             self._session = aiohttp.ClientSession(connector=connector, timeout=timeout)
         return self._session
     

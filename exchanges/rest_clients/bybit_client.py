@@ -42,30 +42,31 @@ class BybitRESTClient(BaseRESTClient):
         if self._session and not self._session.closed:
             await self._session.close()
     
-    def _generate_signature(self, params: Dict[str, Any]) -> str:
-        """Generate HMAC SHA256 signature for Bybit API."""
-        param_str = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
-        signature = hmac.new(
+    def _generate_signature(self, timestamp: str, query_string: str) -> str:
+        """Generate HMAC SHA256 signature for Bybit v5 API.
+        
+        Bybit v5 signature = HMAC_SHA256(timestamp + api_key + recv_window + query_string)
+        """
+        param_str = timestamp + self.api_key + str(self.recv_window) + query_string
+        return hmac.new(
             self.api_secret.encode('utf-8'),
             param_str.encode('utf-8'),
             hashlib.sha256
         ).hexdigest()
-        return signature
     
-    def _get_headers(self) -> Dict[str, str]:
-        """Get common headers for API requests."""
+    def _get_auth_headers(self, query_string: str = "") -> Dict[str, str]:
+        """Get authenticated headers for Bybit v5 API.
+        
+        Bybit v5 uses X-BAPI-* headers for authentication (NOT query params).
+        """
+        timestamp = str(int(time.time() * 1000))
+        signature = self._generate_signature(timestamp, query_string)
         return {
-            "Content-Type": "application/json",
             "X-BAPI-API-KEY": self.api_key,
+            "X-BAPI-TIMESTAMP": timestamp,
+            "X-BAPI-SIGN": signature,
+            "X-BAPI-RECV-WINDOW": str(self.recv_window),
         }
-    
-    def _add_auth_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Add authentication parameters."""
-        params["api_key"] = self.api_key
-        params["timestamp"] = str(int(time.time() * 1000))
-        params["recv_window"] = str(self.recv_window)
-        params["sign"] = self._generate_signature(params)
-        return params
     
     def normalize_symbol(self, symbol: str) -> str:
         """Convert BTC-USDT to BTCUSDT."""
@@ -80,84 +81,78 @@ class BybitRESTClient(BaseRESTClient):
         price: Optional[float] = None,
         time_in_force: str = "GTC"
     ) -> Dict[str, Any]:
-        """Place an order on Bybit."""
+        """Place an order on Bybit using v5 API with header authentication."""
         url = f"{self.BASE_URL}/v5/order/create"
         
-        params = {
+        import json as _json
+        body = {
             "category": "spot",
             "symbol": self.normalize_symbol(symbol),
-            "side": side.capitalize(),  # Buy or Sell
+            "side": side.capitalize(),
             "orderType": "Market" if order_type == "market" else "Limit",
             "qty": str(quantity),
         }
         
         if order_type == "limit" and price:
-            params["price"] = str(price)
-            params["timeInForce"] = time_in_force
+            body["price"] = str(price)
+            body["timeInForce"] = time_in_force
         
-        headers = self._get_headers()
-        params = self._add_auth_params(params)
+        body_str = _json.dumps(body)
+        headers = self._get_auth_headers(body_str)
+        headers["Content-Type"] = "application/json"
         
         session = await self._get_session()
-        async with session.post(url, json=params, headers=headers) as resp:
+        async with session.post(url, data=body_str, headers=headers) as resp:
             data = await resp.json()
             if data.get("retCode") != 0:
                 raise Exception(f"Bybit order failed: {data}")
             return data.get("result", {})
     
     async def cancel_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
-        """Cancel an order on Bybit."""
+        """Cancel an order on Bybit using v5 API."""
         url = f"{self.BASE_URL}/v5/order/cancel"
         
-        params = {
+        import json as _json
+        body = {
             "category": "spot",
             "symbol": self.normalize_symbol(symbol),
             "orderId": order_id,
         }
         
-        headers = self._get_headers()
-        params = self._add_auth_params(params)
+        body_str = _json.dumps(body)
+        headers = self._get_auth_headers(body_str)
+        headers["Content-Type"] = "application/json"
         
         session = await self._get_session()
-        async with session.post(url, json=params, headers=headers) as resp:
+        async with session.post(url, data=body_str, headers=headers) as resp:
             data = await resp.json()
             if data.get("retCode") != 0:
                 raise Exception(f"Bybit cancel failed: {data}")
             return data.get("result", {})
     
     async def get_order_status(self, symbol: str, order_id: str) -> Dict[str, Any]:
-        """Get order status from Bybit."""
+        """Get order status from Bybit using v5 API."""
         url = f"{self.BASE_URL}/v5/order/realtime"
         
-        params = {
-            "category": "spot",
-            "symbol": self.normalize_symbol(symbol),
-            "orderId": order_id,
-        }
-        
-        headers = self._get_headers()
-        params = self._add_auth_params(params)
+        query_string = f"category=spot&symbol={self.normalize_symbol(symbol)}&orderId={order_id}"
+        headers = self._get_auth_headers(query_string)
         
         session = await self._get_session()
-        async with session.get(url, params=params, headers=headers) as resp:
+        async with session.get(f"{url}?{query_string}", headers=headers) as resp:
             data = await resp.json()
             if data.get("retCode") != 0:
                 raise Exception(f"Bybit get order failed: {data}")
             return data.get("result", {})
     
     async def get_balance(self, currency: Optional[str] = None) -> Dict[str, float]:
-        """Get account balances from Bybit."""
+        """Get account balances from Bybit using v5 API with header authentication."""
         url = f"{self.BASE_URL}/v5/account/wallet-balance"
         
-        params = {
-            "accountType": "SPOT",
-        }
-        
-        headers = self._get_headers()
-        params = self._add_auth_params(params)
+        query_string = "accountType=UNIFIED"
+        headers = self._get_auth_headers(query_string)
         
         session = await self._get_session()
-        async with session.get(url, params=params, headers=headers) as resp:
+        async with session.get(f"{url}?{query_string}", headers=headers) as resp:
             data = await resp.json()
             if data.get("retCode") != 0:
                 raise Exception(f"Bybit get balance failed: {data}")
@@ -197,46 +192,44 @@ class BybitRESTClient(BaseRESTClient):
         network: Optional[str] = None,
         memo: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Withdraw funds from Bybit."""
+        """Withdraw funds from Bybit using v5 API."""
         url = f"{self.BASE_URL}/v5/asset/withdraw/create"
         
-        params = {
+        import json as _json
+        body = {
             "coin": currency,
             "amount": str(amount),
             "address": address,
         }
         
         if network:
-            params["chain"] = network
+            body["chain"] = network
         if memo:
-            params["tag"] = memo
+            body["tag"] = memo
         
-        headers = self._get_headers()
-        params = self._add_auth_params(params)
+        body_str = _json.dumps(body)
+        headers = self._get_auth_headers(body_str)
+        headers["Content-Type"] = "application/json"
         
         session = await self._get_session()
-        async with session.post(url, json=params, headers=headers) as resp:
+        async with session.post(url, data=body_str, headers=headers) as resp:
             data = await resp.json()
             if data.get("retCode") != 0:
                 raise Exception(f"Bybit withdraw failed: {data}")
             return data.get("result", {})
     
     async def get_deposit_address(self, currency: str, network: Optional[str] = None) -> Dict[str, str]:
-        """Get deposit address from Bybit."""
+        """Get deposit address from Bybit using v5 API."""
         url = f"{self.BASE_URL}/v5/asset/deposit/query-address"
         
-        params = {
-            "coin": currency,
-        }
-        
+        query_string = f"coin={currency}"
         if network:
-            params["chain"] = network
+            query_string += f"&chain={network}"
         
-        headers = self._get_headers()
-        params = self._add_auth_params(params)
+        headers = self._get_auth_headers(query_string)
         
         session = await self._get_session()
-        async with session.get(url, params=params, headers=headers) as resp:
+        async with session.get(f"{url}?{query_string}", headers=headers) as resp:
             data = await resp.json()
             if data.get("retCode") != 0:
                 raise Exception(f"Bybit get deposit address failed: {data}")

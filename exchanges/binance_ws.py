@@ -15,8 +15,8 @@ class BinanceWS:
     """Real Binance WebSocket client for streaming market data."""
     
     # Binance WebSocket endpoints
-    WS_BASE = "wss://stream.binance.com:9443/ws"
-    WS_BASE_TESTNET = "wss://testnet.binance.vision/ws"
+    WS_BASE = "wss://stream.binance.com:9443"
+    WS_BASE_TESTNET = "wss://testnet.binance.vision"
     
     def __init__(
         self,
@@ -45,8 +45,13 @@ class BinanceWS:
         self.stagger_start = stagger_start
         self.testnet = testnet
         
-        # Convert symbols to Binance format (BTC/USDT -> btcusdt)
-        self.binance_symbols = [s.replace('/', '').lower() for s in symbols]
+        # Convert symbols to Binance format (BTC-USDT -> btcusdt)
+        self.binance_symbols = [s.replace('-', '').replace('/', '').lower() for s in symbols]
+        # Reverse map for PriceStore: btcusdt -> BTC-USDT
+        self._sym_map = {}
+        for s in symbols:
+            b = s.replace('-', '').replace('/', '').lower()
+            self._sym_map[b] = s
         self.ws_base = self.WS_BASE_TESTNET if testnet else self.WS_BASE
         
         self.ws = None
@@ -66,20 +71,17 @@ class BinanceWS:
         await self.connect()
     
     def _build_ws_url(self) -> str:
-        """Build WebSocket URL with all symbol streams."""
-        # Binance WebSocket Stream endpoints:
-        # Single stream: wss://stream.binance.com:9443/ws/<streamName>
-        # Combined streams: wss://stream.binance.com:9443/stream?streams=<streamName1>/<streamName2>
-        # Note: @depth or @depth5 or @depth10 or @depth20 (NOT @depth20@100ms)
+        """Build WebSocket URL with all symbol streams.
         
-        # For multiple symbols, use combined stream endpoint
+        Binance endpoints:
+        - Single stream: wss://stream.binance.com:9443/ws/<streamName>
+        - Combined streams: wss://stream.binance.com:9443/stream?streams=<s1>/<s2>
+        """
         if len(self.binance_symbols) == 1:
-            # Single stream format
             symbol = self.binance_symbols[0]
-            url = f"{self.ws_base}/ws/{symbol}@depth"
+            url = f"{self.ws_base}/ws/{symbol}@depth20@100ms"
         else:
-            # Combined streams format: streams separated by /
-            streams = [f"{symbol}@depth" for symbol in self.binance_symbols]
+            streams = [f"{symbol}@depth20@100ms" for symbol in self.binance_symbols]
             stream_path = "/".join(streams)
             url = f"{self.ws_base}/stream?streams={stream_path}"
         
@@ -130,7 +132,14 @@ class BinanceWS:
                 if '451' in error_str:
                     logger.error(f"❌ {self.exchange_name} unavailable in your region (HTTP 451 - geographic restriction)")
                     logger.info(f"ℹ️  Bot will continue without {self.exchange_name}")
-                    self._stopping = True  # Don't reconnect
+                    self._stopping = True
+                    self.running = False
+                    break
+                # Handle HTTP 404 - endpoint not found (common with Binance)
+                elif '404' in error_str:
+                    logger.warning(f"⚠️  {self.exchange_name} WebSocket endpoint returned 404 — disabling {self.exchange_name}")
+                    logger.info(f"ℹ️  Bot will continue without {self.exchange_name} (no API keys configured)")
+                    self._stopping = True
                     self.running = False
                     break
                 else:
@@ -176,17 +185,18 @@ class BinanceWS:
                 logger.error(f"Error parsing orderbook: {e}")
     
     def _format_symbol(self, binance_symbol: str) -> str:
-        """Convert Binance symbol format to standard format."""
-        # btcusdt -> BTC/USDT
-        symbol_upper = binance_symbol.upper()
+        """Convert Binance symbol format to standard format (BTC-USDT)."""
+        # Use reverse map first (most reliable)
+        if binance_symbol in self._sym_map:
+            return self._sym_map[binance_symbol]
         
-        # Most common quote currencies
+        # Fallback: btcusdt -> BTC-USDT
+        symbol_upper = binance_symbol.upper()
         for quote in ['USDT', 'BUSD', 'USDC', 'BTC', 'ETH', 'BNB']:
             if symbol_upper.endswith(quote):
                 base = symbol_upper[:-len(quote)]
-                return f"{base}/{quote}"
+                return f"{base}-{quote}"
         
-        # Fallback
         return symbol_upper
     
     async def close(self):
