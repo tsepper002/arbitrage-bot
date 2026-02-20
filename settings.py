@@ -57,8 +57,8 @@ def _get_env_str(key: str, default: str) -> str:
 # ============================================================================
 # ORDER EXECUTION MODE
 # ============================================================================
-# CRITICAL: Set to True only when ready for real trading with funded accounts
-# Default is True for safety - all orders will be simulated
+# CRITICAL: DRY_RUN=True (default) means simulation only — no real orders
+# Set ARB_DRY_RUN=false in .env ONLY when ready for real trading with funded accounts
 DRY_RUN = _get_env_bool("ARB_DRY_RUN", True)
 
 # Starting virtual capital for dry run mode (USDT)
