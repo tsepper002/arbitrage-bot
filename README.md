@@ -1,15 +1,45 @@
 # Cryptocurrency Arbitrage Bot
 
-A robust, efficient arbitrage bot for detecting and executing cross-exchange arbitrage opportunities across Bybit, KuCoin, and HTX (Huobi).
+A robust, efficient arbitrage bot for detecting and executing cross-exchange arbitrage opportunities across Bybit, KuCoin, HTX (Huobi), and MEXC.
 
 ## Features
 
-- **Real-time Order Book Monitoring**: WebSocket connections to multiple exchanges with automatic reconnection
-- **Arbitrage Detection**: Intelligent scanning for profitable cross-exchange opportunities
-- **Dual Execution Modes**: Safe dry-run simulation and live trading capability
-- **Risk Management**: Configurable limits on exposure, trade frequency, and position sizes
+- **14 Trading Strategies**: Cross-exchange, triangular, market-making, grid, DCA, pairs, momentum, and more
+- **Real-time Order Book Monitoring**: WebSocket connections to 4 exchanges with automatic reconnection
+- **Dual Execution Modes**: Safe dry-run simulation (virtual capital) and live trading
+- **Risk Management**: Multi-layer risk limits on exposure, daily loss, trade frequency
 - **Performance Optimized**: Event-driven scanning optimized for weak hardware (including Windows 11 laptops)
+- **Telegram Notifications**: Optional alerts for opportunities and errors
 - **Health Monitoring**: Automatic detection of stale streams and connection issues
+
+## 🚀 Quick Start (Windows — First Time)
+
+If you have merge conflicts or are switching from an old branch, run these commands **once**:
+
+```powershell
+cd C:\Users\HP_PC\arbitrage-bot
+git merge --abort
+git stash
+git fetch origin
+git checkout copilot/fix-bot-start-issues-again
+git pull origin copilot/fix-bot-start-issues-again
+pip install -r requirements.txt
+copy .env.example .env
+notepad .env
+# Edit .env with your API keys, then:
+py main.py --mode dry-run
+```
+
+Or simply double-click **`update.bat`** (included in the repo) — it does all of the above automatically.
+
+### After the first setup, daily usage is just:
+
+```powershell
+cd C:\Users\HP_PC\arbitrage-bot
+py main.py --mode dry-run
+```
+
+Or double-click **`start.bat`** (pulls latest code and starts the bot).
 
 ## Table of Contents
 
@@ -40,6 +70,7 @@ Required packages:
 - `aiohttp` - Async HTTP client for REST API calls
 - `websockets` - WebSocket protocol support
 - `websocket-client` - Additional WebSocket client library
+- `python-dotenv` - Load API keys from .env file
 
 ## Quick Start
 
@@ -288,12 +319,15 @@ DRY_RUN = True
    ```
 
 **Current Status:**
-Live order placement is **not fully implemented**. The `_execute_live()` method in `core/order_executor.py` contains a template and placeholder. You must:
-- Add authenticated API client integration
-- Implement order placement logic
-- Add balance checking
-- Implement order fill verification
-- Add error handling and rollback logic
+Live order placement is implemented in `core/order_executor.py` via `_execute_live()`. It:
+- Uses authenticated REST API clients (BybitREST)
+- Places market orders on buy and sell exchanges
+- Checks for valid API keys before executing
+- Falls back to error logging if REST client is unavailable
+
+To use live mode:
+1. Set API keys in `.env` file
+2. Run `python main.py --mode live`
 
 ## Performance Tuning
 
@@ -450,28 +484,39 @@ PER_SYMBOL_COOLDOWN_SEC = 30.0  # 30s between same-symbol trades
 
 ```
 arbitrage-bot/
-├── main.py                      # Entry point
-├── settings.py                  # Configuration (NEW)
+├── main.py                      # Entry point (dry-run + live modes)
+├── settings.py                  # Configuration (loads from .env)
+├── .env.example                 # Template for API keys
 ├── requirements.txt             # Dependencies
-├── config.py                    # Legacy exchange parameters
+├── start.bat                    # Quick start (Windows CMD)
+├── start.ps1                    # Quick start (PowerShell)
+├── update.bat                   # One-time branch switch helper
+├── config.py                    # Exchange parameters (fees, etc.)
 ├── core/                        # Core logic
-│   ├── arbitrage.py            # Main engine (ENHANCED)
-│   ├── order_executor.py       # Order execution layer (NEW)
+│   ├── arbitrage.py            # Main engine + strategy dispatcher
+│   ├── strategies.py           # All 14 strategy implementations
+│   ├── strategy_dispatcher.py  # Strategy dispatcher (fast + slow)
+│   ├── order_executor.py       # Order execution (dry-run + live)
 │   ├── price_store.py          # Order book storage
 │   ├── scanner.py              # Opportunity detection
 │   ├── calculator.py           # Profit calculations
 │   ├── exchange_config.py      # Fee configurations
+│   ├── state.py                # Exchange state tracking
 │   └── trader_config.py        # Trader settings
 ├── exchanges/                   # Exchange clients
-│   ├── base_ws.py              # Base WebSocket class (NEW)
+│   ├── base.py                 # Base exchange class
+│   ├── base_ws.py              # Base WebSocket class
 │   ├── bybit_ws.py             # Bybit WebSocket
+│   ├── bybit_rest.py           # Bybit REST API (v5, authenticated)
 │   ├── kucoin_ws.py            # KuCoin WebSocket
 │   ├── htx_ws.py               # HTX WebSocket
-│   └── *.py                    # Other exchange files
-└── utils/                       # Utilities
-    ├── logger.py
-    ├── throttle.py
-    └── helpers.py
+│   └── mexc.py                 # MEXC WebSocket
+├── utils/                       # Utilities
+│   ├── telegram.py             # Telegram notifications
+│   ├── throttle.py             # API rate limiting
+│   ├── logger.py               # Logging setup
+│   └── helpers.py              # Helper functions
+└── test_core.py                 # Tests (20 tests)
 ```
 
 ## Exchange Fee Information
@@ -483,6 +528,7 @@ Current fee rates configured in `core/exchange_config.py`:
 | Bybit    | 0.02%     | 0.06%     |
 | KuCoin   | 0.01%     | 0.06%     |
 | HTX      | 0.00%     | 0.20%     |
+| MEXC     | 0.00%     | 0.10%     |
 
 **Note:** Fees may vary based on account tier and trading volume. Update `core/exchange_config.py` if you have different fee rates.
 

@@ -6,6 +6,7 @@ REM    start.bat                  — pull latest code & run dry-run
 REM    start.bat live             — pull latest code & run live
 REM    start.bat dry-run          — pull latest code & run dry-run
 REM
+REM  First time? Run update.bat first to switch to the right branch.
 REM  API keys go in .env file (not in settings.py!)
 REM  Copy .env.example to .env and fill in your keys.
 REM ============================================================
@@ -17,8 +18,10 @@ echo  Arbitrage Bot — Quick Start
 echo ============================================================
 
 echo.
-echo === Stashing local changes and pulling latest code ===
-git stash
+echo === Pulling latest code ===
+REM Abort any stuck merge conflicts first
+git merge --abort 2>nul
+git stash 2>nul
 git pull
 if errorlevel 1 (
     echo [WARNING] git pull failed — running with local code
@@ -30,6 +33,14 @@ echo === Installing / updating dependencies ===
 pip install -q -r requirements.txt
 if errorlevel 1 (
     echo [WARNING] pip install failed — some features may not work
+)
+
+REM Create .env if it doesn't exist
+if not exist .env (
+    if exist .env.example (
+        copy /Y .env.example .env >nul
+        echo [INFO] Created .env from template — edit it with your API keys!
+    )
 )
 
 set MODE=dry-run
