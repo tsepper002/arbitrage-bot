@@ -7,43 +7,62 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger("exchange_config")
 
-# Default static parameters. You should validate and update these for your accounts.
+# Updated fee schedules for exchanges
+# These are standard spot trading fees (may vary by VIP level)
 EXCHANGE_PARAMS: Dict[str, Dict[str, Any]] = {
     "Bybit": {
-        "maker": 0.0002,
-        "taker": 0.0006,
-        "withdraw_fee": None,
+        "maker": 0.001,  # 0.1% maker fee
+        "taker": 0.001,  # 0.1% taker fee
+        "withdraw_fee": 1.0,  # Approximate USDT withdrawal fee
         "withdraw_fee_currency": "USDT",
         "min_notional": 1.0,
         "min_size": 0.0001,
-        "supports_depth": False,  # enable true if you implemented depth parsing
+        "supports_depth": True,
     },
     "KuCoin": {
-        "maker": 0.0001,
-        "taker": 0.0006,
-        "withdraw_fee": None,
+        "maker": 0.001,  # 0.1% maker fee
+        "taker": 0.001,  # 0.1% taker fee
+        "withdraw_fee": 1.0,  # Approximate USDT withdrawal fee
         "withdraw_fee_currency": "USDT",
         "min_notional": 1.0,
         "min_size": 0.0001,
-        "supports_depth": False,
+        "supports_depth": True,
     },
     "HTX": {
-        "maker": 0.0000,
-        "taker": 0.0020,
-        "withdraw_fee": None,
+        "maker": 0.002,  # 0.2% maker fee
+        "taker": 0.002,  # 0.2% taker fee
+        "withdraw_fee": 1.0,  # Approximate USDT withdrawal fee
         "withdraw_fee_currency": "USDT",
         "min_notional": 1.0,
         "min_size": 0.0001,
-        "supports_depth": False,
+        "supports_depth": True,
     },
     "MEXC": {
-        "maker": 0.0000,  # MEXC spot: 0% maker fee
-        "taker": 0.0010,
-        "withdraw_fee": None,
+        "maker": 0.000,  # 0% maker fee (MEXC's competitive advantage!)
+        "taker": 0.0005,  # 0.05% taker fee
+        "withdraw_fee": 0.8,  # Approximate USDT withdrawal fee (slightly cheaper)
         "withdraw_fee_currency": "USDT",
         "min_notional": 1.0,
         "min_size": 0.0001,
-        "supports_depth": False,
+        "supports_depth": True,
+    },
+    "Binance": {
+        "maker": 0.001,  # 0.1% maker fee
+        "taker": 0.001,  # 0.1% taker fee
+        "withdraw_fee": 1.0,  # Approximate USDT withdrawal fee
+        "withdraw_fee_currency": "USDT",
+        "min_notional": 10.0,  # Binance typically has higher min notional
+        "min_size": 0.0001,
+        "supports_depth": True,
+    },
+    "XT": {
+        "maker": 0.002,  # 0.2% maker fee
+        "taker": 0.002,  # 0.2% taker fee
+        "withdraw_fee": 1.0,  # Approximate USDT withdrawal fee
+        "withdraw_fee_currency": "USDT",
+        "min_notional": 1.0,
+        "min_size": 0.0001,
+        "supports_depth": True,
     },
 }
 

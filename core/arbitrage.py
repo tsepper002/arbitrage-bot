@@ -8,7 +8,6 @@ from typing import List, Tuple, Optional, Dict, Set
 from .exchange_config import EXCHANGE_PARAMS
 from . import trader_config
 from .order_executor import OrderExecutor
-from .strategy_dispatcher import StrategyDispatcher
 import settings
 
 logger = logging.getLogger("arbitrage_engine")
@@ -37,7 +36,15 @@ class ArbitrageEngine:
                  max_exposure_usdt: Optional[float] = None,
                  safety_factor: Optional[float] = None,
                  topk: Optional[int] = None,
-                 rest_clients: Optional[Dict] = None):
+                 executor: Optional[OrderExecutor] = None,
+                 risk_manager = None,
+                 strategy_manager = None,
+                 flash_crash_protector = None,
+                 wash_trading_filter = None,
+                 orderbook_imbalance_detector = None,
+                 trade_journal = None,
+                 profit_attribution = None,
+                 metrics_collector = None):
         self.store = store
         self.params = EXCHANGE_PARAMS
         
@@ -61,11 +68,20 @@ class ArbitrageEngine:
             else:
                 self.max_exposure_usdt = 200.0
 
-        # Initialize order executor
-        self.executor = OrderExecutor(rest_clients=rest_clients)
-
-        # Initialize strategy dispatcher (all 14 strategies)
-        self.dispatcher = StrategyDispatcher(store)
+        # Initialize order executor (use provided or create new)
+        self.executor = executor if executor is not None else OrderExecutor()
+        
+        # Optional integrations
+        self.risk_manager = risk_manager
+        self.strategy_manager = strategy_manager
+        
+        # Professional components
+        self.flash_crash_protector = flash_crash_protector
+        self.wash_trading_filter = wash_trading_filter
+        self.orderbook_imbalance_detector = orderbook_imbalance_detector
+        self.trade_journal = trade_journal
+        self.profit_attribution = profit_attribution
+        self.metrics_collector = metrics_collector
 
         # Event-driven scanning state
         self.updated_symbols: Set[str] = set()
@@ -123,6 +139,15 @@ class ArbitrageEngine:
         return max(qty, 0.0)
 
     async def scan_once(self, symbol: str, prefunded: bool = True) -> List[Dict]:
+        # Cleanup old entries from recent_cache to prevent memory leak
+        now = time.time()
+        cutoff = now - 60.0  # Remove entries older than 60 seconds
+        keys_to_remove = [k for k, ts in self.recent_cache.items() if ts < cutoff]
+        for k in keys_to_remove:
+            del self.recent_cache[k]
+        if keys_to_remove:
+            logger.debug(f"Cleaned {len(keys_to_remove)} old entries from recent_cache")
+        
         snap = self.store.snapshot()
         exmap = snap.get(symbol, {})
         exchanges = list(exmap.keys())
@@ -130,8 +155,14 @@ class ArbitrageEngine:
         if len(exchanges) < 2:
             return res
 
+        # BIDIRECTIONAL SCAN FIX: Check ALL directed pairs (A->B AND B->A)
+        # Previous version only checked exchanges[i+1:] which missed 50% of opportunities
         for i, buy_ex in enumerate(exchanges):
-            for sell_ex in exchanges[i+1:]:
+            # Check this exchange as buy against ALL other exchanges as sell
+            for j, sell_ex in enumerate(exchanges):
+                if i == j:  # Skip same exchange
+                    continue
+                    
                 buy = exmap.get(buy_ex, {})
                 sell = exmap.get(sell_ex, {})
 
@@ -150,10 +181,29 @@ class ArbitrageEngine:
                 if not asks or not bids:
                     continue
 
+                # S1 PREFILTER: Quick top-of-book spread check before expensive simulation
+                # Skip if gross spread is too small to be profitable after fees
+                top_bid = bids[0][0]
+                top_ask = asks[0][0]
+                gross_spread_pct = ((top_bid - top_ask) / top_ask) * 100.0 if top_ask > 0 else 0
+                
+                buy_fee = self._fee_rate(buy_ex, "taker")
+                sell_fee = self._fee_rate(sell_ex, "taker")
+                sum_fees_pct = (buy_fee + sell_fee) * 100.0
+                
+                # Prefilter: skip if spread < 80% of fees (won't be profitable)
+                if gross_spread_pct < sum_fees_pct * 0.8:
+                    continue
+
                 # choose qty adaptively
                 buy_price_est = asks[0][0] if asks else None
                 qty = self._choose_qty(asks, bids, buy_price_est)
                 if qty <= 0:
+                    continue
+
+                # A5 RISK CHECK: Skip anomalous spreads (likely data errors)
+                if gross_spread_pct > settings.ANOMALOUS_SPREAD_PCT:
+                    logger.warning(f"Skipping anomalous spread {gross_spread_pct:.2f}% for {symbol} {buy_ex}->{sell_ex} (threshold: {settings.ANOMALOUS_SPREAD_PCT}%)")
                     continue
 
                 buy_avg, buy_filled = simulate_execution_from_book(asks, qty)
@@ -171,6 +221,24 @@ class ArbitrageEngine:
 
                 invested = buy_avg * filled
                 roi_pct = (net / invested) * 100 if invested else 0.0
+                
+                # PROFESSIONAL RISK CHECKS
+                # P1: Flash Crash Protection - Check if market is safe to trade
+                if self.flash_crash_protector:
+                    if self.flash_crash_protector.should_stop_trading(symbol):
+                        logger.warning(f"⚠️ Flash crash protection activated for {symbol}, skipping trade")
+                        if self.metrics_collector:
+                            self.metrics_collector.record('flash_crash_blocks', 1)
+                        continue
+                
+                # P2: Orderbook Imbalance Detection - Enhance decision with flow analysis
+                # (This is more for HFT but can inform us about market pressure)
+                
+                # P3: Record metrics for monitoring
+                if self.metrics_collector:
+                    self.metrics_collector.record('opportunities_found', 1)
+                    self.metrics_collector.record('roi_pct', roi_pct)
+                    self.metrics_collector.record('net_profit_usdt', net)
 
                 info = {
                     "symbol": symbol,
@@ -194,6 +262,13 @@ class ArbitrageEngine:
                         self.recent_cache[key] = now
                         self._persist_opportunity(info)
                         res.append(info)
+                        
+                        # USER-FRIENDLY INFO LOGGING
+                        logger.info(f"💰 OPPORTUNITY: {symbol} | Buy {buy_ex} @ {buy_avg:.6f} → Sell {sell_ex} @ {sell_avg:.6f} | ROI: {roi_pct:.3f}% | Net: ${net:.2f}")
+                elif roi_pct > 0:
+                    # Log near-miss opportunities occasionally (for debugging)
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Near-miss: {symbol} {buy_ex}->{sell_ex} ROI={roi_pct:.3f}% (need {self.min_net_pct}%)")
         
         # Sort by net profit
         res.sort(key=lambda x: x["net"], reverse=True)
@@ -212,7 +287,9 @@ class ArbitrageEngine:
 
     async def run(self, symbols: List[str]):
         """Main scanning loop with event-driven optimization."""
-        logger.info(f"Starting arbitrage engine for {len(symbols)} symbols")
+        logger.info(f"🚀 Starting arbitrage engine for {len(symbols)} symbols: {', '.join(symbols)}")
+        logger.info(f"⚙️ Settings: MIN_ROI={self.min_net_pct}%, MAX_EXPOSURE=${self.max_exposure_usdt}, SCAN_INTERVAL={settings.SCAN_INTERVAL_SEC}s")
+        logger.info(f"📊 Waiting for price data from exchanges...")
         last_stats_print = time.time()
         
         while True:
@@ -259,33 +336,99 @@ class ArbitrageEngine:
                 opps = await self.scan_once(s)
                 if opps:
                     for o in opps:
-                        o.setdefault("strategy", "CROSS_EXCHANGE")
+                        # Check risk manager before executing
+                        if self.risk_manager:
+                            can_trade, reason = self.risk_manager.check_can_trade(o)
+                            if not can_trade:
+                                logger.debug(f"Risk manager blocked trade: {reason}")
+                                continue
+                        
                         # Execute or log the opportunity
                         result = await self.executor.execute_arbitrage(o)
+                        
+                        # Record trade to strategy manager
+                        if self.strategy_manager and result.get('trade_info'):
+                            strategy = o.get('strategy', 'cross_exchange')
+                            success = result['status'] == 'success'
+                            profit = result['trade_info'].get('net_profit', 0)
+                            execution_time = result.get('execution_time', 0)
+                            self.strategy_manager.record_trade(
+                                strategy_name=strategy,
+                                success=success,
+                                profit=profit,
+                                execution_time=execution_time
+                            )
+                        
+                        # PROFESSIONAL ANALYTICS: Record trade details
+                        if result.get('trade_info'):
+                            trade_info = result['trade_info']
+                            
+                            # Record to Trade Journal
+                            if self.trade_journal:
+                                self.trade_journal.record_trade({
+                                    'symbol': o['symbol'],
+                                    'side': 'buy_sell',  # arbitrage
+                                    'amount': o['qty'],
+                                    'price': o['buy_avg'],
+                                    'fee': trade_info.get('total_fees', 0),
+                                    'profit': trade_info.get('net_profit', 0),
+                                    'strategy': o.get('strategy', 'cross_exchange'),
+                                    'exchange': f"{o['buy_ex']}/{o['sell_ex']}",
+                                    'notes': f"ROI: {o.get('roi_pct', 0):.3f}%"
+                                })
+                            
+                            # Record to Profit Attribution
+                            if self.profit_attribution:
+                                self.profit_attribution.add_trade({
+                                    'strategy': o.get('strategy', 'cross_exchange'),
+                                    'exchange': o['buy_ex'],
+                                    'symbol': o['symbol'],
+                                    'profit': trade_info.get('net_profit', 0)
+                                })
+                            
+                            # Record metrics
+                            if self.metrics_collector:
+                                self.metrics_collector.record('trades_executed', 1)
+                                self.metrics_collector.record('execution_time_ms', result.get('execution_time', 0) * 1000)
+                                if result['status'] == 'success':
+                                    self.metrics_collector.record('successful_trades', 1)
+                        
+                        # Update risk manager after trade
+                        if self.risk_manager and result.get('trade_info'):
+                            self.risk_manager.record_trade(result['trade_info'])
                         
                         if result['status'] == 'simulated':
                             # Already logged by executor
                             pass
+                        elif result['status'] == 'success':
+                            logger.info(f"✅ Trade executed successfully: {result.get('summary', '')}")
                         elif result['status'] == 'blocked':
                             logger.debug(f"Trade blocked: {result['reason']}")
                         elif result['status'] == 'error':
                             logger.error(f"Execution error: {result.get('reason', 'Unknown')}")
-
-            # Run all 14 strategies via dispatcher
-            strategy_opps = await self.dispatcher.scan_all(symbols_to_scan)
-            for o in strategy_opps:
-                result = await self.executor.execute_arbitrage(o)
-                if result['status'] == 'simulated':
-                    pass
-                elif result['status'] == 'blocked':
-                    logger.debug(f"Strategy {o.get('strategy', '?')} blocked: {result['reason']}")
-                elif result['status'] == 'error':
-                    logger.error(f"Strategy {o.get('strategy', '?')} error: {result.get('reason', 'Unknown')}")
             
             # Print statistics periodically
             if time.time() - last_stats_print > 60.0:
+                # Print executor statistics
                 self.executor.print_statistics()
-                self.dispatcher.print_stats()
+                
+                # Print scanning status
+                snap = self.store.snapshot()
+                active_symbols = len([s for s in symbols if s in snap and snap[s]])
+                total_exchanges = sum(len(snap.get(s, {})) for s in symbols) if snap else 0
+                logger.info(f"📊 STATUS: Scanning {active_symbols}/{len(symbols)} symbols across {total_exchanges} exchange connections")
+                
+                # Show which exchanges have data
+                if snap:
+                    exchanges_with_data = set()
+                    for s in symbols:
+                        if s in snap:
+                            exchanges_with_data.update(snap[s].keys())
+                    if exchanges_with_data:
+                        logger.info(f"📡 Active exchanges: {', '.join(sorted(exchanges_with_data))}")
+                    else:
+                        logger.warning("⚠️ No exchange data available in price store")
+                
                 last_stats_print = time.time()
             
             # Sleep based on configured interval

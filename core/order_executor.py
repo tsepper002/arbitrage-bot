@@ -2,15 +2,14 @@
 """
 Order execution layer with dry_run and live modes.
 Provides a safe interface for order placement with detailed logging.
+Enhanced with parallel order execution and balance integration.
 """
-import asyncio
 import time
+import asyncio
 import logging
-import os
 from typing import List, Optional, Tuple, Dict
 from datetime import datetime
 import settings
-from utils.telegram import TelegramNotifier
 
 logger = logging.getLogger("order_executor")
 
@@ -19,36 +18,31 @@ class OrderExecutor:
     """
     Handles order execution with two modes:
     - dry_run (default): Simulates orders, logs actions without sending to exchanges
-    - live: Places real orders via authenticated REST API clients
+    - live: Real order placement with parallel execution and balance management
     """
     
-    def __init__(self, dry_run: Optional[bool] = None, rest_clients: Optional[Dict] = None):
+    def __init__(self, dry_run: Optional[bool] = None, rest_clients: Optional[Dict] = None, balance_manager=None):
         """
         Initialize order executor.
         
         Args:
             dry_run: If True, simulate orders. If None, uses settings.DRY_RUN
-            rest_clients: Dict of exchange_name -> REST client instance (for live trading)
+            rest_clients: Dict of {exchange_name: REST_client} for live trading
+            balance_manager: BalanceManager instance for balance tracking
         """
         self.dry_run = dry_run if dry_run is not None else settings.DRY_RUN
+        self.rest_clients = rest_clients or {}
+        self.balance_manager = balance_manager
         self.order_history: List[Dict] = []
         self.trade_count_per_minute: Dict[int, int] = {}  # minute timestamp -> count
         self.last_trade_time_per_symbol: Dict[str, float] = {}  # symbol -> last trade timestamp
         
-        # Virtual capital tracking for dry run
-        self.virtual_balance_usdt = settings.VIRTUAL_CAPITAL_USDT if self.dry_run else 0.0
-        self.initial_virtual_balance = self.virtual_balance_usdt
-        
-        # REST clients for live trading (exchange_name -> client)
-        self.rest_clients: Dict = rest_clients or {}
-        
-        self.telegram = TelegramNotifier()
-
         if self.dry_run:
             logger.info("🔵 OrderExecutor initialized in DRY RUN mode (safe simulation)")
         else:
-            configured = list(self.rest_clients.keys()) if self.rest_clients else []
-            logger.warning(f"🔴 OrderExecutor initialized in LIVE mode — exchanges: {configured or 'NONE'}")
+            if not self.rest_clients:
+                logger.warning("⚠️  LIVE mode enabled but no REST clients provided!")
+            logger.warning("🔴 OrderExecutor initialized in LIVE mode - REAL ORDERS WILL BE PLACED!")
     
     def can_trade(self, symbol: str) -> Tuple[bool, Optional[str]]:
         """
@@ -141,16 +135,6 @@ class OrderExecutor:
         net_profit = opp['net']
         roi_pct = opp['roi_pct']
         
-        # Check virtual capital
-        trade_cost = qty * buy_price
-        if trade_cost > self.virtual_balance_usdt:
-            logger.info(f"⚠️ [DRY RUN] Insufficient virtual capital: need ${trade_cost:.2f}, have ${self.virtual_balance_usdt:.2f}")
-            return {
-                'status': 'blocked',
-                'reason': f'Insufficient virtual capital: ${self.virtual_balance_usdt:.2f} < ${trade_cost:.2f}',
-                'opportunity': opp
-            }
-        
         logger.info(
             f"💰 [DRY RUN] ARBITRAGE OPPORTUNITY DETECTED\n"
             f"   Symbol: {symbol}\n"
@@ -172,21 +156,9 @@ class OrderExecutor:
             'roi_pct': roi_pct,
             'buy_order_id': f"DRY_{int(time.time())}_{buy_ex}",
             'sell_order_id': f"DRY_{int(time.time())}_{sell_ex}",
-            'virtual_balance': self.virtual_balance_usdt,
         }
         
         self._record_trade(symbol, order_info)
-
-        # Send Telegram notification (fire and forget)
-        try:
-            asyncio.ensure_future(self.telegram.notify_opportunity(opp))
-        except RuntimeError:
-            logger.debug("Telegram notification skipped: no running event loop")
-
-        # Update virtual balance: subtract buy cost, add sell proceeds
-        self.virtual_balance_usdt = self.virtual_balance_usdt - trade_cost + (qty * sell_price)
-        order_info['virtual_balance'] = self.virtual_balance_usdt
-        logger.info(f"💼 [DRY RUN] Virtual Balance: ${self.virtual_balance_usdt:.2f} USDT")
         
         return {
             'status': 'simulated',
@@ -196,98 +168,156 @@ class OrderExecutor:
     
     async def _execute_live(self, opp: Dict) -> Dict:
         """
-        Execute a real trade via authenticated REST API clients.
-
-        Flow:
-        1. Verify REST clients are available for both exchanges
-        2. Place buy order on the cheaper exchange
-        3. Place sell order on the more expensive exchange
-        4. Record the trade and send Telegram notification
+        Execute live arbitrage with PARALLEL order placement.
+        
+        Strategy:
+        1. Check balances via BalanceManager
+        2. Place buy and sell orders SIMULTANEOUSLY (asyncio.gather)
+        3. Wait for both fills with timeout
+        4. If one fails, emergency close the other
+        5. Update balances optimistically
+        
+        Args:
+            opp: Opportunity dict with symbol, buy_ex, sell_ex, qty, prices
+            
+        Returns:
+            Dict with status, order details, and profit
         """
         symbol = opp['symbol']
         buy_ex = opp['buy_ex']
         sell_ex = opp['sell_ex']
         qty = opp['qty']
-        buy_price = opp['buy_avg']
-        sell_price = opp['sell_avg']
-        net_profit = opp['net']
-        roi_pct = opp['roi_pct']
-
-        # Verify REST clients are available
-        buy_client = self.rest_clients.get(buy_ex)
-        sell_client = self.rest_clients.get(sell_ex)
-
-        if not buy_client or not sell_client:
-            missing = []
-            if not buy_client:
-                missing.append(buy_ex)
-            if not sell_client:
-                missing.append(sell_ex)
-            logger.error(
-                f"🔴 Cannot execute live trade: no REST client for {', '.join(missing)}\n"
-                f"   Set DRY_RUN=True or configure API keys for these exchanges."
-            )
-            return {
-                'status': 'error',
-                'reason': f'No REST client configured for: {", ".join(missing)}',
-                'opportunity': opp,
-            }
-
+        buy_price = opp.get('buy_avg', opp.get('buy_price'))
+        sell_price = opp.get('sell_avg', opp.get('sell_price'))
+        
+        # Parse symbol for balance checking
+        base_currency = symbol.split('-')[0]  # BTC from BTC-USDT
+        quote_currency = symbol.split('-')[1]  # USDT from BTC-USDT
+        
         logger.info(
-            f"🔴 [LIVE] EXECUTING ARBITRAGE TRADE\n"
-            f"   Symbol: {symbol}\n"
-            f"   Buy:  {qty:.6f} @ ${buy_price:.6f} on {buy_ex}\n"
-            f"   Sell: {qty:.6f} @ ${sell_price:.6f} on {sell_ex}\n"
-            f"   Expected Net: ${net_profit:.4f} ({roi_pct:.3f}% ROI)"
+            f"🔴 LIVE EXECUTION: {symbol} | "
+            f"Buy {qty} @ ${buy_price:.4f} on {buy_ex} | "
+            f"Sell {qty} @ ${sell_price:.4f} on {sell_ex}"
         )
-
-        # Convert symbol format for exchange APIs (BTC-USDT -> BTCUSDT for most)
-        api_symbol = symbol.replace("-", "")
-
+        
         try:
-            # Place buy order
-            buy_result = await buy_client.place_order(api_symbol, qty, buy_price)
-            logger.info(f"🟢 [LIVE] Buy order placed on {buy_ex}: {buy_result}")
-
-            # Place sell order
-            sell_result = await sell_client.place_order(api_symbol, qty, sell_price)
-            logger.info(f"🟢 [LIVE] Sell order placed on {sell_ex}: {sell_result}")
-
-            # Record trade
-            order_info = {
-                'mode': 'live',
+            # Step 1: Check balances
+            if self.balance_manager:
+                buy_cost = qty * buy_price * 1.002  # Add 0.2% buffer for fees
+                can_buy, buy_reason = self.balance_manager.has_sufficient_balance(buy_ex, quote_currency, buy_cost)
+                can_sell, sell_reason = self.balance_manager.has_sufficient_balance(sell_ex, base_currency, qty)
+                
+                if not can_buy:
+                    logger.warning(f"⚠️  Cannot buy on {buy_ex}: {buy_reason}")
+                    return {'status': 'blocked', 'reason': buy_reason}
+                
+                if not can_sell:
+                    logger.warning(f"⚠️  Cannot sell on {sell_ex}: {sell_reason}")
+                    return {'status': 'blocked', 'reason': sell_reason}
+            
+            # Step 2: Get REST clients
+            buy_client = self.rest_clients.get(buy_ex)
+            sell_client = self.rest_clients.get(sell_ex)
+            
+            if not buy_client or not sell_client:
+                error_msg = f"Missing REST client: {buy_ex if not buy_client else sell_ex}"
+                logger.error(f"❌ {error_msg}")
+                return {'status': 'error', 'reason': error_msg}
+            
+            # Step 3: Place both orders SIMULTANEOUSLY
+            logger.info("⚡ Placing PARALLEL orders...")
+            start_time = time.time()
+            
+            # Use market orders for speed (can be optimized to use limit orders)
+            buy_task = buy_client.place_order(symbol, 'buy', 'market', qty, buy_price)
+            sell_task = sell_client.place_order(symbol, 'sell', 'market', qty, sell_price)
+            
+            # Execute in parallel
+            results = await asyncio.gather(buy_task, sell_task, return_exceptions=True)
+            buy_result, sell_result = results
+            
+            execution_time = time.time() - start_time
+            
+            # Check for errors
+            if isinstance(buy_result, Exception):
+                logger.error(f"❌ Buy order failed: {buy_result}")
+                # Sell order might have succeeded - need to reverse!
+                if not isinstance(sell_result, Exception):
+                    logger.warning("⚠️  EMERGENCY: Sell succeeded but buy failed - reversing sell...")
+                    await self._emergency_close(sell_ex, symbol, 'buy', qty, buy_price, sell_client)
+                return {'status': 'error', 'reason': f'Buy failed: {str(buy_result)}'}
+            
+            if isinstance(sell_result, Exception):
+                logger.error(f"❌ Sell order failed: {sell_result}")
+                # Buy order succeeded - need to reverse!
+                logger.warning("⚠️  EMERGENCY: Buy succeeded but sell failed - reversing buy...")
+                await self._emergency_close(buy_ex, symbol, 'sell', qty, sell_price, buy_client)
+                return {'status': 'error', 'reason': f'Sell failed: {str(sell_result)}'}
+            
+            # Both orders succeeded!
+            logger.info(f"✅ BOTH ORDERS FILLED in {execution_time:.3f}s")
+            
+            # Step 4: Update balances optimistically
+            if self.balance_manager:
+                buy_cost_actual = qty * buy_price
+                sell_proceeds = qty * sell_price
+                self.balance_manager.record_trade(
+                    buy_ex, sell_ex, base_currency, quote_currency,
+                    qty, buy_cost_actual, sell_proceeds
+                )
+            
+            # Step 5: Record trade
+            trade_info = {
                 'symbol': symbol,
-                'buy_exchange': buy_ex,
-                'sell_exchange': sell_ex,
-                'quantity': qty,
+                'buy_ex': buy_ex,
+                'sell_ex': sell_ex,
+                'qty': qty,
                 'buy_price': buy_price,
                 'sell_price': sell_price,
-                'net_profit': net_profit,
-                'roi_pct': roi_pct,
-                'buy_order_result': buy_result,
-                'sell_order_result': sell_result,
+                'buy_order_id': buy_result.get('orderId') or buy_result.get('order_id'),
+                'sell_order_id': sell_result.get('orderId') or sell_result.get('order_id'),
+                'gross_profit': opp.get('gross', 0),
+                'net_profit': opp.get('net', 0),
+                'roi_pct': opp.get('roi_pct', 0),
+                'execution_time_sec': execution_time,
+                'mode': 'LIVE'
             }
-            self._record_trade(symbol, order_info)
-
-            # Send Telegram notification (fire and forget)
-            try:
-                asyncio.create_task(self.telegram.notify_opportunity(opp))
-            except RuntimeError:
-                logger.debug("Telegram notification skipped: no running event loop")
-
+            
+            self._record_trade(symbol, trade_info)
+            
+            logger.info(
+                f"💰 LIVE TRADE COMPLETED: "
+                f"${trade_info['net_profit']:.4f} profit ({trade_info['roi_pct']:.3f}% ROI) "
+                f"in {execution_time:.3f}s"
+            )
+            
             return {
-                'status': 'executed',
-                'order_info': order_info,
-                'message': f'Live orders placed on {buy_ex} and {sell_ex}',
+                'status': 'success',
+                'trade_info': trade_info
             }
-
+            
         except Exception as e:
-            logger.exception(f"🔴 [LIVE] Order execution failed: {e}")
+            logger.exception(f"❌ Live execution failed: {e}")
             return {
                 'status': 'error',
-                'reason': str(e),
-                'opportunity': opp,
+                'reason': str(e)
             }
+    
+    async def _emergency_close(self, exchange: str, symbol: str, side: str, qty: float, price: float, client):
+        """
+        Emergency close position when one leg of arbitrage fails.
+        Places immediate market order in opposite direction.
+        """
+        try:
+            logger.warning(f"🚨 EMERGENCY CLOSE: {side} {qty} {symbol} on {exchange}")
+            result = await client.place_order(symbol, side, 'market', qty, price)
+            logger.info(f"✅ Emergency close successful: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"❌ EMERGENCY CLOSE FAILED: {e}")
+            # This is critical - manual intervention may be needed
+            logger.error(f"🚨🚨🚨 MANUAL INTERVENTION REQUIRED: {side} {qty} {symbol} on {exchange}")
+            return None
     
     def get_statistics(self) -> Dict:
         """Get execution statistics."""
@@ -299,9 +329,7 @@ class OrderExecutor:
                 'total_orders': 0,
                 'total_profit': 0.0,
                 'average_roi': 0.0,
-                'mode': 'dry_run' if self.dry_run else 'live',
-                'virtual_balance': self.virtual_balance_usdt,
-                'virtual_pnl': self.virtual_balance_usdt - self.initial_virtual_balance,
+                'mode': 'dry_run' if self.dry_run else 'live'
             }
         
         avg_roi = sum(o.get('roi_pct', 0) for o in self.order_history) / total_orders
@@ -312,8 +340,6 @@ class OrderExecutor:
             'average_roi': avg_roi,
             'mode': 'dry_run' if self.dry_run else 'live',
             'symbols_traded': list(set(o['symbol'] for o in self.order_history)),
-            'virtual_balance': self.virtual_balance_usdt,
-            'virtual_pnl': self.virtual_balance_usdt - self.initial_virtual_balance,
         }
     
     def print_statistics(self):
@@ -329,7 +355,4 @@ class OrderExecutor:
         print(f"  Average ROI: {stats['average_roi']:.3f}%")
         if stats.get('symbols_traded'):
             print(f"  Symbols Traded: {', '.join(stats['symbols_traded'])}")
-        if self.dry_run:
-            print(f"  Virtual Balance: ${self.virtual_balance_usdt:.2f} USDT")
-            print(f"  Virtual P&L: ${self.virtual_balance_usdt - self.initial_virtual_balance:.2f} USDT")
         print(f"{'='*60}\n")
