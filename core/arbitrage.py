@@ -418,7 +418,9 @@ class ArbitrageEngine:
                     self.last_scan_time[s] = scan_start
                     ready_symbols.append(s)
             
-            # SPEED: Scan all symbols in parallel using asyncio.gather()
+            # SPEED: Scan all symbols concurrently instead of sequentially.
+            # Previous: for s in symbols: await scan_once(s)  →  O(N × latency)
+            # Now: asyncio.gather(*[scan_once(s)])  →  O(1 × latency) for CPU-bound work
             if ready_symbols:
                 scan_results = await asyncio.gather(
                     *(self.scan_once(s) for s in ready_symbols),

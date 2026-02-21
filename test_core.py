@@ -358,8 +358,8 @@ def test_mexc_depth_parsing():
     import json, time
 
     store = PriceStore()
-    # Simulate MEXC symbol mapping
-    sym_map = {"BTCUSDT": "BTC-USDT", "ETHUSDT": "ETH-USDT", "SOLUSDT": "SOL-USDT"}
+    # Simulate MEXC symbol mapping (all symbols used in tests below)
+    sym_map = {"BTCUSDT": "BTC-USDT", "ETHUSDT": "ETH-USDT", "SOLUSDT": "SOL-USDT", "BNBUSDT": "BNB-USDT"}
 
     # Test 1: Nested dict format {"s": ..., "d": {"bids": [{"p":..,"v":..}]}}
     dict_msg = json.dumps({
@@ -398,7 +398,6 @@ def test_mexc_depth_parsing():
         },
         "t": 1700000000000
     })
-    sym_map["BNBUSDT"] = "BNB-USDT"
 
     for raw in [dict_msg, array_msg, flat_msg, channel_msg]:
         data = json.loads(raw)
