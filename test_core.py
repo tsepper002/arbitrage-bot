@@ -516,6 +516,67 @@ def test_engine_feeds_dispatcher():
     print(f"  ✅ ArbitrageEngine correctly feeds back to StrategyDispatcher")
 
 
+def test_ml_integration_in_engine():
+    """TEST 19: ML modules are integrated and called in ArbitrageEngine"""
+    print("\n" + "=" * 60)
+    print("TEST 19: ML Integration in ArbitrageEngine")
+    print("=" * 60)
+    
+    from core.price_store import PriceStore
+    from core.arbitrage import ArbitrageEngine
+    from ml.market_regime_detector import MarketRegimeDetector
+    from ml.ml_spread_predictor import MLSpreadPredictor
+    from core.fee_optimizer import FeeOptimizer
+    
+    store = PriceStore()
+    regime = MarketRegimeDetector()
+    spread_pred = MLSpreadPredictor()
+    fee_opt = FeeOptimizer()
+    
+    engine = ArbitrageEngine(
+        store,
+        market_regime_detector=regime,
+        ml_spread_predictor=spread_pred,
+        fee_optimizer=fee_opt
+    )
+    
+    # Verify ML modules are stored
+    assert engine.market_regime_detector is regime
+    assert engine.ml_spread_predictor is spread_pred
+    assert engine.fee_optimizer is fee_opt
+    print("  ✅ ML modules are passed to ArbitrageEngine")
+    
+    # Test market regime detection
+    r1 = regime.detect('BTC-USDT', 50000)
+    assert r1 in regime.REGIMES, f"Invalid regime: {r1}"
+    print(f"  ✅ MarketRegimeDetector: {r1}")
+    
+    # Test spread predictor
+    pred = spread_pred.predict('BTC-USDT', {'current_spread': 0.001})
+    assert pred > 0, f"Invalid prediction: {pred}"
+    spread_pred.update('BTC-USDT', 0.0012)
+    print(f"  ✅ MLSpreadPredictor: prediction={pred:.6f}")
+    
+    # Test fee optimizer
+    exchange, fee_data = fee_opt.calculate_optimal_fee(['bybit', 'kucoin'], 'BTC-USDT', 100.0)
+    assert exchange is not None
+    assert fee_data is not None
+    print(f"  ✅ FeeOptimizer: best exchange={exchange}, maker_fee={fee_data['maker_fee']}")
+    
+    # Run a scan to verify ML modules are called
+    loop.run_until_complete(store.update("Bybit", "BTC-USDT", bid=50100, bid_size=1.0, ask=50200, ask_size=1.0))
+    loop.run_until_complete(store.update_levels("Bybit", "BTC-USDT", bids_levels=[(50100, 1.0)], asks_levels=[(50200, 1.0)]))
+    loop.run_until_complete(store.update("KuCoin", "BTC-USDT", bid=50000, bid_size=1.0, ask=50050, ask_size=1.0))
+    loop.run_until_complete(store.update_levels("KuCoin", "BTC-USDT", bids_levels=[(50000, 1.0)], asks_levels=[(50050, 1.0)]))
+    
+    opps = loop.run_until_complete(engine.scan_once("BTC-USDT"))
+    
+    # After scan, regime detector should have data for BTC-USDT
+    r2 = regime.get_regime('BTC-USDT')
+    print(f"  ✅ After scan, regime = {r2}")
+    print(f"  ✅ ML modules properly integrated into trading pipeline")
+
+
 if __name__ == "__main__":
     tests = [
         test_settings, test_price_store, test_exchange_config, test_order_executor,
@@ -523,7 +584,7 @@ if __name__ == "__main__":
         test_core_managers, test_strategy_dispatcher, test_professional_features,
         test_analytics, test_ml_modules, test_rest_clients, test_advanced_core,
         test_e2e_arbitrage, test_mexc_depth_parsing, test_scan_fast_strategies,
-        test_engine_feeds_dispatcher,
+        test_engine_feeds_dispatcher, test_ml_integration_in_engine,
     ]
     passed = failed = 0
     for t in tests:

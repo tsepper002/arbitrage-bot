@@ -5,6 +5,7 @@ import os
 import time
 import logging
 from typing import List, Tuple, Optional, Dict, Set
+from datetime import datetime
 from .exchange_config import EXCHANGE_PARAMS
 from . import trader_config
 from .order_executor import OrderExecutor
@@ -45,7 +46,10 @@ class ArbitrageEngine:
                  orderbook_imbalance_detector = None,
                  trade_journal = None,
                  profit_attribution = None,
-                 metrics_collector = None):
+                 metrics_collector = None,
+                 market_regime_detector = None,
+                 fee_optimizer = None,
+                 ml_spread_predictor = None):
         self.store = store
         self.params = EXCHANGE_PARAMS
         
@@ -64,7 +68,6 @@ class ArbitrageEngine:
         else:
             sc_usdt = trader_config.get_starting_capital_usdt(None)
             if sc_usdt:
-                # conservative: use 50% of starting capital as per-trade max exposure
                 self.max_exposure_usdt = max(sc_usdt * 0.5, 50.0)
             else:
                 self.max_exposure_usdt = 200.0
@@ -84,6 +87,11 @@ class ArbitrageEngine:
         self.trade_journal = trade_journal
         self.profit_attribution = profit_attribution
         self.metrics_collector = metrics_collector
+        
+        # ML modules
+        self.market_regime_detector = market_regime_detector
+        self.fee_optimizer = fee_optimizer
+        self.ml_spread_predictor = ml_spread_predictor
 
         # Event-driven scanning state
         self.updated_symbols: Set[str] = set()
@@ -233,10 +241,84 @@ class ArbitrageEngine:
                             self.metrics_collector.record('flash_crash_blocks', 1)
                         continue
                 
-                # P2: Orderbook Imbalance Detection - Enhance decision with flow analysis
-                # (This is more for HFT but can inform us about market pressure)
+                # P2: Wash Trading Filter — skip if volume looks suspicious
+                if self.wash_trading_filter:
+                    try:
+                        is_suspicious, suspicion_score = self.wash_trading_filter.is_suspicious_trade(
+                            symbol, buy_avg, filled
+                        )
+                        if is_suspicious:
+                            logger.warning(f"⚠️ Wash trading detected for {symbol} (score={suspicion_score:.2f}), skipping")
+                            if self.metrics_collector:
+                                self.metrics_collector.record('wash_trade_blocks', 1)
+                            continue
+                    except Exception:
+                        pass  # Don't block trade on filter error
                 
-                # P3: Record metrics for monitoring
+                # P3: Orderbook Imbalance — adjust confidence based on order flow
+                imbalance_boost = 0.0
+                if self.orderbook_imbalance_detector and asks and bids:
+                    try:
+                        from professional_features.orderbook_imbalance_detector import OrderBookSnapshot
+                        snapshot = OrderBookSnapshot(
+                            timestamp=datetime.now(),
+                            bids=bids[:10],
+                            asks=asks[:10],
+                            exchange=buy_ex,
+                            symbol=symbol
+                        )
+                        signal = self.orderbook_imbalance_detector.analyze_orderbook(snapshot)
+                        # Boost ROI confidence when imbalance confirms our trade direction
+                        # Buy side: positive imbalance (buyers dominate) = favorable
+                        if signal.signal in ('BUY', 'STRONG_BUY') and signal.confidence > 0.5:
+                            imbalance_boost = signal.confidence * 0.01  # Up to 1% boost
+                        elif signal.signal in ('SELL', 'STRONG_SELL') and signal.confidence > 0.7:
+                            # Strong sell pressure on buy side = unfavorable, reduce ROI threshold
+                            imbalance_boost = -0.01
+                    except Exception:
+                        pass
+                
+                # P4: ML Spread Predictor — check if spread will persist
+                if self.ml_spread_predictor:
+                    try:
+                        spread_pct = (top_bid - top_ask) / top_ask if top_ask > 0 else 0
+                        predicted_spread = self.ml_spread_predictor.predict(symbol, {
+                            'current_spread': spread_pct,
+                            'roi_pct': roi_pct,
+                            'buy_ex': buy_ex,
+                            'sell_ex': sell_ex
+                        })
+                        # Update predictor with observed spread
+                        self.ml_spread_predictor.update(symbol, spread_pct)
+                    except Exception:
+                        pass
+                
+                # P5: Market Regime Detection — adjust min ROI based on market conditions
+                regime_min_roi = self.min_net_pct
+                if self.market_regime_detector:
+                    try:
+                        mid_price = (top_bid + top_ask) / 2 if (top_bid and top_ask) else 0
+                        if mid_price > 0:
+                            regime = self.market_regime_detector.detect(symbol, mid_price)
+                            if regime == 'VOLATILE':
+                                # In volatile markets, opportunities are wider but riskier
+                                regime_min_roi = self.min_net_pct * 1.5
+                            elif regime == 'CALM':
+                                # In calm markets, accept smaller spreads
+                                regime_min_roi = self.min_net_pct * 0.8
+                    except Exception:
+                        pass
+                
+                # P6: Fee Optimizer — check if maker order would be cheaper
+                if self.fee_optimizer:
+                    try:
+                        self.fee_optimizer.record_trade_fee(
+                            buy_ex, symbol, invested, fees, 'taker'
+                        )
+                    except Exception:
+                        pass
+                
+                # P7: Record metrics for monitoring
                 if self.metrics_collector:
                     self.metrics_collector.record('opportunities_found', 1)
                     self.metrics_collector.record('roi_pct', roi_pct)
@@ -255,7 +337,7 @@ class ArbitrageEngine:
                     "roi_pct": roi_pct,
                 }
 
-                if net > 0 and roi_pct >= self.min_net_pct:
+                if net > 0 and roi_pct >= (regime_min_roi - imbalance_boost):
                     # dedupe and persist
                     key = f"{symbol}:{buy_ex}->{sell_ex}:{round(buy_avg,6)}:{round(sell_avg,6)}"
                     now = time.time()

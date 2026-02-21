@@ -88,6 +88,14 @@ from professional_features.vwap_engine import VWAPEngine
 from professional_features.iceberg_order_detector import IcebergOrderDetector
 from professional_features.order_flow_tracker import OrderFlowTracker
 
+# ML modules
+from ml.market_regime_detector import MarketRegimeDetector
+from ml.ml_spread_predictor import MLSpreadPredictor
+from ml.auto_parameter_optimizer import AutoParameterOptimizer
+
+# Fee optimization
+from core.fee_optimizer import FeeOptimizer
+
 # Exchange modules
 from exchanges.bybit_ws import BybitWS
 from exchanges.kucoin_ws import KucoinWS
@@ -461,6 +469,17 @@ class IntegratedArbitrageBot:
             self.orderbook_imbalance_detector = OrderBookImbalanceDetector()
             logger.info("✅ Orderbook Imbalance Detector initialized")
             
+            # ML Modules
+            logger.info("\n🧠 Initializing ML Modules...")
+            self.market_regime_detector = MarketRegimeDetector()
+            logger.info("✅ Market Regime Detector initialized")
+            self.ml_spread_predictor = MLSpreadPredictor()
+            logger.info("✅ ML Spread Predictor initialized")
+            self.fee_optimizer = FeeOptimizer()
+            logger.info("✅ Fee Optimizer initialized")
+            self.auto_parameter_optimizer = AutoParameterOptimizer()
+            logger.info("✅ Auto Parameter Optimizer initialized")
+            
             logger.info("\n🎯 All professional components initialized successfully!")
             
         except Exception as e:
@@ -714,9 +733,12 @@ class IntegratedArbitrageBot:
                 orderbook_imbalance_detector=self.orderbook_imbalance_detector,
                 trade_journal=self.trade_journal,
                 profit_attribution=self.profit_attribution,
-                metrics_collector=self.metrics_collector
+                metrics_collector=self.metrics_collector,
+                market_regime_detector=self.market_regime_detector,
+                fee_optimizer=self.fee_optimizer,
+                ml_spread_predictor=self.ml_spread_predictor
             )
-            logger.info("✅ Main Arbitrage Engine initialized with professional components")
+            logger.info("✅ Main Arbitrage Engine initialized with professional components + ML")
             
         except Exception as e:
             logger.error(f"❌ Error initializing strategies: {e}")
@@ -881,6 +903,20 @@ class IntegratedArbitrageBot:
                     total_bal = self.balance_manager.get_total_balance('USDT')
                     virt = " (virtual)" if settings.DRY_RUN else ""
                     print(f" 💵 Capital: ${total_bal:.2f} USDT{virt}")
+                
+                # ML module status
+                ml_parts = []
+                if self.market_regime_detector:
+                    regimes = self.market_regime_detector.get_all_regimes()
+                    if regimes:
+                        regime_counts = {}
+                        for r in regimes.values():
+                            regime_counts[r] = regime_counts.get(r, 0) + 1
+                        ml_parts.append("Regime:" + "/".join(f"{r}×{c}" for r, c in regime_counts.items()))
+                if self.ml_spread_predictor:
+                    ml_parts.append(f"Spread ML:{'trained' if self.ml_spread_predictor.is_trained else 'learning'}")
+                if ml_parts:
+                    print(f" 🧠 {' | '.join(ml_parts)}")
                 
                 print(f"{'='*70}")
                 
