@@ -616,15 +616,24 @@ def test_strategy_signal_execution():
             return True
         return False
     
+    # Always-executable (3)
     assert is_executable({'strategy': 'TRIANGULAR'}) == True
     assert is_executable({'strategy': 'FUNDING_RATE'}) == True
     assert is_executable({'strategy': 'INDEX_ARB'}) == True
-    assert is_executable({'strategy': 'SMART_ORDER'}) == False  # Advisory only
-    assert is_executable({'strategy': 'VOLATILITY'}) == False  # Advisory only
+    # Advisory-only (2)
+    assert is_executable({'strategy': 'SMART_ORDER'}) == False
+    assert is_executable({'strategy': 'VOLATILITY'}) == False
+    # Conditionally executable (6)
     assert is_executable({'strategy': 'DCA', 'data': {'dip_pct': 1.5}}) == True
+    assert is_executable({'strategy': 'MARKET_MAKING', 'data': {'spread_pct': 0.3}}) == True
+    assert is_executable({'strategy': 'PAIRS_TRADING', 'data': {'z_score': 2.5}}) == True
+    assert is_executable({'strategy': 'SPREAD_BETTING', 'data': {'z_score': -2.1}}) == True
     assert is_executable({'strategy': 'MOMENTUM', 'data': {'strength': 0.8}}) == True
-    assert is_executable({'strategy': 'MOMENTUM', 'data': {'strength': 0.3}}) == False  # Too weak
-    print("  ✅ _is_executable correctly identifies 8 actionable vs 2 advisory strategies")
+    assert is_executable({'strategy': 'BREAKOUT', 'data': {'type': 'resistance_break'}}) == True
+    # Weak signals → don't execute
+    assert is_executable({'strategy': 'MOMENTUM', 'data': {'strength': 0.3}}) == False
+    assert is_executable({'strategy': 'GRID_TRADING'}) == False  # No data
+    print("  ✅ _is_executable: 3 always-exec + 6 conditional + 2 advisory + weak/empty correctly classified")
     
     # --- Test _build_trade_from_signal logic ---
     def build_trade_from_signal(opp, store):
