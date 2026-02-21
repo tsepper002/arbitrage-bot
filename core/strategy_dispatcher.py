@@ -174,20 +174,18 @@ class StrategyDispatcher:
                 return opportunities
             snap = store.snapshot()
 
-            # --- TRIANGULAR: A→B→C→A within same exchange ---
-            # Triangular arbitrage using USDT-denominated pairs only:
-            # e.g., USDT→BTC→ETH→USDT uses BTC-USDT and ETH-USDT prices
-            # to compute the implied ETH/BTC rate and compare to the USDT loop.
+            # --- TRIANGULAR: Cross-exchange implied rate arbitrage ---
+            # With only USDT pairs, single-exchange triangular is impossible
+            # (all paths reduce to spread products < 1). But CROSS-EXCHANGE
+            # triangular works: compare how pair_a and pair_b are priced on
+            # different exchanges. If Ex1 overprices BTC but underprices ETH
+            # (relative to Ex2), there's an arbitrage cycle.
             #
-            # Route: buy BTC with USDT (ask), compute implied ETH/BTC from
-            # BTC-USDT bid / ETH-USDT ask, then sell ETH for USDT (bid).
-            # Product = (1/ask_BTC) * (bid_BTC/ask_ETH) * bid_ETH * (1-fee)^3
-            # Simplified: product = bid_ETH / ask_ETH * (1-fee)^3 ... but that
-            # collapses to spread arb. The real value is when different exchange
-            # order books have micro-inefficiencies in the 3-leg cycle.
+            # Formula (for pair_a, pair_b across ex1, ex2):
+            #   roi = (bid_b_ex2 × bid_a_ex1) / (ask_a_ex2 × ask_b_ex1) × (1-fee)^3 - 1
+            # This is asymmetric: forward (ex1→ex2) ≠ reverse (ex2→ex1).
             from core.exchange_config import EXCHANGE_PARAMS
             tri_pairs = [
-                # (leg1_USDT_pair, leg2_USDT_pair) — compute implied cross rate
                 ('BTC-USDT', 'ETH-USDT'),
                 ('BTC-USDT', 'SOL-USDT'),
                 ('BTC-USDT', 'BNB-USDT'),
@@ -197,59 +195,49 @@ class StrategyDispatcher:
             for pair_a, pair_b in tri_pairs:
                 exmap_a = snap.get(pair_a, {})
                 exmap_b = snap.get(pair_b, {})
-                # Check each exchange that has BOTH pairs
-                for ex in exmap_a:
-                    if ex not in exmap_b:
+                # Collect exchanges that have BOTH pairs
+                common_exs = [ex for ex in exmap_a if ex in exmap_b]
+                if len(common_exs) < 2:
+                    continue
+                # Check all exchange pairs for asymmetric mispricing
+                for i, ex1 in enumerate(common_exs):
+                    rec_a1, rec_b1 = exmap_a[ex1], exmap_b[ex1]
+                    bid_a1, ask_a1 = rec_a1.get("bid"), rec_a1.get("ask")
+                    bid_b1, ask_b1 = rec_b1.get("bid"), rec_b1.get("ask")
+                    if not (bid_a1 and ask_a1 and bid_b1 and ask_b1):
                         continue
-                    rec_a = exmap_a[ex]
-                    rec_b = exmap_b[ex]
-                    bid_a, ask_a = rec_a.get("bid"), rec_a.get("ask")
-                    bid_b, ask_b = rec_b.get("bid"), rec_b.get("ask")
-                    if not (bid_a and ask_a and bid_b and ask_b):
-                        continue
-                    if ask_a <= 0 or ask_b <= 0:
-                        continue
-                    # Triangular cycle: USDT → A → B → USDT
-                    # Leg 1: buy A with USDT at ask_a → get 1/ask_a units of A
-                    # Leg 2: sell A for B at implied rate bid_a/ask_b → get bid_a/ask_b units of B per unit of A
-                    # Leg 3: sell B for USDT at bid_b → get bid_b USDT per unit of B
-                    # Total USDT out per 1 USDT in = (1/ask_a) * (bid_a/ask_b) * bid_b ... wait
-                    # Actually: (bid_a * bid_b) / (ask_a * ask_b) is the direct formula
-                    # but that's just cross-exchange spread. The real triangular uses
-                    # the cross-pair rate. Let's compute properly:
-                    #
-                    # Forward: USDT→buy_A(ask_a)→implied_sell_A_for_B→sell_B(bid_b)
-                    # = (1/ask_a) * ask_a * (bid_b / ask_b) ... no
-                    #
-                    # Correct 3-leg cycle with USDT pairs:
-                    # Leg 1: USDT → A: buy A at ask_a, get 1/ask_a units
-                    # Leg 2: A → B: sell A for B. Implied rate = bid_b_in_USDT / ask_a_in_USDT
-                    #   Actually A→B is not a direct pair. We compute:
-                    #   sell A for USDT at bid_a, then buy B with USDT at ask_b
-                    #   Net: (bid_a / ask_b) units of B per unit of A
-                    # Leg 3: B → USDT: sell B at bid_b, get bid_b USDT
-                    #
-                    # Product = (1/ask_a) * (bid_a / ask_b) * bid_b * (1-fee)^3
-                    ex_fee = EXCHANGE_PARAMS.get(ex, {}).get("taker", 0.001)
-                    product = (bid_a / ask_a) * (bid_b / ask_b) * ((1 - ex_fee) ** 3)
-                    profit_pct = (product - 1.0) * 100
-
-                    # Also check reverse: USDT→B→A→USDT
-                    product_rev = (bid_b / ask_b) * (bid_a / ask_a) * ((1 - ex_fee) ** 3)
-                    profit_rev = (product_rev - 1.0) * 100
-
-                    best_profit = max(profit_pct, profit_rev)
-                    if best_profit > settings.MIN_NET_ROI_PCT:
-                        direction = f"USDT→{pair_a}→{pair_b}→USDT" if profit_pct >= profit_rev else f"USDT→{pair_b}→{pair_a}→USDT"
-                        opportunities.append({
-                            'strategy': 'TRIANGULAR',
-                            'type': 'triangular',
-                            'exchange': ex,
-                            'route': direction,
-                            'data': {'roi_pct': best_profit}
-                        })
-                        self.strategy_stats['TRIANGULAR']['opportunities'] += 1
-                        logger.info(f"   🔺 TRI: {ex} {direction} net_roi={best_profit:.3f}%")
+                    for ex2 in common_exs[i+1:]:
+                        rec_a2, rec_b2 = exmap_a[ex2], exmap_b[ex2]
+                        bid_a2, ask_a2 = rec_a2.get("bid"), rec_a2.get("ask")
+                        bid_b2, ask_b2 = rec_b2.get("bid"), rec_b2.get("ask")
+                        if not (bid_a2 and ask_a2 and bid_b2 and ask_b2):
+                            continue
+                        if ask_a2 <= 0 or ask_b1 <= 0 or ask_b2 <= 0 or ask_a1 <= 0:
+                            continue
+                        # Use worst (highest) fee between the two exchanges
+                        fee1 = EXCHANGE_PARAMS.get(ex1, {}).get("taker", 0.001)
+                        fee2 = EXCHANGE_PARAMS.get(ex2, {}).get("taker", 0.001)
+                        fee = max(fee1, fee2)
+                        # Forward: buy pair_a on ex1 (cheap), sell pair_b on ex2 (expensive)
+                        fwd = (bid_b2 * bid_a1) / (ask_a2 * ask_b1) * ((1 - fee) ** 3)
+                        fwd_roi = (fwd - 1) * 100
+                        # Reverse: buy pair_a on ex2, sell pair_b on ex1
+                        rev = (bid_b1 * bid_a2) / (ask_a1 * ask_b2) * ((1 - fee) ** 3)
+                        rev_roi = (rev - 1) * 100
+                        best_roi = max(fwd_roi, rev_roi)
+                        if best_roi > settings.MIN_NET_ROI_PCT:
+                            if fwd_roi >= rev_roi:
+                                direction = f"{pair_a}@{ex1}+{pair_b}@{ex2}"
+                            else:
+                                direction = f"{pair_a}@{ex2}+{pair_b}@{ex1}"
+                            opportunities.append({
+                                'strategy': 'TRIANGULAR',
+                                'type': 'cross_exchange_triangle',
+                                'route': direction,
+                                'data': {'roi_pct': best_roi}
+                            })
+                            self.strategy_stats['TRIANGULAR']['opportunities'] += 1
+                            logger.info(f"   🔺 TRI: {direction} net_roi={best_roi:.3f}%")
 
             # --- SMART_ORDER: detect when spread is wide enough for limit orders ---
             from core.exchange_config import EXCHANGE_PARAMS as EP
