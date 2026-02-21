@@ -68,6 +68,7 @@ class ArbitrageEngine:
         else:
             sc_usdt = trader_config.get_starting_capital_usdt(None)
             if sc_usdt:
+                # Conservative: use 50% of starting capital as per-trade max exposure
                 self.max_exposure_usdt = max(sc_usdt * 0.5, 50.0)
             else:
                 self.max_exposure_usdt = 200.0
@@ -252,11 +253,12 @@ class ArbitrageEngine:
                             if self.metrics_collector:
                                 self.metrics_collector.record('wash_trade_blocks', 1)
                             continue
-                    except Exception:
-                        pass  # Don't block trade on filter error
+                    except (AttributeError, ValueError, TypeError) as e:
+                        logger.debug(f"Wash trading filter error: {e}")
                 
                 # P3: Orderbook Imbalance — adjust confidence based on order flow
-                imbalance_boost = 0.0
+                # Positive imbalance_adj means BUY pressure confirms our trade → lower ROI bar
+                imbalance_adj = 0.0
                 if self.orderbook_imbalance_detector and asks and bids:
                     try:
                         from professional_features.orderbook_imbalance_detector import OrderBookSnapshot
@@ -268,30 +270,30 @@ class ArbitrageEngine:
                             symbol=symbol
                         )
                         signal = self.orderbook_imbalance_detector.analyze_orderbook(snapshot)
-                        # Boost ROI confidence when imbalance confirms our trade direction
-                        # Buy side: positive imbalance (buyers dominate) = favorable
+                        # Positive adj = favorable (lowers required ROI)
+                        # Negative adj = unfavorable (raises required ROI)
                         if signal.signal in ('BUY', 'STRONG_BUY') and signal.confidence > 0.5:
-                            imbalance_boost = signal.confidence * 0.01  # Up to 1% boost
+                            imbalance_adj = signal.confidence * 0.01  # Up to +1% favorable
                         elif signal.signal in ('SELL', 'STRONG_SELL') and signal.confidence > 0.7:
-                            # Strong sell pressure on buy side = unfavorable, reduce ROI threshold
-                            imbalance_boost = -0.01
-                    except Exception:
-                        pass
+                            imbalance_adj = -0.01  # Unfavorable
+                    except (AttributeError, ValueError, TypeError) as e:
+                        logger.debug(f"Orderbook imbalance error: {e}")
                 
-                # P4: ML Spread Predictor — check if spread will persist
+                # P4: ML Spread Predictor — observe and predict spread behavior
                 if self.ml_spread_predictor:
                     try:
-                        spread_pct = (top_bid - top_ask) / top_ask if top_ask > 0 else 0
+                        # Cross-exchange spread: positive = profitable
+                        cross_spread_pct = gross_spread_pct / 100.0
                         predicted_spread = self.ml_spread_predictor.predict(symbol, {
-                            'current_spread': spread_pct,
+                            'current_spread': cross_spread_pct,
                             'roi_pct': roi_pct,
                             'buy_ex': buy_ex,
                             'sell_ex': sell_ex
                         })
                         # Update predictor with observed spread
-                        self.ml_spread_predictor.update(symbol, spread_pct)
-                    except Exception:
-                        pass
+                        self.ml_spread_predictor.update(symbol, cross_spread_pct)
+                    except (AttributeError, ValueError, TypeError) as e:
+                        logger.debug(f"ML spread predictor error: {e}")
                 
                 # P5: Market Regime Detection — adjust min ROI based on market conditions
                 regime_min_roi = self.min_net_pct
@@ -306,17 +308,17 @@ class ArbitrageEngine:
                             elif regime == 'CALM':
                                 # In calm markets, accept smaller spreads
                                 regime_min_roi = self.min_net_pct * 0.8
-                    except Exception:
-                        pass
+                    except (AttributeError, ValueError, TypeError) as e:
+                        logger.debug(f"Market regime detection error: {e}")
                 
-                # P6: Fee Optimizer — check if maker order would be cheaper
+                # P6: Fee Optimizer — record trade fee for VIP tier analysis
                 if self.fee_optimizer:
                     try:
                         self.fee_optimizer.record_trade_fee(
                             buy_ex, symbol, invested, fees, 'taker'
                         )
-                    except Exception:
-                        pass
+                    except (AttributeError, ValueError, TypeError) as e:
+                        logger.debug(f"Fee optimizer error: {e}")
                 
                 # P7: Record metrics for monitoring
                 if self.metrics_collector:
@@ -337,7 +339,7 @@ class ArbitrageEngine:
                     "roi_pct": roi_pct,
                 }
 
-                if net > 0 and roi_pct >= (regime_min_roi - imbalance_boost):
+                if net > 0 and roi_pct >= (regime_min_roi - imbalance_adj):
                     # dedupe and persist
                     key = f"{symbol}:{buy_ex}->{sell_ex}:{round(buy_avg,6)}:{round(sell_avg,6)}"
                     now = time.time()
