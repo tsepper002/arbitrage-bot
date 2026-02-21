@@ -1134,6 +1134,10 @@ class IntegratedArbitrageBot:
         
         Uses PriceStore real-time data to find the best buy/sell exchange
         pair that aligns with the strategy signal.
+        
+        When a strategy produces a HIGH-CONFIDENCE signal (z-score > 2.0,
+        RSI extreme, etc.), the required ROI threshold is reduced by up to
+        50% because the statistical edge combines with the spread opportunity.
         """
         strategy = opp.get('strategy', '')
         symbol = opp.get('symbol', 'BTC-USDT')
@@ -1150,6 +1154,7 @@ class IntegratedArbitrageBot:
         snap = store.snapshot()
         exmap = snap.get(symbol, {})
         if len(exmap) < 2:
+            logger.debug(f"  ↳ {strategy} {symbol}: only {len(exmap)} exchange(s), need ≥2")
             return None
         
         # Find best buy (lowest ask) and sell (highest bid) exchanges
@@ -1167,6 +1172,7 @@ class IntegratedArbitrageBot:
                 best_sell_ex = ex
         
         if not best_buy_ex or not best_sell_ex or best_buy_ex == best_sell_ex:
+            logger.debug(f"  ↳ {strategy} {symbol}: same exchange ({best_buy_ex}={best_sell_ex})")
             return None
         
         # Calculate profit with real prices and fees
@@ -1185,8 +1191,21 @@ class IntegratedArbitrageBot:
         net = gross - fees
         roi_pct = (net / invested) * 100 if invested > 0 else 0
         
-        # Only return if profitable after fees
-        if net <= 0 or roi_pct < settings.MIN_NET_ROI_PCT:
+        # Signal confidence reduces required ROI threshold:
+        # High-confidence signals (z>2.0, RSI extreme) add statistical
+        # edge on top of the spread, so we lower the bar by up to 50%.
+        confidence = self._signal_confidence(strategy, data)
+        min_roi = settings.MIN_NET_ROI_PCT * (1.0 - 0.5 * confidence)
+        
+        # Only return if profitable after fees (with confidence-adjusted threshold)
+        if net <= 0 or roi_pct < min_roi:
+            spread_pct = ((best_sell_price - best_buy_price) / best_buy_price) * 100
+            fee_pct = (buy_fee + sell_fee) * 100
+            logger.debug(
+                f"  ↳ {strategy} {symbol}: spread={spread_pct:.4f}% fees={fee_pct:.3f}% "
+                f"roi={roi_pct:.4f}% < min={min_roi:.4f}% ({best_buy_ex}→{best_sell_ex}) "
+                f"conf={confidence:.0%}"
+            )
             return None
         
         return {
@@ -1202,6 +1221,38 @@ class IntegratedArbitrageBot:
             'roi_pct': roi_pct,
             'strategy': strategy,
         }
+    
+    def _signal_confidence(self, strategy: str, data: dict) -> float:
+        """Calculate signal confidence [0.0 - 1.0] from strategy-specific metrics.
+        
+        Higher confidence = lower ROI threshold needed for execution.
+        Returns 0.0 for strategies without statistical edge (pure spread).
+        """
+        if strategy == 'PAIRS_TRADING':
+            # z-score > 2.0 = high confidence, > 3.0 = very high
+            z = abs(data.get('z_score', 0))
+            return min(z / 4.0, 1.0) if z > 1.5 else 0.0
+        elif strategy == 'SPREAD_BETTING':
+            z = abs(data.get('z_score', 0))
+            return min(z / 4.0, 1.0) if z > 1.5 else 0.0
+        elif strategy == 'MOMENTUM':
+            # RSI < 25 or > 75 = high confidence (extreme overbought/oversold)
+            rsi = data.get('rsi', 50)
+            extremity = max(rsi - 50, 50 - rsi) / 50.0  # 0-1 scale
+            return extremity if extremity > 0.4 else 0.0
+        elif strategy == 'FUNDING_RATE':
+            premium = abs(data.get('premium_pct', 0))
+            return min(premium / 1.0, 1.0) if premium > 0.2 else 0.0
+        elif strategy == 'INDEX_ARB':
+            deviation = abs(data.get('deviation_pct', 0))
+            return min(deviation / 0.5, 1.0) if deviation > 0.1 else 0.0
+        elif strategy == 'VOLATILITY_ARB':
+            return 0.3  # Moderate base confidence for vol differences
+        elif strategy == 'DCA':
+            dip = data.get('dip_pct', 0)
+            return min(dip / 5.0, 1.0) if dip > 1.0 else 0.0
+        # Pure spread strategies: no additional statistical edge
+        return 0.0
     
     async def shutdown(self):
         """Graceful shutdown."""

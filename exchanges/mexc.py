@@ -1,105 +1,211 @@
 # arbitrage_bot/exchanges/mexc.py
+"""
+MEXC exchange WebSocket + REST fallback for orderbook data.
+
+MEXC migrated to wss://wbs-api.mexc.com/ws (Aug 2025) and
+switched public market streams to Protocol Buffers (protobuf).
+Since protobuf decoding adds complexity, we use a REST polling
+fallback: GET /api/v3/depth?symbol=X&limit=5 every 1-2 seconds.
+
+This gives reliable JSON data with ~1s latency — sufficient for
+arbitrage on a $20 account where trade frequency is low.
+"""
 import asyncio
 import json
 import time
-import websockets
 import logging
+
+try:
+    import aiohttp
+    HAS_AIOHTTP = True
+except ImportError:
+    HAS_AIOHTTP = False
+
+try:
+    import websockets
+    HAS_WS = True
+except ImportError:
+    HAS_WS = False
 
 log = logging.getLogger("MEXC")
 
 class MEXC:
-    WS_URL = "wss://wbs.mexc.com/ws"
+    # New endpoint (Aug 2025 migration)
+    WS_URL = "wss://wbs-api.mexc.com/ws"
+    WS_URL_LEGACY = "wss://wbs.mexc.com/ws"
+    REST_URL = "https://api.mexc.com/api/v3/depth"
+    REST_POLL_INTERVAL = 1.5  # seconds between REST polls
 
     def __init__(self, store, symbols):
         self.store = store
-        # Original symbols in standard format (e.g., BTC-USDT)
         self.symbols = symbols
-        # MEXC API uses no-separator format (e.g., BTCUSDT)
         self._mexc_symbols = [s.replace("-", "") for s in symbols]
-        # Reverse mapping: BTCUSDT -> BTC-USDT for PriceStore
         self._sym_map = {s.replace("-", ""): s for s in symbols}
         self._stop = False
-        self._backoff = 1.0  # Start with 1s backoff
+        self._backoff = 1.0
         self._max_backoff = 60.0
         self._last_msg_time = 0
+        self._data_received = False  # Track if we ever got valid data
+        self._ws_failed = False  # Track if WS is broken (triggers REST fallback)
 
     def stop(self):
         self._stop = True
 
     async def run(self):
-        while not self._stop:
-            try:
-                async with websockets.connect(
-                    self.WS_URL,
-                    ping_interval=20,
-                    ping_timeout=10,
-                    close_timeout=5,
-                ) as ws:
-                    log.info("MEXC WS connected")
-                    self._backoff = 1.0  # Reset backoff on successful connect
+        """Main entry: try WS first, fall back to REST polling if WS fails."""
+        if HAS_WS:
+            # Try WS with new endpoint, then legacy
+            for url in [self.WS_URL, self.WS_URL_LEGACY]:
+                if self._stop:
+                    return
+                try:
+                    await self._run_ws(url)
+                    if self._data_received:
+                        return  # WS worked, clean exit
+                except Exception as e:
+                    log.warning(f"MEXC WS {url} failed: {e}")
+                    continue
+
+        # WS failed or not available — fall back to REST polling
+        self._ws_failed = True
+        log.info("MEXC: switching to REST polling (WS unavailable or protobuf-only)")
+        if HAS_AIOHTTP:
+            await self._run_rest_poll()
+        else:
+            log.error("MEXC: neither websockets nor aiohttp available — cannot connect")
+
+    async def _run_ws(self, url: str):
+        """Try WebSocket connection. Exits after 10s with no data (protobuf detection)."""
+        try:
+            async with websockets.connect(
+                url,
+                ping_interval=20,
+                ping_timeout=10,
+                close_timeout=5,
+            ) as ws:
+                log.info(f"MEXC WS connected to {url}")
+                self._backoff = 1.0
+                self._last_msg_time = time.time()
+
+                for s in self._mexc_symbols:
+                    msg = {
+                        "method": "SUBSCRIPTION",
+                        "params": [f"spot@public.limit.depth.v3.api@{s}@5"],
+                    }
+                    await ws.send(json.dumps(msg))
+
+                json_msg_count = 0
+                binary_msg_count = 0
+
+                async for raw in ws:
+                    if self._stop:
+                        break
+
                     self._last_msg_time = time.time()
 
-                    for s in self._mexc_symbols:
-                        # @5 = 5 levels of depth (more stable than @1 which drops on thin books)
-                        msg = {
-                            "method": "SUBSCRIPTION",
-                            "params": [f"spot@public.limit.depth.v3.api@{s}@5"],
-                        }
-                        await ws.send(json.dumps(msg))
+                    # Detect protobuf: binary frames can't be JSON-parsed
+                    if isinstance(raw, bytes):
+                        binary_msg_count += 1
+                        if binary_msg_count >= 3 and json_msg_count == 0:
+                            log.warning(f"MEXC WS sends protobuf (binary), switching to REST")
+                            return  # Exit WS, let run() fall back to REST
+                        continue
 
-                    async for raw in ws:
-                        if self._stop:
-                            break
-                        
-                        self._last_msg_time = time.time()
+                    try:
                         data = json.loads(raw)
+                    except json.JSONDecodeError:
+                        binary_msg_count += 1
+                        if binary_msg_count >= 3 and json_msg_count == 0:
+                            log.warning(f"MEXC WS sends non-JSON data, switching to REST")
+                            return
+                        continue
 
-                        # MEXC v3 API: data can be nested under "d" or flat at top level
-                        # Try nested format first ({"s": ..., "d": {"bids": ..., "asks": ...}})
-                        # then flat format ({"symbol": ..., "bids": ..., "asks": ...})
-                        if "d" in data:
-                            mexc_symbol = data.get("s", "")
-                            # Fallback: extract symbol from channel name "c"
-                            # e.g. "spot@public.limit.depth.v3.api@BTCUSDT@5" → "BTCUSDT"
-                            if not mexc_symbol and "c" in data:
-                                parts = data["c"].split("@")
-                                if len(parts) >= 3:
-                                    mexc_symbol = parts[2]
-                            bids = data["d"].get("bids")
-                            asks = data["d"].get("asks")
-                        elif "bids" in data or "asks" in data:
-                            mexc_symbol = data.get("symbol", "") or data.get("s", "")
-                            bids = data.get("bids")
-                            asks = data.get("asks")
-                        else:
-                            continue
+                    json_msg_count += 1
 
-                        if not bids or not asks:
-                            continue
+                    # Parse depth data
+                    mexc_symbol, bids, asks = self._parse_ws_message(data)
+                    if not mexc_symbol or not bids or not asks:
+                        continue
 
-                        try:
-                            ts = time.time()
-                            # MEXC sends depth entries as {"p": price, "v": volume} dicts,
-                            # as [price, volume] arrays, or as ["price", "qty"] string arrays
-                            sample = bids[0]
-                            if isinstance(sample, dict):
-                                bids_levels = [(float(b["p"]), float(b["v"])) for b in bids]
-                                asks_levels = [(float(a["p"]), float(a["v"])) for a in asks]
+                    levels = self._parse_levels(bids, asks)
+                    if not levels:
+                        continue
+
+                    bids_levels, asks_levels = levels
+                    std_symbol = self._sym_map.get(mexc_symbol, mexc_symbol)
+                    await self.store.update_levels("MEXC", std_symbol, bids_levels, asks_levels, time.time())
+                    self._data_received = True
+
+        except Exception as e:
+            log.warning(f"MEXC WS error on {url}: {type(e).__name__}: {e}")
+            raise
+
+    def _parse_ws_message(self, data: dict):
+        """Extract symbol, bids, asks from MEXC WS JSON message."""
+        mexc_symbol = ""
+        bids = None
+        asks = None
+
+        if "d" in data:
+            mexc_symbol = data.get("s", "")
+            if not mexc_symbol and "c" in data:
+                parts = data["c"].split("@")
+                if len(parts) >= 3:
+                    mexc_symbol = parts[2]
+            inner = data["d"]
+            if isinstance(inner, dict):
+                bids = inner.get("bids")
+                asks = inner.get("asks")
+        elif "bids" in data or "asks" in data:
+            mexc_symbol = data.get("symbol", "") or data.get("s", "")
+            if not mexc_symbol and "c" in data:
+                parts = data["c"].split("@")
+                if len(parts) >= 3:
+                    mexc_symbol = parts[2]
+            bids = data.get("bids")
+            asks = data.get("asks")
+
+        return mexc_symbol, bids, asks
+
+    def _parse_levels(self, bids, asks):
+        """Parse bid/ask levels from MEXC format (dict, array, or string array)."""
+        try:
+            sample = bids[0]
+            if isinstance(sample, dict):
+                bids_levels = [(float(b["p"]), float(b["v"])) for b in bids]
+                asks_levels = [(float(a["p"]), float(a["v"])) for a in asks]
+            else:
+                bids_levels = [(float(b[0]), float(b[1])) for b in bids]
+                asks_levels = [(float(a[0]), float(a[1])) for a in asks]
+            return bids_levels, asks_levels
+        except (ValueError, IndexError, TypeError, KeyError) as e:
+            log.debug(f"MEXC parse error: {e}")
+            return None
+
+    async def _run_rest_poll(self):
+        """Fallback: poll MEXC REST API for orderbook data every 1.5 seconds."""
+        log.info(f"MEXC REST polling started for {len(self._mexc_symbols)} symbols")
+        async with aiohttp.ClientSession() as session:
+            while not self._stop:
+                for mexc_sym in self._mexc_symbols:
+                    if self._stop:
+                        break
+                    try:
+                        url = f"{self.REST_URL}?symbol={mexc_sym}&limit=5"
+                        async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                bids_raw = data.get("bids", [])
+                                asks_raw = data.get("asks", [])
+                                if bids_raw and asks_raw:
+                                    bids_levels = [(float(b[0]), float(b[1])) for b in bids_raw]
+                                    asks_levels = [(float(a[0]), float(a[1])) for a in asks_raw]
+                                    std_symbol = self._sym_map.get(mexc_sym, mexc_sym)
+                                    await self.store.update_levels("MEXC", std_symbol, bids_levels, asks_levels, time.time())
+                                    self._data_received = True
                             else:
-                                bids_levels = [(float(b[0]), float(b[1])) for b in bids]
-                                asks_levels = [(float(a[0]), float(a[1])) for a in asks]
-                        except (ValueError, IndexError, TypeError, KeyError):
-                            continue
+                                log.debug(f"MEXC REST {mexc_sym}: HTTP {resp.status}")
+                    except Exception as e:
+                        log.debug(f"MEXC REST {mexc_sym} error: {e}")
 
-                        # Convert MEXC symbol (BTCUSDT) back to standard format (BTC-USDT)
-                        std_symbol = self._sym_map.get(mexc_symbol, mexc_symbol)
-                        await self.store.update_levels("MEXC", std_symbol, bids_levels, asks_levels, ts)
-
-            except websockets.exceptions.ConnectionClosedError as e:
-                log.warning(f"MEXC WS closed: {e.code} {e.reason}")
-            except Exception as e:
-                log.warning(f"MEXC reconnecting ({self._backoff:.0f}s): {type(e).__name__}: {e}")
-            
-            if not self._stop:
-                await asyncio.sleep(self._backoff)
-                self._backoff = min(self._backoff * 1.5, self._max_backoff)
+                await asyncio.sleep(self.REST_POLL_INTERVAL)

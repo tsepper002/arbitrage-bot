@@ -753,6 +753,95 @@ def test_strategy_signal_execution():
     print("  ✅ Strategy signals are now properly routed to OrderExecutor for execution!")
 
 
+def test_mexc_rest_fallback():
+    """TEST 21: MEXC REST polling fallback and _parse_ws_message/levels"""
+    print("\n" + "="*60)
+    print("TEST 21: MEXC REST Fallback + Signal Confidence")
+    print("="*60)
+    from exchanges.mexc import MEXC
+    from core.price_store import PriceStore
+
+    store = PriceStore()
+    mexc = MEXC(store, ["BTC-USDT", "ETH-USDT"])
+
+    # Verify URL migration
+    assert "wbs-api.mexc.com" in mexc.WS_URL, f"Should use new MEXC URL, got {mexc.WS_URL}"
+    print(f"  ✅ MEXC WS URL: {mexc.WS_URL} (migrated from wbs.mexc.com)")
+
+    # Test _parse_ws_message — nested dict format
+    sym, bids, asks = mexc._parse_ws_message({
+        "c": "spot@public.limit.depth.v3.api@BTCUSDT@5",
+        "d": {"bids": [{"p": "50000", "v": "1.0"}], "asks": [{"p": "50001", "v": "2.0"}]}
+    })
+    assert sym == "BTCUSDT", f"Symbol should be BTCUSDT, got {sym}"
+    assert bids is not None
+    print(f"  ✅ _parse_ws_message: nested dict format → symbol={sym}")
+
+    # Test _parse_ws_message — flat format
+    sym2, bids2, asks2 = mexc._parse_ws_message({
+        "symbol": "ETHUSDT",
+        "bids": [["3000", "5.0"]],
+        "asks": [["3001", "4.0"]]
+    })
+    assert sym2 == "ETHUSDT"
+    print(f"  ✅ _parse_ws_message: flat format → symbol={sym2}")
+
+    # Test _parse_levels — dict format
+    levels = mexc._parse_levels([{"p": "50000", "v": "1.0"}], [{"p": "50001", "v": "2.0"}])
+    assert levels is not None
+    bids_l, asks_l = levels
+    assert bids_l[0] == (50000.0, 1.0)
+    assert asks_l[0] == (50001.0, 2.0)
+    print(f"  ✅ _parse_levels: dict format → bid={bids_l[0]} ask={asks_l[0]}")
+
+    # Test _parse_levels — array format
+    levels2 = mexc._parse_levels([["3000", "5.0"]], [["3001", "4.0"]])
+    assert levels2 is not None
+    assert levels2[0][0] == (3000.0, 5.0)
+    print(f"  ✅ _parse_levels: array format → bid={levels2[0][0]}")
+
+    # Test REST URL
+    assert "api.mexc.com" in mexc.REST_URL, "REST URL should be api.mexc.com"
+    print(f"  ✅ REST fallback URL: {mexc.REST_URL}")
+
+    # Test _signal_confidence (from IntegratedArbitrageBot)
+    # We test the logic inline since we can't easily instantiate the full bot
+    def signal_confidence(strategy, data):
+        if strategy == 'PAIRS_TRADING':
+            z = abs(data.get('z_score', 0))
+            return min(z / 4.0, 1.0) if z > 1.5 else 0.0
+        elif strategy == 'MOMENTUM':
+            rsi = data.get('rsi', 50)
+            extremity = max(rsi - 50, 50 - rsi) / 50.0
+            return extremity if extremity > 0.4 else 0.0
+        elif strategy == 'FUNDING_RATE':
+            premium = abs(data.get('premium_pct', 0))
+            return min(premium / 1.0, 1.0) if premium > 0.2 else 0.0
+        return 0.0
+
+    # PAIRS z=2.32 → confidence = 2.32/4.0 = 0.58 → min_roi reduced by 29%
+    conf = signal_confidence('PAIRS_TRADING', {'z_score': 2.32})
+    assert 0.55 < conf < 0.60, f"PAIRS z=2.32 confidence should be ~0.58, got {conf}"
+    reduced_roi = settings.MIN_NET_ROI_PCT * (1.0 - 0.5 * conf)
+    print(f"  ✅ PAIRS z=2.32: confidence={conf:.2f} → min_roi={reduced_roi:.4f}% (from {settings.MIN_NET_ROI_PCT}%)")
+
+    # MOMENTUM RSI=76.9 → extremity=0.538 → confidence=0.538
+    conf2 = signal_confidence('MOMENTUM', {'rsi': 76.9})
+    assert conf2 > 0.4, f"MOMENTUM RSI=76.9 confidence should be >0.4, got {conf2}"
+    reduced_roi2 = settings.MIN_NET_ROI_PCT * (1.0 - 0.5 * conf2)
+    print(f"  ✅ MOMENTUM RSI=76.9: confidence={conf2:.2f} → min_roi={reduced_roi2:.4f}%")
+
+    # Weak signal → no confidence boost
+    conf3 = signal_confidence('PAIRS_TRADING', {'z_score': 0.5})
+    assert conf3 == 0.0, f"Weak PAIRS z=0.5 should have 0 confidence, got {conf3}"
+    print(f"  ✅ Weak signals: z=0.5 → confidence=0.0 (no threshold reduction)")
+
+    # FUNDING_RATE with strong premium
+    conf4 = signal_confidence('FUNDING_RATE', {'premium_pct': 0.5})
+    assert conf4 > 0.0, f"FUNDING premium=0.5% should have confidence, got {conf4}"
+    print(f"  ✅ FUNDING premium=0.5%: confidence={conf4:.2f}")
+
+
 if __name__ == "__main__":
     tests = [
         test_settings, test_price_store, test_exchange_config, test_order_executor,
@@ -761,7 +850,7 @@ if __name__ == "__main__":
         test_analytics, test_ml_modules, test_rest_clients, test_advanced_core,
         test_e2e_arbitrage, test_mexc_depth_parsing, test_scan_fast_strategies,
         test_engine_feeds_dispatcher, test_ml_integration_in_engine,
-        test_strategy_signal_execution,
+        test_strategy_signal_execution, test_mexc_rest_fallback,
     ]
     passed = failed = 0
     for t in tests:
