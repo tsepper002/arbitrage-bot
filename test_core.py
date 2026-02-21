@@ -764,8 +764,8 @@ def test_mexc_rest_fallback():
     store = PriceStore()
     mexc = MEXC(store, ["BTC-USDT", "ETH-USDT"])
 
-    # Verify URL migration
-    assert "wbs-api.mexc.com" in mexc.WS_URL, f"Should use new MEXC URL, got {mexc.WS_URL}"
+    # Verify URL migration — exact match to avoid substring false positives
+    assert mexc.WS_URL == "wss://wbs-api.mexc.com/ws", f"Should use new MEXC URL, got {mexc.WS_URL}"
     print(f"  ✅ MEXC WS URL: {mexc.WS_URL} (migrated from wbs.mexc.com)")
 
     # Test _parse_ws_message — nested dict format
@@ -800,8 +800,8 @@ def test_mexc_rest_fallback():
     assert levels2[0][0] == (3000.0, 5.0)
     print(f"  ✅ _parse_levels: array format → bid={levels2[0][0]}")
 
-    # Test REST URL
-    assert "api.mexc.com" in mexc.REST_URL, "REST URL should be api.mexc.com"
+    # Test REST URL — exact match to avoid substring false positives
+    assert mexc.REST_URL == "https://api.mexc.com/api/v3/depth", f"REST URL wrong: {mexc.REST_URL}"
     print(f"  ✅ REST fallback URL: {mexc.REST_URL}")
 
     # Test _signal_confidence (from IntegratedArbitrageBot)

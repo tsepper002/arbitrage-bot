@@ -1228,17 +1228,15 @@ class IntegratedArbitrageBot:
         Higher confidence = lower ROI threshold needed for execution.
         Returns 0.0 for strategies without statistical edge (pure spread).
         """
-        if strategy == 'PAIRS_TRADING':
+        if strategy in ('PAIRS_TRADING', 'SPREAD_BETTING'):
             # z-score > 2.0 = high confidence, > 3.0 = very high
-            z = abs(data.get('z_score', 0))
-            return min(z / 4.0, 1.0) if z > 1.5 else 0.0
-        elif strategy == 'SPREAD_BETTING':
             z = abs(data.get('z_score', 0))
             return min(z / 4.0, 1.0) if z > 1.5 else 0.0
         elif strategy == 'MOMENTUM':
             # RSI < 25 or > 75 = high confidence (extreme overbought/oversold)
             rsi = data.get('rsi', 50)
-            extremity = max(rsi - 50, 50 - rsi) / 50.0  # 0-1 scale
+            # Normalized distance from RSI=50, range [0.0, 1.0]
+            extremity = min(abs(rsi - 50) / 50.0, 1.0)
             return extremity if extremity > 0.4 else 0.0
         elif strategy == 'FUNDING_RATE':
             premium = abs(data.get('premium_pct', 0))
