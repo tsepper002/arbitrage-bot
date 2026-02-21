@@ -918,6 +918,11 @@ class IntegratedArbitrageBot:
                 if ml_parts:
                     print(f" 🧠 {' | '.join(ml_parts)}")
                 
+                # Near-miss counter from engine
+                near_misses = getattr(self.engine, '_near_miss_count', 0) if self.engine else 0
+                if near_misses > 0:
+                    print(f" 📊 Near-misses: {near_misses} (spreads analyzed but below fee threshold)")
+                
                 print(f"{'='*70}")
                 
                 # Every 1000 cycles, print detailed summary
@@ -1082,6 +1087,12 @@ class IntegratedArbitrageBot:
         strategy = opp.get('strategy', '')
         # These strategies produce actionable cross-exchange trades
         if strategy in ('TRIANGULAR', 'FUNDING_RATE', 'INDEX_ARB'):
+            return True
+        # SMART_ORDER: wide spread = profitable cross-exchange opportunity
+        if strategy == 'SMART_ORDER' and opp.get('data', {}).get('spread_pct', 0) > 0:
+            return True
+        # VOLATILITY_ARB: spread width difference between exchanges
+        if strategy == 'VOLATILITY_ARB' and opp.get('data', {}):
             return True
         # MARKET_MAKING signals with spread data can execute
         if strategy == 'MARKET_MAKING' and opp.get('data', {}).get('spread_pct', 0) > 0:

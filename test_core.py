@@ -350,18 +350,18 @@ def test_e2e_arbitrage():
 
 
 def test_mexc_depth_parsing():
-    """TEST 16: MEXC Depth Parsing (dict and array formats)"""
+    """TEST 16: MEXC Depth Parsing (dict, array, and flat formats)"""
     print("\n" + "=" * 60)
-    print("TEST 16: MEXC Depth Parsing (dict and array formats)")
+    print("TEST 16: MEXC Depth Parsing (dict, array, and flat formats)")
     print("=" * 60)
     from core.price_store import PriceStore
     import json, time
 
     store = PriceStore()
     # Simulate MEXC symbol mapping
-    sym_map = {"BTCUSDT": "BTC-USDT", "ETHUSDT": "ETH-USDT"}
+    sym_map = {"BTCUSDT": "BTC-USDT", "ETHUSDT": "ETH-USDT", "SOLUSDT": "SOL-USDT"}
 
-    # Test dict format (MEXC v3 API): {"p": price, "v": volume}
+    # Test 1: Nested dict format {"s": ..., "d": {"bids": [{"p":..,"v":..}]}}
     dict_msg = json.dumps({
         "s": "BTCUSDT",
         "d": {
@@ -370,7 +370,7 @@ def test_mexc_depth_parsing():
         }
     })
 
-    # Test array format (legacy): ["price", "volume"]
+    # Test 2: Nested array format {"s": ..., "d": {"bids": [["price","vol"]]}}
     array_msg = json.dumps({
         "s": "ETHUSDT",
         "d": {
@@ -379,13 +379,28 @@ def test_mexc_depth_parsing():
         }
     })
 
-    for raw in [dict_msg, array_msg]:
+    # Test 3: FLAT format {"symbol": ..., "bids": [...], "asks": [...]}
+    # (MEXC API may return this format instead of nested "d")
+    flat_msg = json.dumps({
+        "symbol": "SOLUSDT",
+        "bids": [["84.5", "10.0"], ["84.4", "20.0"]],
+        "asks": [["84.6", "8.0"], ["84.7", "15.0"]],
+        "ts": 1700000000000
+    })
+
+    for raw in [dict_msg, array_msg, flat_msg]:
         data = json.loads(raw)
-        if "d" not in data:
+        # Handle both nested ("d") and flat formats
+        if "d" in data:
+            mexc_symbol = data.get("s", "")
+            bids = data["d"].get("bids")
+            asks = data["d"].get("asks")
+        elif "bids" in data or "asks" in data:
+            mexc_symbol = data.get("symbol", "") or data.get("s", "")
+            bids = data.get("bids")
+            asks = data.get("asks")
+        else:
             continue
-        mexc_symbol = data.get("s", "")
-        bids = data["d"].get("bids")
-        asks = data["d"].get("asks")
         if not bids or not asks:
             continue
         try:
@@ -405,14 +420,19 @@ def test_mexc_depth_parsing():
     snap = store.snapshot()
     assert "MEXC" in snap.get("BTC-USDT", {}), "BTC-USDT missing from MEXC"
     assert "MEXC" in snap.get("ETH-USDT", {}), "ETH-USDT missing from MEXC"
+    assert "MEXC" in snap.get("SOL-USDT", {}), "SOL-USDT missing from MEXC (flat format failed!)"
     btc = snap["BTC-USDT"]["MEXC"]
     eth = snap["ETH-USDT"]["MEXC"]
+    sol = snap["SOL-USDT"]["MEXC"]
     assert btc["bid"] == 50000.0, f"BTC bid wrong: {btc['bid']}"
     assert btc["ask"] == 50001.0, f"BTC ask wrong: {btc['ask']}"
     assert eth["bid"] == 3000.0, f"ETH bid wrong: {eth['bid']}"
     assert eth["ask"] == 3001.0, f"ETH ask wrong: {eth['ask']}"
-    print(f"  ✅ Dict format: BTC-USDT bid={btc['bid']} ask={btc['ask']}")
-    print(f"  ✅ Array format: ETH-USDT bid={eth['bid']} ask={eth['ask']}")
+    assert sol["bid"] == 84.5, f"SOL bid wrong: {sol['bid']}"
+    assert sol["ask"] == 84.6, f"SOL ask wrong: {sol['ask']}"
+    print(f"  ✅ Nested dict format: BTC-USDT bid={btc['bid']} ask={btc['ask']}")
+    print(f"  ✅ Nested array format: ETH-USDT bid={eth['bid']} ask={eth['ask']}")
+    print(f"  ✅ FLAT format: SOL-USDT bid={sol['bid']} ask={sol['ask']}")
 
 
 def test_scan_fast_strategies():
@@ -602,6 +622,10 @@ def test_strategy_signal_execution():
         strategy = opp.get('strategy', '')
         if strategy in ('TRIANGULAR', 'FUNDING_RATE', 'INDEX_ARB'):
             return True
+        if strategy == 'SMART_ORDER' and opp.get('data', {}).get('spread_pct', 0) > 0:
+            return True
+        if strategy == 'VOLATILITY_ARB' and opp.get('data', {}):
+            return True
         if strategy == 'MARKET_MAKING' and opp.get('data', {}).get('spread_pct', 0) > 0:
             return True
         if strategy == 'DCA' and opp.get('data', {}).get('dip_pct', 0) > 0:
@@ -620,10 +644,12 @@ def test_strategy_signal_execution():
     assert is_executable({'strategy': 'TRIANGULAR'}) == True
     assert is_executable({'strategy': 'FUNDING_RATE'}) == True
     assert is_executable({'strategy': 'INDEX_ARB'}) == True
-    # Advisory-only (2)
-    assert is_executable({'strategy': 'SMART_ORDER'}) == False
+    # Advisory-only (1 — only VOLATILITY is advisory now)
     assert is_executable({'strategy': 'VOLATILITY'}) == False
-    # Conditionally executable (6)
+    # Conditionally executable (8 — SMART_ORDER and VOLATILITY_ARB are now executable with data)
+    assert is_executable({'strategy': 'SMART_ORDER', 'data': {'spread_pct': 0.5}}) == True
+    assert is_executable({'strategy': 'SMART_ORDER'}) == False  # No data → not executable
+    assert is_executable({'strategy': 'VOLATILITY_ARB', 'data': {'spread_diff': 0.1}}) == True
     assert is_executable({'strategy': 'DCA', 'data': {'dip_pct': 1.5}}) == True
     assert is_executable({'strategy': 'MARKET_MAKING', 'data': {'spread_pct': 0.3}}) == True
     assert is_executable({'strategy': 'PAIRS_TRADING', 'data': {'z_score': 2.5}}) == True
@@ -633,7 +659,7 @@ def test_strategy_signal_execution():
     # Weak signals → don't execute
     assert is_executable({'strategy': 'MOMENTUM', 'data': {'strength': 0.3}}) == False
     assert is_executable({'strategy': 'GRID_TRADING'}) == False  # No data
-    print("  ✅ _is_executable: 3 always-exec + 6 conditional + 2 advisory + weak/empty correctly classified")
+    print("  ✅ _is_executable: 3 always-exec + 8 conditional + 1 advisory + weak/empty correctly classified")
     
     # --- Test _build_trade_from_signal logic ---
     def build_trade_from_signal(opp, store):

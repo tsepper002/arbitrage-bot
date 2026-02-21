@@ -54,20 +54,27 @@ class MEXC:
                         self._last_msg_time = time.time()
                         data = json.loads(raw)
 
-                        if "d" not in data:
+                        # MEXC v3 API: data can be nested under "d" or flat at top level
+                        # Try nested format first ({"s": ..., "d": {"bids": ..., "asks": ...}})
+                        # then flat format ({"symbol": ..., "bids": ..., "asks": ...})
+                        if "d" in data:
+                            mexc_symbol = data.get("s", "")
+                            bids = data["d"].get("bids")
+                            asks = data["d"].get("asks")
+                        elif "bids" in data or "asks" in data:
+                            mexc_symbol = data.get("symbol", "") or data.get("s", "")
+                            bids = data.get("bids")
+                            asks = data.get("asks")
+                        else:
                             continue
-
-                        mexc_symbol = data.get("s", "")
-                        bids = data["d"].get("bids")
-                        asks = data["d"].get("asks")
 
                         if not bids or not asks:
                             continue
 
                         try:
                             ts = time.time()
-                            # MEXC v3 sends depth entries as {"p": price, "v": volume} dicts
-                            # or as [price, volume] arrays — handle both formats
+                            # MEXC sends depth entries as {"p": price, "v": volume} dicts,
+                            # as [price, volume] arrays, or as ["price", "qty"] string arrays
                             sample = bids[0]
                             if isinstance(sample, dict):
                                 bids_levels = [(float(b["p"]), float(b["v"])) for b in bids]
