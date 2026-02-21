@@ -65,7 +65,8 @@ class StrategyDispatcher:
     
     def _get_price_store(self):
         """Get the PriceStore from bot_manager."""
-        return getattr(self.bot_manager, 'price_store', None)
+        # IntegratedArbitrageBot uses 'store', other contexts may use 'price_store'
+        return getattr(self.bot_manager, 'store', None) or getattr(self.bot_manager, 'price_store', None)
     
     def _get_mid_price(self, symbol: str, exchange: str = None) -> Optional[float]:
         """Get mid price for a symbol from PriceStore."""
@@ -158,7 +159,11 @@ class StrategyDispatcher:
         opportunities = []
 
         try:
+            # Increment all fast strategy call counters up front
             self.strategy_stats['CROSS_EXCHANGE']['calls'] += 1
+            self.strategy_stats['TRIANGULAR']['calls'] += 1
+            self.strategy_stats['SMART_ORDER']['calls'] += 1
+            self.strategy_stats['VOLATILITY']['calls'] += 1
 
             # Update price history on every fast scan for slow strategies
             self._update_price_history()
@@ -169,8 +174,7 @@ class StrategyDispatcher:
             snap = store.snapshot()
 
             # --- TRIANGULAR: A→B→C→A within same exchange ---
-            self.strategy_stats['TRIANGULAR']['calls'] += 1
-            tri = getattr(self.bot_manager, 'triangular_arb', None)
+            tri = getattr(self.bot_manager, 'triangular_engine', None) or getattr(self.bot_manager, 'triangular_arb', None)
             if tri and hasattr(tri, 'routes'):
                 from core.exchange_config import EXCHANGE_PARAMS
                 for route in tri.routes:
@@ -211,7 +215,6 @@ class StrategyDispatcher:
                                         logger.info(f"   🔺 TRI: {ex} {route} net_roi={net_roi:.3f}%")
 
             # --- SMART_ORDER: detect when spread is wide enough for limit orders ---
-            self.strategy_stats['SMART_ORDER']['calls'] += 1
             from core.exchange_config import EXCHANGE_PARAMS as EP
             for symbol, exmap in snap.items():
                 for ex, rec in exmap.items():
@@ -233,7 +236,6 @@ class StrategyDispatcher:
                             break  # one per symbol
 
             # --- VOLATILITY: detect high short-term volatility ---
-            self.strategy_stats['VOLATILITY']['calls'] += 1
             for symbol in list(self._price_history.keys()):
                 prices = self._get_prices_list(symbol)
                 if len(prices) < 10:
