@@ -159,7 +159,8 @@ class StrategyDispatcher:
         opportunities = []
 
         try:
-            # Increment all fast strategy call counters up front
+            # Increment call counters up front so dashboard always shows scan activity
+            # (strategies are called every cycle, they just find 0 opportunities when data is pending)
             self.strategy_stats['CROSS_EXCHANGE']['calls'] += 1
             self.strategy_stats['TRIANGULAR']['calls'] += 1
             self.strategy_stats['SMART_ORDER']['calls'] += 1
