@@ -59,6 +59,12 @@ class MEXC:
                         # then flat format ({"symbol": ..., "bids": ..., "asks": ...})
                         if "d" in data:
                             mexc_symbol = data.get("s", "")
+                            # Fallback: extract symbol from channel name "c"
+                            # e.g. "spot@public.limit.depth.v3.api@BTCUSDT@5" → "BTCUSDT"
+                            if not mexc_symbol and "c" in data:
+                                parts = data["c"].split("@")
+                                if len(parts) >= 3:
+                                    mexc_symbol = parts[2]
                             bids = data["d"].get("bids")
                             asks = data["d"].get("asks")
                         elif "bids" in data or "asks" in data:

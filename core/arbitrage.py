@@ -407,119 +407,115 @@ class ArbitrageEngine:
                 # Scan all symbols
                 symbols_to_scan = symbols
             
-            for s in symbols_to_scan:
-                # Throttle per-symbol scanning
-                last_scan = self.last_scan_time.get(s, 0)
-                time_since_last = scan_start - last_scan
-                if time_since_last < settings.MIN_SCAN_INTERVAL_PER_SYMBOL_SEC:
-                    continue
-                
-                self.last_scan_time[s] = scan_start
-                
-                # Get market overview
-                snap = self.store.snapshot()
-                exmap = snap.get(s, {})
-                best_bid = (None, 0.0)
-                best_ask = (None, float("inf"))
-                for ex, rec in exmap.items():
-                    b = rec.get("bid")
-                    a = rec.get("ask")
-                    if b and (best_bid[0] is None or b > best_bid[1]):
-                        best_bid = (ex, b)
-                    if a and (best_ask[0] is None or a < best_ask[1]):
-                        best_ask = (ex, a)
-                
-                # Only log market data occasionally to reduce spam
-                # Disabled by default - enable for debugging by changing condition to True
-                if logger.isEnabledFor(logging.DEBUG) and False:
-                    if best_bid[0] or best_ask[0]:
-                        logger.debug(f"MARKET {s}: BEST_BID {best_bid[0] or '-'} {best_bid[1]} BEST_ASK {best_ask[0] or '-'} {best_ask[1]}")
-
-                # Scan for opportunities
-                opps = await self.scan_once(s)
-                if opps:
-                    # Feed opportunity count back to strategy dispatcher
-                    if self.strategy_dispatcher:
-                        self.strategy_dispatcher.record_engine_opportunities(len(opps))
-                    for o in opps:
-                        # Check risk manager before executing
-                        if self.risk_manager:
-                            can_trade, reason = self.risk_manager.check_can_trade(o)
-                            if not can_trade:
-                                logger.debug(f"Risk manager blocked trade: {reason}")
-                                continue
-                        
-                        # Execute or log the opportunity
-                        result = await self.executor.execute_arbitrage(o)
-                        
-                        # Record trade to strategy manager
-                        if self.strategy_manager and result.get('trade_info'):
-                            strategy = o.get('strategy', 'cross_exchange')
-                            success = result['status'] == 'success'
-                            profit = result['trade_info'].get('net_profit', 0)
-                            execution_time = result.get('execution_time', 0)
-                            self.strategy_manager.record_trade(
-                                strategy_name=strategy,
-                                success=success,
-                                profit=profit,
-                                execution_time=execution_time
-                            )
-                        
-                        # PROFESSIONAL ANALYTICS: Record trade details
-                        if result.get('trade_info'):
-                            trade_info = result['trade_info']
-                            
-                            # Record to Trade Journal
-                            if self.trade_journal:
-                                self.trade_journal.record_trade({
-                                    'symbol': o['symbol'],
-                                    'side': 'buy_sell',  # arbitrage
-                                    'amount': o['qty'],
-                                    'price': o['buy_avg'],
-                                    'fee': trade_info.get('total_fees', 0),
-                                    'profit': trade_info.get('net_profit', 0),
-                                    'strategy': o.get('strategy', 'cross_exchange'),
-                                    'exchange': f"{o['buy_ex']}/{o['sell_ex']}",
-                                    'notes': f"ROI: {o.get('roi_pct', 0):.3f}%"
-                                })
-                            
-                            # Record to Profit Attribution
-                            if self.profit_attribution:
-                                self.profit_attribution.add_trade({
-                                    'strategy': o.get('strategy', 'cross_exchange'),
-                                    'exchange': o['buy_ex'],
-                                    'symbol': o['symbol'],
-                                    'profit': trade_info.get('net_profit', 0)
-                                })
-                            
-                            # Record metrics
-                            if self.metrics_collector:
-                                self.metrics_collector.record('trades_executed', 1)
-                                self.metrics_collector.record('execution_time_ms', result.get('execution_time', 0) * 1000)
-                                if result['status'] == 'success':
-                                    self.metrics_collector.record('successful_trades', 1)
-                        
-                        # Update risk manager after trade
-                        if self.risk_manager and result.get('trade_info'):
-                            self.risk_manager.record_trade(result['trade_info'])
-                        
-                        if result['status'] == 'simulated':
-                            # Already logged by executor
-                            pass
-                        elif result['status'] == 'success':
-                            logger.info(f"✅ Trade executed successfully: {result.get('summary', '')}")
-                        elif result['status'] == 'blocked':
-                            logger.debug(f"Trade blocked: {result['reason']}")
-                        elif result['status'] == 'error':
-                            logger.error(f"Execution error: {result.get('reason', 'Unknown')}")
+            # SPEED: Take snapshot ONCE per cycle (not per symbol)
+            snap = self.store.snapshot()
             
-            # Print statistics periodically
+            # Filter to symbols that pass throttle check
+            ready_symbols = []
+            for s in symbols_to_scan:
+                last_scan = self.last_scan_time.get(s, 0)
+                if scan_start - last_scan >= settings.MIN_SCAN_INTERVAL_PER_SYMBOL_SEC:
+                    self.last_scan_time[s] = scan_start
+                    ready_symbols.append(s)
+            
+            # SPEED: Scan all symbols in parallel using asyncio.gather()
+            if ready_symbols:
+                scan_results = await asyncio.gather(
+                    *(self.scan_once(s) for s in ready_symbols),
+                    return_exceptions=True
+                )
+            else:
+                scan_results = []
+            
+            for s, opps in zip(ready_symbols, scan_results):
+                # Skip exceptions from individual scans
+                if isinstance(opps, Exception):
+                    logger.debug(f"Scan error for {s}: {opps}")
+                    continue
+                if not opps:
+                    continue
+
+                # Feed opportunity count back to strategy dispatcher
+                if self.strategy_dispatcher:
+                    self.strategy_dispatcher.record_engine_opportunities(len(opps))
+                for o in opps:
+                    # Check risk manager before executing
+                    if self.risk_manager:
+                        can_trade, reason = self.risk_manager.check_can_trade(o)
+                        if not can_trade:
+                            logger.debug(f"Risk manager blocked trade: {reason}")
+                            continue
+                    
+                    # Execute or log the opportunity
+                    result = await self.executor.execute_arbitrage(o)
+                    
+                    # Record trade to strategy manager
+                    if self.strategy_manager and result.get('trade_info'):
+                        strategy = o.get('strategy', 'cross_exchange')
+                        success = result['status'] == 'success'
+                        profit = result['trade_info'].get('net_profit', 0)
+                        execution_time = result.get('execution_time', 0)
+                        self.strategy_manager.record_trade(
+                            strategy_name=strategy,
+                            success=success,
+                            profit=profit,
+                            execution_time=execution_time
+                        )
+                    
+                    # PROFESSIONAL ANALYTICS: Record trade details
+                    if result.get('trade_info'):
+                        trade_info = result['trade_info']
+                        
+                        # Record to Trade Journal
+                        if self.trade_journal:
+                            self.trade_journal.record_trade({
+                                'symbol': o['symbol'],
+                                'side': 'buy_sell',  # arbitrage
+                                'amount': o['qty'],
+                                'price': o['buy_avg'],
+                                'fee': trade_info.get('total_fees', 0),
+                                'profit': trade_info.get('net_profit', 0),
+                                'strategy': o.get('strategy', 'cross_exchange'),
+                                'exchange': f"{o['buy_ex']}/{o['sell_ex']}",
+                                'notes': f"ROI: {o.get('roi_pct', 0):.3f}%"
+                            })
+                        
+                        # Record to Profit Attribution
+                        if self.profit_attribution:
+                            self.profit_attribution.add_trade({
+                                'strategy': o.get('strategy', 'cross_exchange'),
+                                'exchange': o['buy_ex'],
+                                'symbol': o['symbol'],
+                                'profit': trade_info.get('net_profit', 0)
+                            })
+                        
+                        # Record metrics
+                        if self.metrics_collector:
+                            self.metrics_collector.record('trades_executed', 1)
+                            self.metrics_collector.record('execution_time_ms', result.get('execution_time', 0) * 1000)
+                            if result['status'] == 'success':
+                                self.metrics_collector.record('successful_trades', 1)
+                    
+                    # Update risk manager after trade
+                    if self.risk_manager and result.get('trade_info'):
+                        self.risk_manager.record_trade(result['trade_info'])
+                    
+                    if result['status'] == 'simulated':
+                        # Already logged by executor
+                        pass
+                    elif result['status'] == 'success':
+                        logger.info(f"✅ Trade executed successfully: {result.get('summary', '')}")
+                    elif result['status'] == 'blocked':
+                        logger.debug(f"Trade blocked: {result['reason']}")
+                    elif result['status'] == 'error':
+                        logger.error(f"Execution error: {result.get('reason', 'Unknown')}")
+            
+            # Print statistics periodically (reuse snap from above)
             if time.time() - last_stats_print > 60.0:
                 # Print executor statistics
                 self.executor.print_statistics()
                 
                 # Print scanning status
-                snap = self.store.snapshot()
                 active_symbols = len([s for s in symbols if s in snap and snap[s]])
                 total_exchanges = sum(len(snap.get(s, {})) for s in symbols) if snap else 0
                 logger.info(f"📊 STATUS: Scanning {active_symbols}/{len(symbols)} symbols across {total_exchanges} exchange connections")

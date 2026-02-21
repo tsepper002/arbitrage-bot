@@ -388,11 +388,28 @@ def test_mexc_depth_parsing():
         "ts": 1700000000000
     })
 
-    for raw in [dict_msg, array_msg, flat_msg]:
+    # Test 4: Channel-only format (no "s" field, symbol in "c" channel name)
+    # MEXC API may not include "s" field — symbol must be extracted from "c"
+    channel_msg = json.dumps({
+        "c": "spot@public.limit.depth.v3.api@BNBUSDT@5",
+        "d": {
+            "bids": [{"p": "600.0", "v": "10.0"}],
+            "asks": [{"p": "601.0", "v": "8.0"}]
+        },
+        "t": 1700000000000
+    })
+    sym_map["BNBUSDT"] = "BNB-USDT"
+
+    for raw in [dict_msg, array_msg, flat_msg, channel_msg]:
         data = json.loads(raw)
         # Handle both nested ("d") and flat formats
         if "d" in data:
             mexc_symbol = data.get("s", "")
+            # Fallback: extract symbol from "c" channel name
+            if not mexc_symbol and "c" in data:
+                parts = data["c"].split("@")
+                if len(parts) >= 3:
+                    mexc_symbol = parts[2]
             bids = data["d"].get("bids")
             asks = data["d"].get("asks")
         elif "bids" in data or "asks" in data:
@@ -421,9 +438,11 @@ def test_mexc_depth_parsing():
     assert "MEXC" in snap.get("BTC-USDT", {}), "BTC-USDT missing from MEXC"
     assert "MEXC" in snap.get("ETH-USDT", {}), "ETH-USDT missing from MEXC"
     assert "MEXC" in snap.get("SOL-USDT", {}), "SOL-USDT missing from MEXC (flat format failed!)"
+    assert "MEXC" in snap.get("BNB-USDT", {}), "BNB-USDT missing from MEXC (channel fallback failed!)"
     btc = snap["BTC-USDT"]["MEXC"]
     eth = snap["ETH-USDT"]["MEXC"]
     sol = snap["SOL-USDT"]["MEXC"]
+    bnb = snap["BNB-USDT"]["MEXC"]
     assert btc["bid"] == 50000.0, f"BTC bid wrong: {btc['bid']}"
     assert btc["ask"] == 50001.0, f"BTC ask wrong: {btc['ask']}"
     assert eth["bid"] == 3000.0, f"ETH bid wrong: {eth['bid']}"
@@ -433,6 +452,9 @@ def test_mexc_depth_parsing():
     print(f"  ✅ Nested dict format: BTC-USDT bid={btc['bid']} ask={btc['ask']}")
     print(f"  ✅ Nested array format: ETH-USDT bid={eth['bid']} ask={eth['ask']}")
     print(f"  ✅ FLAT format: SOL-USDT bid={sol['bid']} ask={sol['ask']}")
+    assert bnb["bid"] == 600.0, f"BNB bid wrong: {bnb['bid']}"
+    assert bnb["ask"] == 601.0, f"BNB ask wrong: {bnb['ask']}"
+    print(f"  ✅ Channel fallback: BNB-USDT bid={bnb['bid']} ask={bnb['ask']} (no 's' field, extracted from 'c')")
 
 
 def test_scan_fast_strategies():
