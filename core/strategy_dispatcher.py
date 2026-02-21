@@ -244,7 +244,7 @@ class StrategyDispatcher:
             # Count as signals, not opportunities — actual opportunities are only
             # counted when _build_trade_from_signal() finds a profitable cross-exchange pair.
             from core.exchange_config import EXCHANGE_PARAMS as EP
-            smart_order_detected = False
+            smart_order_signal_found = False
             for symbol, exmap in snap.items():
                 for ex, rec in exmap.items():
                     bid, ask = rec.get("bid"), rec.get("ask")
@@ -262,14 +262,14 @@ class StrategyDispatcher:
                                 'data': {'spread_pct': spread_pct, 'ratio': spread_pct / fee_pct}
                             })
                             self.strategy_stats['SMART_ORDER']['signals'] += 1
-                            smart_order_detected = True
+                            smart_order_signal_found = True
                             break  # one per symbol
-            if smart_order_detected:
+            if smart_order_signal_found:
                 self.strategy_stats['SMART_ORDER']['opportunities'] += 1
 
             # --- VOLATILITY: detect high short-term volatility ---
             # Market condition SIGNAL. Counts as 1 opportunity per scan if any symbol volatile.
-            vol_detected = False
+            volatility_signal_found = False
             for symbol in list(self._price_history.keys()):
                 prices = self._get_prices_list(symbol)
                 if len(prices) < 10:
@@ -288,8 +288,8 @@ class StrategyDispatcher:
                         'data': {'volatility_pct': volatility}
                     })
                     self.strategy_stats['VOLATILITY']['signals'] += 1
-                    vol_detected = True
-            if vol_detected:
+                    volatility_signal_found = True
+            if volatility_signal_found:
                 self.strategy_stats['VOLATILITY']['opportunities'] += 1
 
         except Exception as e:

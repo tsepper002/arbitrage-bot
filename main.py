@@ -931,7 +931,7 @@ class IntegratedArbitrageBot:
                     if best_spread > 0:
                         gap = best_fees - best_spread
                         pct_of_fees = (best_spread / best_fees * 100) if best_fees > 0 else 0
-                        print(f" 📊 Best spread: {best_spread:.4f}% ({pct_of_fees:.0f}% of {best_fees:.3f}% fees) | {best_info}")
+                        print(f" 📊 Best spread: {best_spread:.4f}% ({pct_of_fees:.0f}% of {best_fees:.3f}% fees, gap={gap:.4f}%) | {best_info}")
                     if near_misses > 0:
                         print(f" 🔍 Near-misses: {near_misses} | Pairs analyzed: {total_analyzed}")
                 
