@@ -434,10 +434,15 @@ def test_scan_fast_strategies():
     dispatcher = StrategyDispatcher(bot)
 
     # Add price data with wide spread (triggers SMART_ORDER: spread > 2x fee = 0.2%)
+    # Also add ETH-USDT so TRIANGULAR can compute BTC/ETH cross-rate
     loop.run_until_complete(store.update_levels("Bybit", "BTC-USDT",
         bids_levels=[(50000.0, 1.0)], asks_levels=[(50200.0, 1.0)]))
     loop.run_until_complete(store.update_levels("KuCoin", "BTC-USDT",
         bids_levels=[(50050.0, 1.0)], asks_levels=[(50250.0, 1.0)]))
+    loop.run_until_complete(store.update_levels("Bybit", "ETH-USDT",
+        bids_levels=[(3000.0, 10.0)], asks_levels=[(3010.0, 10.0)]))
+    loop.run_until_complete(store.update_levels("KuCoin", "ETH-USDT",
+        bids_levels=[(3005.0, 10.0)], asks_levels=[(3015.0, 10.0)]))
 
     # Build price history for VOLATILITY detection
     import time
@@ -463,7 +468,7 @@ def test_scan_fast_strategies():
     assert stats['VOLATILITY']['opportunities'] >= 1, "VOLATILITY should detect oscillation"
 
     print(f"  ✅ CROSS_EXCHANGE: {stats['CROSS_EXCHANGE']['calls']} calls")
-    print(f"  ✅ TRIANGULAR: {stats['TRIANGULAR']['calls']} calls")
+    print(f"  ✅ TRIANGULAR: {stats['TRIANGULAR']['calls']} calls, {stats['TRIANGULAR']['opportunities']} opps")
     print(f"  ✅ SMART_ORDER: {stats['SMART_ORDER']['calls']} calls, {stats['SMART_ORDER']['opportunities']} opps")
     print(f"  ✅ VOLATILITY: {stats['VOLATILITY']['calls']} calls, {stats['VOLATILITY']['opportunities']} opps")
     print(f"  ✅ Total fast opps: {len(opps)}")
