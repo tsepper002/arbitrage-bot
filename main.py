@@ -884,17 +884,20 @@ class IntegratedArbitrageBot:
                 
                 # Strategies summary (compact)
                 print(f"{'─'*70}")
-                print(f" {'Strategy':<20} {'Scans':>8} {'Opps':>8} {'Rate':>8}")
+                print(f" {'Strategy':<20} {'Scans':>8} {'Sigs':>6} {'Opps':>6} {'Trds':>6}")
                 print(f"{'─'*70}")
                 for name, stats in disp_stats.items():
                     calls = stats['calls']
+                    signals = stats.get('signals', 0)
                     opps = stats['opportunities']
-                    rate = (opps / calls * 100) if calls > 0 else 0.0
-                    print(f" {name:<20} {calls:>8} {opps:>8} {rate:>7.1f}%")
+                    trades = stats.get('trades', 0)
+                    print(f" {name:<20} {calls:>8} {signals:>6} {opps:>6} {trades:>6}")
                 
                 # Totals
+                total_signals = sum(s.get('signals', 0) for s in disp_stats.values())
+                total_trades_strat = sum(s.get('trades', 0) for s in disp_stats.values())
                 print(f"{'─'*70}")
-                print(f" {'TOTAL':<20} {total_scans:>8} {total_opps:>8}")
+                print(f" {'TOTAL':<20} {total_scans:>8} {total_signals:>6} {total_opps:>6} {total_trades_strat:>6}")
                 print(f"{'─'*70}")
                 print(f" 💰 Trades: {total_trades} | Profit: ${total_profit:.4f} | Avg ROI: {avg_roi:.3f}%")
                 
@@ -918,10 +921,19 @@ class IntegratedArbitrageBot:
                 if ml_parts:
                     print(f" 🧠 {' | '.join(ml_parts)}")
                 
-                # Near-miss counter from engine
-                near_misses = getattr(self.engine, '_near_miss_count', 0) if self.engine else 0
-                if near_misses > 0:
-                    print(f" 📊 Near-misses: {near_misses} (spreads analyzed but below fee threshold)")
+                # Engine analytics: best spread seen + near-miss tracking
+                if self.engine:
+                    best_spread = getattr(self.engine, '_best_spread_pct', 0)
+                    best_info = getattr(self.engine, '_best_spread_info', '')
+                    best_fees = getattr(self.engine, '_best_spread_fees_pct', 0)
+                    near_misses = getattr(self.engine, '_near_miss_count', 0)
+                    total_analyzed = getattr(self.engine, '_total_pairs_analyzed', 0)
+                    if best_spread > 0:
+                        gap = best_fees - best_spread
+                        pct_of_fees = (best_spread / best_fees * 100) if best_fees > 0 else 0
+                        print(f" 📊 Best spread: {best_spread:.4f}% ({pct_of_fees:.0f}% of {best_fees:.3f}% fees) | {best_info}")
+                    if near_misses > 0:
+                        print(f" 🔍 Near-misses: {near_misses} | Pairs analyzed: {total_analyzed}")
                 
                 print(f"{'='*70}")
                 
@@ -1068,6 +1080,9 @@ class IntegratedArbitrageBot:
                                 result = await self.engine.executor.execute_arbitrage(trade_info)
                                 if result.get('status') in ('simulated', 'success'):
                                     logger.info(f"✅ {opp['strategy']} trade executed: {trade_info['symbol']} ${trade_info.get('net', 0):.4f}")
+                                    # Record trade in dispatcher stats
+                                    if self.strategy_dispatcher:
+                                        self.strategy_dispatcher.strategy_stats[opp['strategy']]['trades'] += 1
                                     # Record to strategy manager
                                     if self.strategy_manager:
                                         self.strategy_manager.record_trade(

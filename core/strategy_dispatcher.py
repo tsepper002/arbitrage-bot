@@ -41,20 +41,20 @@ class StrategyDispatcher:
         
         # Strategy performance tracking
         self.strategy_stats = {
-            'CROSS_EXCHANGE': {'calls': 0, 'opportunities': 0},
-            'TRIANGULAR': {'calls': 0, 'opportunities': 0},
-            'SMART_ORDER': {'calls': 0, 'opportunities': 0},
-            'VOLATILITY': {'calls': 0, 'opportunities': 0},
-            'GRID_TRADING': {'calls': 0, 'opportunities': 0},
-            'DCA': {'calls': 0, 'opportunities': 0},
-            'MARKET_MAKING': {'calls': 0, 'opportunities': 0},
-            'PAIRS_TRADING': {'calls': 0, 'opportunities': 0},
-            'FUNDING_RATE': {'calls': 0, 'opportunities': 0},
-            'VOLATILITY_ARB': {'calls': 0, 'opportunities': 0},
-            'INDEX_ARB': {'calls': 0, 'opportunities': 0},
-            'SPREAD_BETTING': {'calls': 0, 'opportunities': 0},
-            'MOMENTUM': {'calls': 0, 'opportunities': 0},
-            'BREAKOUT': {'calls': 0, 'opportunities': 0},
+            'CROSS_EXCHANGE': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
+            'TRIANGULAR': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
+            'SMART_ORDER': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
+            'VOLATILITY': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
+            'GRID_TRADING': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
+            'DCA': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
+            'MARKET_MAKING': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
+            'PAIRS_TRADING': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
+            'FUNDING_RATE': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
+            'VOLATILITY_ARB': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
+            'INDEX_ARB': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
+            'SPREAD_BETTING': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
+            'MOMENTUM': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
+            'BREAKOUT': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
         }
         
         fast_names = ['CROSS_EXCHANGE', 'TRIANGULAR', 'SMART_ORDER', 'VOLATILITY']
@@ -240,7 +240,11 @@ class StrategyDispatcher:
                             logger.info(f"   🔺 TRI: {direction} net_roi={best_roi:.3f}%")
 
             # --- SMART_ORDER: detect when spread is wide enough for limit orders ---
+            # These are market condition SIGNALS (wide spread on single exchange).
+            # Count as signals, not opportunities — actual opportunities are only
+            # counted when _build_trade_from_signal() finds a profitable cross-exchange pair.
             from core.exchange_config import EXCHANGE_PARAMS as EP
+            smart_order_detected = False
             for symbol, exmap in snap.items():
                 for ex, rec in exmap.items():
                     bid, ask = rec.get("bid"), rec.get("ask")
@@ -257,10 +261,15 @@ class StrategyDispatcher:
                                 'exchange': ex,
                                 'data': {'spread_pct': spread_pct, 'ratio': spread_pct / fee_pct}
                             })
-                            self.strategy_stats['SMART_ORDER']['opportunities'] += 1
+                            self.strategy_stats['SMART_ORDER']['signals'] += 1
+                            smart_order_detected = True
                             break  # one per symbol
+            if smart_order_detected:
+                self.strategy_stats['SMART_ORDER']['opportunities'] += 1
 
             # --- VOLATILITY: detect high short-term volatility ---
+            # Market condition SIGNAL. Counts as 1 opportunity per scan if any symbol volatile.
+            vol_detected = False
             for symbol in list(self._price_history.keys()):
                 prices = self._get_prices_list(symbol)
                 if len(prices) < 10:
@@ -278,7 +287,10 @@ class StrategyDispatcher:
                         'symbol': symbol,
                         'data': {'volatility_pct': volatility}
                     })
-                    self.strategy_stats['VOLATILITY']['opportunities'] += 1
+                    self.strategy_stats['VOLATILITY']['signals'] += 1
+                    vol_detected = True
+            if vol_detected:
+                self.strategy_stats['VOLATILITY']['opportunities'] += 1
 
         except Exception as e:
             logger.error(f"Error in fast strategy scan: {e}")

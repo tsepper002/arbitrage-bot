@@ -97,6 +97,12 @@ class ArbitrageEngine:
         # Event-driven scanning state
         self.updated_symbols: Set[str] = set()
         self.last_scan_time: Dict[str, float] = {}
+        
+        # Spread analytics — track best spread seen each cycle
+        self._best_spread_pct = 0.0
+        self._best_spread_info = ""
+        self._near_miss_count = 0
+        self._total_pairs_analyzed = 0
 
         # ensure persistence file
         if not os.path.exists(self.persist_path):
@@ -202,20 +208,19 @@ class ArbitrageEngine:
                 sell_fee = self._fee_rate(sell_ex, "taker")
                 sum_fees_pct = (buy_fee + sell_fee) * 100.0
                 
+                self._total_pairs_analyzed += 1
+                
+                # Track best spread for dashboard transparency
+                if gross_spread_pct > self._best_spread_pct:
+                    self._best_spread_pct = gross_spread_pct
+                    self._best_spread_info = f"{symbol} {buy_ex}→{sell_ex}"
+                    self._best_spread_fees_pct = sum_fees_pct
+                
                 # Prefilter: skip if spread < 80% of fees (won't be profitable)
                 if gross_spread_pct < sum_fees_pct * 0.8:
-                    # Near-miss logging: show the engine IS analyzing spreads
-                    NEAR_MISS_THRESHOLD = 0.3  # 30% of fee threshold
-                    NEAR_MISS_LOG_INTERVAL = 100
-                    if gross_spread_pct > sum_fees_pct * NEAR_MISS_THRESHOLD:
-                        self._near_miss_count = getattr(self, '_near_miss_count', 0) + 1
-                        if self._near_miss_count % NEAR_MISS_LOG_INTERVAL == 0:
-                            net_est = gross_spread_pct - sum_fees_pct
-                            logger.info(
-                                f"📊 Near-miss #{self._near_miss_count}: {symbol} {buy_ex}→{sell_ex} "
-                                f"spread={gross_spread_pct:.4f}% fees={sum_fees_pct:.3f}% "
-                                f"net≈{net_est:.4f}% (need >{sum_fees_pct * 0.8:.3f}%)"
-                            )
+                    # Near-miss: spread is >30% of fee threshold (engine is working)
+                    if gross_spread_pct > sum_fees_pct * 0.3:
+                        self._near_miss_count += 1
                     continue
 
                 # choose qty adaptively
