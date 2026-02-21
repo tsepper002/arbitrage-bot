@@ -644,11 +644,11 @@ def test_strategy_signal_execution():
     assert is_executable({'strategy': 'TRIANGULAR'}) == True
     assert is_executable({'strategy': 'FUNDING_RATE'}) == True
     assert is_executable({'strategy': 'INDEX_ARB'}) == True
-    # Advisory-only (1 — only VOLATILITY is advisory now)
+    # Advisory-only (1 - only VOLATILITY is advisory now)
     assert is_executable({'strategy': 'VOLATILITY'}) == False
-    # Conditionally executable (8 — SMART_ORDER and VOLATILITY_ARB are now executable with data)
+    # Conditionally executable (8 - SMART_ORDER and VOLATILITY_ARB are now executable with data)
     assert is_executable({'strategy': 'SMART_ORDER', 'data': {'spread_pct': 0.5}}) == True
-    assert is_executable({'strategy': 'SMART_ORDER'}) == False  # No data → not executable
+    assert is_executable({'strategy': 'SMART_ORDER'}) == False  # No data - not executable
     assert is_executable({'strategy': 'VOLATILITY_ARB', 'data': {'spread_diff': 0.1}}) == True
     assert is_executable({'strategy': 'DCA', 'data': {'dip_pct': 1.5}}) == True
     assert is_executable({'strategy': 'MARKET_MAKING', 'data': {'spread_pct': 0.3}}) == True

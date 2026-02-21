@@ -205,10 +205,11 @@ class ArbitrageEngine:
                 # Prefilter: skip if spread < 80% of fees (won't be profitable)
                 if gross_spread_pct < sum_fees_pct * 0.8:
                     # Near-miss logging: show the engine IS analyzing spreads
-                    if gross_spread_pct > sum_fees_pct * 0.3:
+                    NEAR_MISS_THRESHOLD = 0.3  # 30% of fee threshold
+                    NEAR_MISS_LOG_INTERVAL = 100
+                    if gross_spread_pct > sum_fees_pct * NEAR_MISS_THRESHOLD:
                         self._near_miss_count = getattr(self, '_near_miss_count', 0) + 1
-                        # Log every 100th near-miss to avoid spam
-                        if self._near_miss_count % 100 == 1:
+                        if self._near_miss_count % NEAR_MISS_LOG_INTERVAL == 0:
                             net_est = gross_spread_pct - sum_fees_pct
                             logger.info(
                                 f"📊 Near-miss #{self._near_miss_count}: {symbol} {buy_ex}→{sell_ex} "
