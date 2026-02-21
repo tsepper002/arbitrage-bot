@@ -45,6 +45,7 @@ from core.rebalancer import get_auto_rebalancer
 from core.startup_validator import get_startup_validator
 from core.windows_optimizer import setup_windows_optimizations, WindowsOptimizer
 from core.smart_capital_allocator import get_smart_allocator
+from core.exchange_config import EXCHANGE_PARAMS
 from core.strategy_dispatcher import StrategyDispatcher  # NEW: All 14 strategies!
 
 # Professional Infrastructure
@@ -874,11 +875,16 @@ class IntegratedArbitrageBot:
                 print(f" {mode} | Cycle #{cycle} | {active_symbols} symbols | {total_exchanges} connections")
                 print(f"{'='*70}")
                 
-                # Connected exchanges
+                # Connected exchanges with fee info
                 all_exchanges = ['Bybit', 'KuCoin', 'HTX', 'MEXC', 'Binance']
                 connected = [ex for ex in all_exchanges if ex in exchanges_with_data]
                 disconnected = [ex for ex in all_exchanges if ex not in exchanges_with_data]
-                print(f" ✅ Connected: {', '.join(connected) if connected else 'none'}")
+                # Show fee next to each connected exchange
+                conn_parts = []
+                for ex in connected:
+                    fee = EXCHANGE_PARAMS.get(ex, {}).get('taker', 0)
+                    conn_parts.append(f"{ex}({fee*100:.1f}%)" if fee > 0 else f"{ex}(0%)")
+                print(f" ✅ Connected: {', '.join(conn_parts) if conn_parts else 'none'}")
                 if disconnected:
                     print(f" ❌ Disconnected: {', '.join(disconnected)}")
                 

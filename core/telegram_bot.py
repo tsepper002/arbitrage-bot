@@ -409,7 +409,8 @@ Mode: {"🔵 DRY RUN" if settings.DRY_RUN else "🔴 LIVE"}
     
     def _cmd_opportunities(self, bot_manager) -> str:
         """Return recent arbitrage opportunities."""
-        return """
+        num_symbols = len(settings.TRADING_SYMBOLS)
+        return f"""
 🔍 *Recent Opportunities*
 
 Opportunities are detected in real-time and logged to the console.
@@ -421,7 +422,7 @@ To see live opportunities:
 
 Recent scans: Active
 Exchanges monitored: Bybit, KuCoin, HTX, MEXC
-Symbols: 10 pairs
+Symbols: {num_symbols} pairs
 """
     
     async def start_monitoring_loop(self, bot_manager):

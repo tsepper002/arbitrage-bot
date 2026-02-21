@@ -52,27 +52,31 @@ class MEXC:
         self._stop = True
 
     async def run(self):
-        """Main entry: try WS first, fall back to REST polling if WS fails."""
-        if HAS_WS:
-            # Try WS with new endpoint, then legacy
+        """Main entry: REST polling (reliable JSON).
+
+        MEXC migrated public market streams to protobuf (Aug 2025).
+        The WS connects but sends binary frames that we can't parse,
+        while subscription confirmations are JSON (so protobuf detection
+        never triggers). REST polling gives reliable JSON at ~1.5s latency,
+        which is fine since MEXC has 0% spot trading fees.
+        """
+        if HAS_AIOHTTP:
+            log.info("MEXC: using REST polling (0% fees, reliable JSON data)")
+            await self._run_rest_poll()
+        elif HAS_WS:
+            # Fallback to WS if aiohttp not installed
             for url in [self.WS_URL, self.WS_URL_LEGACY]:
                 if self._stop:
                     return
                 try:
                     await self._run_ws(url)
                     if self._data_received:
-                        return  # WS worked, clean exit
+                        return
                 except Exception as e:
                     log.warning(f"MEXC WS {url} failed: {e}")
                     continue
-
-        # WS failed or not available — fall back to REST polling
-        self._ws_failed = True
-        log.info("MEXC: switching to REST polling (WS unavailable or protobuf-only)")
-        if HAS_AIOHTTP:
-            await self._run_rest_poll()
         else:
-            log.error("MEXC: neither websockets nor aiohttp available — cannot connect")
+            log.error("MEXC: neither aiohttp nor websockets available — cannot connect")
 
     async def _run_ws(self, url: str):
         """Try WebSocket connection. Exits after 10s with no data (protobuf detection)."""

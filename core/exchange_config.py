@@ -38,8 +38,8 @@ EXCHANGE_PARAMS: Dict[str, Dict[str, Any]] = {
         "supports_depth": True,
     },
     "MEXC": {
-        "maker": 0.000,  # 0% maker fee (MEXC's competitive advantage!)
-        "taker": 0.0005,  # 0.05% taker fee
+        "maker": 0.000,  # 0% maker fee — MEXC has ZERO spot trading fees
+        "taker": 0.000,  # 0% taker fee — confirmed for all users (no VIP required)
         "withdraw_fee": 0.8,  # Approximate USDT withdrawal fee (slightly cheaper)
         "withdraw_fee_currency": "USDT",
         "min_notional": 1.0,
