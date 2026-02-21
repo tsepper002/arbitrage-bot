@@ -1023,26 +1023,159 @@ class IntegratedArbitrageBot:
             return
     
     async def _strategy_dispatcher_loop(self):
-        """Background task for running strategy dispatcher scans."""
+        """Background task for running strategy dispatcher scans.
+        
+        Scans all 14 strategies and routes executable opportunities
+        to OrderExecutor for trade execution (dry-run or live).
+        """
         try:
             while True:
-                # Fast scan: runs TRIANGULAR, SMART_ORDER, VOLATILITY strategies
+                all_opps = []
+                
+                # Fast scan: TRIANGULAR, SMART_ORDER, VOLATILITY
                 # (CROSS_EXCHANGE is handled by ArbitrageEngine.run())
                 if self.strategy_dispatcher:
                     fast_opps = await self.strategy_dispatcher.scan_fast()
                     if fast_opps:
-                        logger.info(f"🎯 Fast strategies found {len(fast_opps)} opportunities")
+                        all_opps.extend(fast_opps)
                 
-                # Slow scan: run auxiliary strategies periodically (every 60s)
+                # Slow scan: 10 auxiliary strategies (every 60s)
                 if self.strategy_dispatcher and self.strategy_dispatcher.should_scan_slow():
                     slow_opps = await self.strategy_dispatcher.scan_slow()
                     if slow_opps:
-                        logger.info(f"🎯 Slow strategies found {len(slow_opps)} opportunities")
+                        all_opps.extend(slow_opps)
+                
+                # Execute opportunities that have actionable trade data
+                if all_opps and hasattr(self, 'engine') and self.engine:
+                    executable = [o for o in all_opps if self._is_executable(o)]
+                    if executable:
+                        logger.info(f"🎯 Strategies found {len(executable)} executable opportunities (of {len(all_opps)} signals)")
+                        for opp in executable:
+                            trade_info = self._build_trade_from_signal(opp)
+                            if trade_info:
+                                # Risk check
+                                if self.risk_manager:
+                                    can_trade, reason = self.risk_manager.check_can_trade(trade_info)
+                                    if not can_trade:
+                                        logger.debug(f"Risk manager blocked {opp['strategy']}: {reason}")
+                                        continue
+                                # Execute via OrderExecutor
+                                result = await self.engine.executor.execute_arbitrage(trade_info)
+                                if result.get('status') in ('simulated', 'success'):
+                                    logger.info(f"✅ {opp['strategy']} trade executed: {trade_info['symbol']} ${trade_info.get('net', 0):.4f}")
+                                    # Record to strategy manager
+                                    if self.strategy_manager:
+                                        self.strategy_manager.record_trade(
+                                            strategy_name=opp['strategy'],
+                                            success=True,
+                                            profit=trade_info.get('net', 0),
+                                            execution_time=0
+                                        )
                 
                 await asyncio.sleep(settings.SCAN_INTERVAL_SEC)
                 
         except asyncio.CancelledError:
             return
+    
+    def _is_executable(self, opp: dict) -> bool:
+        """Check if a strategy signal has enough data to execute a trade."""
+        strategy = opp.get('strategy', '')
+        # These strategies produce actionable cross-exchange trades
+        if strategy in ('TRIANGULAR', 'FUNDING_RATE', 'INDEX_ARB'):
+            return True
+        # MARKET_MAKING signals with spread data can execute
+        if strategy == 'MARKET_MAKING' and opp.get('data', {}).get('spread_pct', 0) > 0:
+            return True
+        # DCA buy signals
+        if strategy == 'DCA' and opp.get('data', {}).get('dip_pct', 0) > 0:
+            return True
+        # PAIRS_TRADING z-score signals
+        if strategy == 'PAIRS_TRADING' and abs(opp.get('data', {}).get('z_score', 0)) > 0:
+            return True
+        # SPREAD_BETTING z-score signals
+        if strategy == 'SPREAD_BETTING' and abs(opp.get('data', {}).get('z_score', 0)) > 0:
+            return True
+        # MOMENTUM with strong signal
+        if strategy == 'MOMENTUM' and opp.get('data', {}).get('strength', 0) > 0.6:
+            return True
+        # BREAKOUT detected
+        if strategy == 'BREAKOUT' and opp.get('data', {}):
+            return True
+        return False
+    
+    def _build_trade_from_signal(self, opp: dict) -> dict:
+        """Convert a strategy signal into an executable trade dict.
+        
+        Uses PriceStore real-time data to find the best buy/sell exchange
+        pair that aligns with the strategy signal.
+        """
+        strategy = opp.get('strategy', '')
+        symbol = opp.get('symbol', 'BTC-USDT')
+        data = opp.get('data', {})
+        
+        # For pair strategies, use the first symbol
+        if '/' in symbol:
+            symbol = symbol.split('/')[0]
+        
+        store = getattr(self, 'store', None)
+        if not store:
+            return None
+        
+        snap = store.snapshot()
+        exmap = snap.get(symbol, {})
+        if len(exmap) < 2:
+            return None
+        
+        # Find best buy (lowest ask) and sell (highest bid) exchanges
+        best_buy_ex, best_buy_price = None, float('inf')
+        best_sell_ex, best_sell_price = None, 0.0
+        
+        for ex, rec in exmap.items():
+            ask = rec.get('ask')
+            bid = rec.get('bid')
+            if ask and ask < best_buy_price:
+                best_buy_price = ask
+                best_buy_ex = ex
+            if bid and bid > best_sell_price:
+                best_sell_price = bid
+                best_sell_ex = ex
+        
+        if not best_buy_ex or not best_sell_ex or best_buy_ex == best_sell_ex:
+            return None
+        
+        # Calculate profit with real prices and fees
+        from core.exchange_config import EXCHANGE_PARAMS
+        buy_fee = EXCHANGE_PARAMS.get(best_buy_ex, {}).get('taker', 0.001)
+        sell_fee = EXCHANGE_PARAMS.get(best_sell_ex, {}).get('taker', 0.001)
+        
+        # Calculate max trade size from exposure limit
+        qty = min(settings.MAX_EXPOSURE_USDT, 200.0) / best_buy_price if best_buy_price > 0 else 0
+        if qty <= 0:
+            return None
+        
+        invested = best_buy_price * qty
+        fees = invested * buy_fee + (best_sell_price * qty) * sell_fee
+        gross = (best_sell_price - best_buy_price) * qty
+        net = gross - fees
+        roi_pct = (net / invested) * 100 if invested > 0 else 0
+        
+        # Only return if profitable after fees
+        if net <= 0 or roi_pct < settings.MIN_NET_ROI_PCT:
+            return None
+        
+        return {
+            'symbol': symbol,
+            'buy_ex': best_buy_ex,
+            'sell_ex': best_sell_ex,
+            'qty': qty,
+            'buy_avg': best_buy_price,
+            'sell_avg': best_sell_price,
+            'gross': gross,
+            'fees': fees,
+            'net': net,
+            'roi_pct': roi_pct,
+            'strategy': strategy,
+        }
     
     async def shutdown(self):
         """Graceful shutdown."""

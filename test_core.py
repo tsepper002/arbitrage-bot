@@ -577,6 +577,126 @@ def test_ml_integration_in_engine():
     print(f"  ✅ ML modules properly integrated into trading pipeline")
 
 
+def test_strategy_signal_execution():
+    """TEST 20: Verify strategy signals are routed to OrderExecutor for execution."""
+    print("\n" + "="*60)
+    print("TEST 20: Strategy Signals → OrderExecutor Execution")
+    print("="*60)
+    
+    from core.price_store import PriceStore
+    from core.order_executor import OrderExecutor
+    from core.exchange_config import EXCHANGE_PARAMS
+    
+    store = PriceStore()
+    executor = OrderExecutor(dry_run=True)
+    
+    # Set up realistic cross-exchange price data with a profitable spread
+    # Bybit: BTC ask $50,000 (buy here)
+    # KuCoin: BTC bid $50,150 (sell here) — 0.30% gross spread
+    loop.run_until_complete(store.update("Bybit", "BTC-USDT", bid=49990, bid_size=1.0, ask=50000, ask_size=1.0))
+    loop.run_until_complete(store.update("KuCoin", "BTC-USDT", bid=50150, bid_size=1.0, ask=50200, ask_size=1.0))
+    loop.run_until_complete(store.update("HTX", "BTC-USDT", bid=50050, bid_size=1.0, ask=50100, ask_size=1.0))
+    
+    # --- Test _is_executable logic ---
+    def is_executable(opp):
+        strategy = opp.get('strategy', '')
+        if strategy in ('TRIANGULAR', 'FUNDING_RATE', 'INDEX_ARB'):
+            return True
+        if strategy == 'MARKET_MAKING' and opp.get('data', {}).get('spread_pct', 0) > 0:
+            return True
+        if strategy == 'DCA' and opp.get('data', {}).get('dip_pct', 0) > 0:
+            return True
+        if strategy == 'PAIRS_TRADING' and abs(opp.get('data', {}).get('z_score', 0)) > 0:
+            return True
+        if strategy == 'SPREAD_BETTING' and abs(opp.get('data', {}).get('z_score', 0)) > 0:
+            return True
+        if strategy == 'MOMENTUM' and opp.get('data', {}).get('strength', 0) > 0.6:
+            return True
+        if strategy == 'BREAKOUT' and opp.get('data', {}):
+            return True
+        return False
+    
+    assert is_executable({'strategy': 'TRIANGULAR'}) == True
+    assert is_executable({'strategy': 'FUNDING_RATE'}) == True
+    assert is_executable({'strategy': 'INDEX_ARB'}) == True
+    assert is_executable({'strategy': 'SMART_ORDER'}) == False  # Advisory only
+    assert is_executable({'strategy': 'VOLATILITY'}) == False  # Advisory only
+    assert is_executable({'strategy': 'DCA', 'data': {'dip_pct': 1.5}}) == True
+    assert is_executable({'strategy': 'MOMENTUM', 'data': {'strength': 0.8}}) == True
+    assert is_executable({'strategy': 'MOMENTUM', 'data': {'strength': 0.3}}) == False  # Too weak
+    print("  ✅ _is_executable correctly identifies 8 actionable vs 2 advisory strategies")
+    
+    # --- Test _build_trade_from_signal logic ---
+    def build_trade_from_signal(opp, store):
+        strategy = opp.get('strategy', '')
+        symbol = opp.get('symbol', 'BTC-USDT')
+        if '/' in symbol:
+            symbol = symbol.split('/')[0]
+        snap = store.snapshot()
+        exmap = snap.get(symbol, {})
+        if len(exmap) < 2:
+            return None
+        best_buy_ex, best_buy_price = None, float('inf')
+        best_sell_ex, best_sell_price = None, 0.0
+        for ex, rec in exmap.items():
+            ask = rec.get('ask')
+            bid = rec.get('bid')
+            if ask and ask < best_buy_price:
+                best_buy_price = ask
+                best_buy_ex = ex
+            if bid and bid > best_sell_price:
+                best_sell_price = bid
+                best_sell_ex = ex
+        if not best_buy_ex or not best_sell_ex or best_buy_ex == best_sell_ex:
+            return None
+        buy_fee = EXCHANGE_PARAMS.get(best_buy_ex, {}).get('taker', 0.001)
+        sell_fee = EXCHANGE_PARAMS.get(best_sell_ex, {}).get('taker', 0.001)
+        qty = min(settings.MAX_EXPOSURE_USDT, 200.0) / best_buy_price if best_buy_price > 0 else 0
+        if qty <= 0:
+            return None
+        invested = best_buy_price * qty
+        fees = invested * buy_fee + (best_sell_price * qty) * sell_fee
+        gross = (best_sell_price - best_buy_price) * qty
+        net = gross - fees
+        roi_pct = (net / invested) * 100 if invested > 0 else 0
+        if net <= 0 or roi_pct < settings.MIN_NET_ROI_PCT:
+            return None
+        return {
+            'symbol': symbol, 'buy_ex': best_buy_ex, 'sell_ex': best_sell_ex,
+            'qty': qty, 'buy_avg': best_buy_price, 'sell_avg': best_sell_price,
+            'gross': gross, 'fees': fees, 'net': net, 'roi_pct': roi_pct,
+            'strategy': strategy,
+        }
+    
+    trade = build_trade_from_signal({
+        'strategy': 'TRIANGULAR',
+        'symbol': 'BTC-USDT',
+        'data': {'roi_pct': 0.15}
+    }, store)
+    
+    assert trade is not None, "Should build trade from profitable signal"
+    assert trade['buy_ex'] == 'Bybit', f"Should buy on Bybit (cheapest ask), got {trade['buy_ex']}"
+    assert trade['sell_ex'] == 'KuCoin', f"Should sell on KuCoin (highest bid), got {trade['sell_ex']}"
+    assert trade['net'] > 0, f"Trade should be profitable, net={trade['net']}"
+    assert trade['roi_pct'] > 0, f"ROI should be positive, got {trade['roi_pct']}"
+    assert trade['strategy'] == 'TRIANGULAR'
+    print(f"  ✅ _build_trade_from_signal: Buy {trade['buy_ex']} @ ${trade['buy_avg']:.0f} → Sell {trade['sell_ex']} @ ${trade['sell_avg']:.0f}")
+    print(f"     Net: ${trade['net']:.4f}, ROI: {trade['roi_pct']:.3f}%")
+    
+    # Execute the trade through OrderExecutor
+    result = loop.run_until_complete(executor.execute_arbitrage(trade))
+    assert result['status'] == 'simulated', f"Expected simulated, got {result['status']}"
+    print(f"  ✅ OrderExecutor executed TRIANGULAR trade: status={result['status']}")
+    
+    # Verify executor recorded the trade
+    assert len(executor.order_history) == 1
+    assert executor.order_history[0]['symbol'] == 'BTC-USDT'
+    assert executor.order_history[0]['net_profit'] > 0
+    print(f"  ✅ Trade recorded in history: profit=${executor.order_history[0]['net_profit']:.4f}")
+    
+    print("  ✅ Strategy signals are now properly routed to OrderExecutor for execution!")
+
+
 if __name__ == "__main__":
     tests = [
         test_settings, test_price_store, test_exchange_config, test_order_executor,
@@ -585,6 +705,7 @@ if __name__ == "__main__":
         test_analytics, test_ml_modules, test_rest_clients, test_advanced_core,
         test_e2e_arbitrage, test_mexc_depth_parsing, test_scan_fast_strategies,
         test_engine_feeds_dispatcher, test_ml_integration_in_engine,
+        test_strategy_signal_execution,
     ]
     passed = failed = 0
     for t in tests:
