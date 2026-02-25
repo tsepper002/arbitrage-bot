@@ -81,11 +81,20 @@ class TelegramBot:
                         return False
         
         except asyncio.TimeoutError:
-            logger.error("Telegram send timeout")
+            logger.warning("Telegram send timeout (network slow)")
+            return False
+        
+        except (ConnectionError, OSError, asyncio.CancelledError) as e:
+            # Network errors (ConnectionAbortedError, DNS failure, etc.) — clean one-line warning
+            logger.warning(f"Telegram network error: {type(e).__name__}: {e}")
             return False
         
         except Exception as e:
-            logger.exception(f"Telegram send error: {e}")
+            if 'aiohttp' in type(e).__module__:
+                # aiohttp connection errors — clean warning, no traceback
+                logger.warning(f"Telegram connection error: {type(e).__name__}: {e}")
+            else:
+                logger.exception(f"Telegram send error: {e}")
             return False
     
     # Automatic notifications
