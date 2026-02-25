@@ -703,10 +703,10 @@ class IntegratedArbitrageBot:
             # 10. Breakout Strategy
             self.breakout_strategy = BreakoutStrategy(
                 config={
-                    'lookback_period': 50,
-                    'volume_threshold': 1.5,
+                    'lookback_period': 20,
+                    'volume_threshold': 1.3,
                     'breakout_threshold': 0.001,
-                    'min_touches': 3
+                    'min_touches': 2
                 }
             )
             logger.info("✅ Breakout Strategy initialized")
@@ -765,7 +765,11 @@ class IntegratedArbitrageBot:
                 rest_clients=self.rest_clients,
                 balance_manager=self.balance_manager
             )
+            self.executor = executor
             
+            # Wire executor into triangular engine
+            if self.triangular_engine:
+                self.triangular_engine.order_executor = executor
             self.engine = ArbitrageEngine(
                 store=self.store,
                 executor=executor,
@@ -854,11 +858,10 @@ class IntegratedArbitrageBot:
                 logger.info("✅ Auto-rebalancer task started")
             
             # Triangular arbitrage task
-            # Note: Triangular engine is integrated into main engine, no separate scan needed
-            # if self.triangular_engine:
-            #     triangular_task = asyncio.create_task(self.triangular_engine.scan_loop(symbols))
-            #     self.tasks.append(triangular_task)
-            #     logger.info("✅ Triangular arbitrage task started")
+            if self.triangular_engine:
+                triangular_task = asyncio.create_task(self._triangular_scan_loop())
+                self.tasks.append(triangular_task)
+                logger.info("✅ Triangular arbitrage task started")
             
             # Strategy dispatcher slow scan task (scans 10 auxiliary strategies every 5 min)
             if self.strategy_dispatcher:
@@ -1135,6 +1138,29 @@ class IntegratedArbitrageBot:
         except asyncio.CancelledError:
             return
     
+    async def _triangular_scan_loop(self):
+        """Background task for triangular arbitrage scanning."""
+        try:
+            await asyncio.sleep(5)  # Wait for price data
+            while True:
+                try:
+                    opps = self.triangular_engine.scan_opportunities()
+                    if opps:
+                        for opp in opps:
+                            logger.info(
+                                f"🔺 TRI: {opp['route']} on {opp['exchange']} "
+                                f"profit={opp['profit_pct']:.3f}%"
+                            )
+                            if self.executor:
+                                await self.triangular_engine.execute_opportunity(opp)
+                            if self.strategy_dispatcher:
+                                self.strategy_dispatcher.strategy_stats['TRIANGULAR']['opportunities'] += 1
+                except Exception as e:
+                    logger.debug(f"Triangular scan error: {e}")
+                await asyncio.sleep(2)  # Scan every 2 seconds
+        except asyncio.CancelledError:
+            logger.info("Triangular scan loop cancelled")
+
     async def _strategy_dispatcher_loop(self):
         """Background task for running strategy dispatcher scans.
         

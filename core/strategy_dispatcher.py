@@ -689,25 +689,27 @@ class StrategyDispatcher:
         
         for symbol in symbols:
             prices = self._get_prices_list(symbol)
-            if len(prices) < 20:
+            if len(prices) < 15:
                 continue
             
-            # MomentumStrategy.analyze(symbol, prices) returns a MomentumSignal or None
-            if hasattr(momentum, 'analyze'):
-                signal = momentum.analyze(symbol, prices)
-                if signal:
-                    opportunities.append({
-                        'strategy': 'MOMENTUM',
-                        'type': 'trend',
-                        'symbol': symbol,
-                        'data': {
-                            'signal_type': signal.signal_type,
-                            'rsi': signal.rsi,
-                            'strength': signal.strength
-                        }
-                    })
-                    self.strategy_stats['MOMENTUM']['opportunities'] += 1
-                    logger.info(f"   📊 MOMENTUM: {symbol} {signal.signal_type} RSI={signal.rsi:.1f}")
+            try:
+                if hasattr(momentum, 'analyze'):
+                    signal = momentum.analyze(symbol, prices)
+                    if signal:
+                        opportunities.append({
+                            'strategy': 'MOMENTUM',
+                            'type': 'trend',
+                            'symbol': symbol,
+                            'data': {
+                                'signal_type': signal.signal_type,
+                                'rsi': signal.rsi,
+                                'strength': signal.strength
+                            }
+                        })
+                        self.strategy_stats['MOMENTUM']['opportunities'] += 1
+                        logger.info(f"   📊 MOMENTUM: {symbol} {signal.signal_type} RSI={signal.rsi:.1f}")
+            except Exception as e:
+                logger.debug(f"Momentum analyze error for {symbol}: {e}")
         
         return opportunities
     
@@ -724,26 +726,27 @@ class StrategyDispatcher:
         
         for symbol in symbols:
             prices = self._get_prices_list(symbol)
-            if len(prices) < 20:
+            if len(prices) < 15:
                 continue
             
             current_price = prices[-1]
-            # Use price change as volume proxy (we don't have real volume data)
             prev_price = prices[-2] if len(prices) >= 2 else 0
             volume_proxy = abs(current_price - prev_price) / prev_price if prev_price > 0 else 0
             
-            # BreakoutStrategy.analyze(symbol, price, volume) returns signal dict or None
-            if hasattr(breakout, 'analyze'):
-                signal = breakout.analyze(symbol, current_price, volume_proxy)
-                if signal:
-                    opportunities.append({
-                        'strategy': 'BREAKOUT',
-                        'type': 'technical',
-                        'symbol': symbol,
-                        'data': signal
-                    })
-                    self.strategy_stats['BREAKOUT']['opportunities'] += 1
-                    logger.info(f"   📊 BREAKOUT: {symbol} {signal.get('type', 'unknown')} @ {current_price:.2f}")
+            try:
+                if hasattr(breakout, 'analyze'):
+                    signal = breakout.analyze(symbol, current_price, volume_proxy)
+                    if signal:
+                        opportunities.append({
+                            'strategy': 'BREAKOUT',
+                            'type': 'technical',
+                            'symbol': symbol,
+                            'data': signal
+                        })
+                        self.strategy_stats['BREAKOUT']['opportunities'] += 1
+                        logger.info(f"   📊 BREAKOUT: {symbol} {signal.get('type', 'unknown')} @ {current_price:.2f}")
+            except Exception as e:
+                logger.debug(f"Breakout analyze error for {symbol}: {e}")
         
         return opportunities
     

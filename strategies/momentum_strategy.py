@@ -60,16 +60,19 @@ class MomentumStrategy:
     
     def analyze(self, symbol: str, prices: List[float]) -> Optional[MomentumSignal]:
         """Анализ и генерация сигнала"""
-        if len(prices) < 20:
+        if len(prices) < 15:
             return None
         
         rsi = self.calculate_rsi(prices)
         
         signal_type = None
-        if rsi < 30:
+        strength = 0.5
+        if rsi < 35:
             signal_type = 'BUY'
-        elif rsi > 70:
+            strength = min(1.0, (35 - rsi) / 20)
+        elif rsi > 65:
             signal_type = 'SELL'
+            strength = min(1.0, (rsi - 65) / 20)
         
         if signal_type is None:
             return None
@@ -78,7 +81,7 @@ class MomentumStrategy:
             timestamp=datetime.now(),
             symbol=symbol,
             signal_type=signal_type,
-            strength=0.7,
+            strength=strength,
             momentum_score=0.8,
             rsi=rsi,
             macd=0.0,

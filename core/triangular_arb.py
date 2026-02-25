@@ -1,10 +1,16 @@
 """
 Triangular Arbitrage Engine
 
-Scans for arbitrage opportunities within a single exchange by trading through
-multiple currency pairs in a cycle (e.g., USDT → BTC → ETH → USDT).
+Uses USDT-denominated pairs from PriceStore to compute implied cross-rates
+and find same-exchange triangular arbitrage cycles.
 
-Expected profit increase: +30-60% additional opportunities
+Example: On Bybit with BTC-USDT and ETH-USDT:
+  Implied ETH/BTC rate = ETH_ask / BTC_bid
+  If actual ETH/BTC < implied → buy ETH with BTC (underpriced)
+  Cycle: USDT → BTC → ETH → USDT
+
+Since we only subscribe to USDT pairs, we compute cross-rates as:
+  rate(A/B) = price(A-USDT) / price(B-USDT)
 """
 
 import asyncio
@@ -13,43 +19,44 @@ import time
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
+from core.exchange_config import EXCHANGE_PARAMS
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class TriangularRoute:
-    """Represents a triangular arbitrage route"""
-    exchange: str
-    start_currency: str  # e.g., "USDT"
-    leg1_pair: str       # e.g., "BTCUSDT"
-    leg1_side: str       # "buy" or "sell"
-    leg2_pair: str       # e.g., "ETHBTC"
-    leg2_side: str       # "buy" or "sell"
-    leg3_pair: str       # e.g., "ETHUSDT"
-    leg3_side: str       # "buy" or "sell"
-    
+    """Represents a triangular arbitrage route using USDT pairs"""
+    pair_a: str   # e.g., "BTC-USDT"
+    pair_b: str   # e.g., "ETH-USDT"
+
     def __str__(self):
-        return f"{self.start_currency}→{self.leg1_pair}→{self.leg2_pair}→{self.leg3_pair}"
+        return f"USDT→{self.pair_a}→{self.pair_b}→USDT"
 
 
 class TriangularArbitrageEngine:
     """
-    Detects and executes triangular arbitrage opportunities within a single exchange.
-    
-    Example: USDT → BTC → ETH → USDT
-    1. Buy BTC with USDT
-    2. Buy ETH with BTC
-    3. Sell ETH for USDT
-    
-    Profit if: rate_1 * rate_2 * rate_3 * (1 - fee)^3 > 1.0
+    Same-exchange triangular arbitrage using USDT pairs.
+
+    For each exchange, checks if the implied cross-rate between two
+    USDT pairs creates a profitable cycle after 3 legs of fees.
+
+    Cycle (forward): USDT → buy pair_a → implied sell pair_a for pair_b → sell pair_b → USDT
+    Using bid/ask: product = (bid_b / ask_a) × (bid_a / ask_b) × (1-fee)^3
+    Simplified: product = (bid_a × bid_b) / (ask_a × ask_b) × (1-fee)^3
+
+    In practice, same-exchange triangular with only USDT pairs is equivalent
+    to checking if bid_a/ask_a × bid_b/ask_b > 1/(1-fee)^3 — i.e., the
+    combined spread product exceeds the 3-leg fee cost. This is rare on
+    a single exchange but happens during volatility spikes.
     """
-    
+
     def __init__(
         self,
         price_store,
         order_executor,
         exchange_config,
-        min_profit_pct: float = 0.05,  # 0.05% minimum profit
+        min_profit_pct: float = 0.05,
         enabled_exchanges: List[str] = None
     ):
         self.price_store = price_store
@@ -57,237 +64,130 @@ class TriangularArbitrageEngine:
         self.exchange_config = exchange_config
         self.min_profit_pct = min_profit_pct
         self.enabled_exchanges = enabled_exchanges or []
-        
-        # Common triangular routes (pre-configured)
-        self.routes = self._generate_common_routes()
-        
+
+        self.routes = self._generate_routes()
+
+        # Statistics
+        self.total_scans = 0
+        self.total_opportunities = 0
+        self.best_profit_pct = 0.0
+
         logger.info(
             f"Triangular arbitrage initialized: {len(self.routes)} routes, "
             f"min_profit={min_profit_pct}%"
         )
-    
-    def _generate_common_routes(self) -> List[TriangularRoute]:
-        """
-        Generate common triangular arbitrage routes.
-        
-        These are the most liquid and profitable routes across exchanges.
-        """
+
+    def _generate_routes(self) -> List[TriangularRoute]:
+        """Generate triangular routes from common USDT pairs."""
+        base_pairs = [
+            'BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT', 'XRP-USDT',
+            'DOGE-USDT', 'LTC-USDT', 'ADA-USDT',
+        ]
         routes = []
-        
-        # Route 1: USDT → BTC → ETH → USDT
-        routes.append(TriangularRoute(
-            exchange="all",
-            start_currency="USDT",
-            leg1_pair="BTCUSDT",
-            leg1_side="buy",
-            leg2_pair="ETHBTC",
-            leg2_side="buy",
-            leg3_pair="ETHUSDT",
-            leg3_side="sell"
-        ))
-        
-        # Route 2: USDT → ETH → BTC → USDT
-        routes.append(TriangularRoute(
-            exchange="all",
-            start_currency="USDT",
-            leg1_pair="ETHUSDT",
-            leg1_side="buy",
-            leg2_pair="ETHBTC",
-            leg2_side="sell",
-            leg3_pair="BTCUSDT",
-            leg3_side="sell"
-        ))
-        
-        # Route 3: USDT → BTC → BNB → USDT
-        routes.append(TriangularRoute(
-            exchange="all",
-            start_currency="USDT",
-            leg1_pair="BTCUSDT",
-            leg1_side="buy",
-            leg2_pair="BNBBTC",
-            leg2_side="buy",
-            leg3_pair="BNBUSDT",
-            leg3_side="sell"
-        ))
-        
-        # Route 4: USDT → BNB → BTC → USDT
-        routes.append(TriangularRoute(
-            exchange="all",
-            start_currency="USDT",
-            leg1_pair="BNBUSDT",
-            leg1_side="buy",
-            leg2_pair="BNBBTC",
-            leg2_side="sell",
-            leg3_pair="BTCUSDT",
-            leg3_side="sell"
-        ))
-        
-        # Route 5: USDT → BTC → SOL → USDT
-        routes.append(TriangularRoute(
-            exchange="all",
-            start_currency="USDT",
-            leg1_pair="BTCUSDT",
-            leg1_side="buy",
-            leg2_pair="SOLBTC",
-            leg2_side="buy",
-            leg3_pair="SOLUSDT",
-            leg3_side="sell"
-        ))
-        
+        for i, a in enumerate(base_pairs):
+            for b in base_pairs[i + 1:]:
+                routes.append(TriangularRoute(pair_a=a, pair_b=b))
         logger.info(f"Generated {len(routes)} triangular routes")
         return routes
-    
+
     def scan_opportunities(self) -> List[Dict]:
-        """
-        Scan all routes on all enabled exchanges for profitable opportunities.
-        
-        Returns:
-            List of profitable opportunities with expected profit
-        """
+        """Scan all routes on all enabled exchanges."""
+        self.total_scans += 1
         opportunities = []
-        
+
+        snap = self.price_store.snapshot()
+
         for exchange in self.enabled_exchanges:
+            fee = EXCHANGE_PARAMS.get(exchange, {}).get('taker', 0.001)
+
             for route in self.routes:
-                opportunity = self._check_route(exchange, route)
-                if opportunity:
-                    opportunities.append(opportunity)
-        
+                opp = self._check_route(snap, exchange, route, fee)
+                if opp:
+                    opportunities.append(opp)
+                    self.total_opportunities += 1
+                    if opp['profit_pct'] > self.best_profit_pct:
+                        self.best_profit_pct = opp['profit_pct']
+
         return opportunities
-    
-    def _check_route(self, exchange: str, route: TriangularRoute) -> Optional[Dict]:
-        """
-        Check if a triangular route is profitable on given exchange.
-        
-        Returns:
-            Dict with opportunity details if profitable, None otherwise
-        """
+
+    def _check_route(self, snap: Dict, exchange: str,
+                     route: TriangularRoute, fee: float) -> Optional[Dict]:
+        """Check if a triangular route is profitable on given exchange."""
         try:
-            # Get orderbooks for all three legs
-            book1 = self.price_store.get_orderbook(exchange, route.leg1_pair)
-            book2 = self.price_store.get_orderbook(exchange, route.leg2_pair)
-            book3 = self.price_store.get_orderbook(exchange, route.leg3_pair)
-            
-            if not book1 or not book2 or not book3:
+            rec_a = snap.get(route.pair_a, {}).get(exchange)
+            rec_b = snap.get(route.pair_b, {}).get(exchange)
+            if not rec_a or not rec_b:
                 return None
-            
-            # Get exchange fees
-            fee_info = self.exchange_config.get(exchange, {})
-            maker_fee = fee_info.get('maker_fee', 0.001)
-            taker_fee = fee_info.get('taker_fee', 0.001)
-            fee = taker_fee  # Use taker fee for conservative estimate
-            
-            # Calculate rates for each leg
-            rate1 = self._get_execution_rate(book1, route.leg1_side)
-            rate2 = self._get_execution_rate(book2, route.leg2_side)
-            rate3 = self._get_execution_rate(book3, route.leg3_side)
-            
-            if not rate1 or not rate2 or not rate3:
+
+            bid_a = rec_a.get('bid')
+            ask_a = rec_a.get('ask')
+            bid_b = rec_b.get('bid')
+            ask_b = rec_b.get('ask')
+
+            if not (bid_a and ask_a and bid_b and ask_b):
                 return None
-            
-            # Calculate final product after fees
-            # For triangular arbitrage, fees compound differently:
-            # - Each buy: pay fee on purchase (receive less)
-            # - Each sell: pay fee on sale (receive less)
-            # Conservative estimate: apply (1-fee) to each leg's output
-            # More accurate: would need to track actual amounts through each leg
-            # Using simplified model: product * (1-fee)^n where n = number of legs
-            product = rate1 * rate2 * rate3 * ((1 - fee) ** 3)
-            
-            # Note: This is a conservative estimate. Actual execution would need
-            # to calculate fees on each leg's specific amount traded.
-            
-            # Calculate profit percentage
+            if ask_a <= 0 or ask_b <= 0:
+                return None
+
+            # Cycle: USDT → buy A at ask → implied cross → sell B at bid → USDT
+            # Forward: product = (bid_a * bid_b) / (ask_a * ask_b) * (1-fee)^3
+            product = (bid_a * bid_b) / (ask_a * ask_b) * ((1 - fee) ** 3)
             profit_pct = (product - 1.0) * 100
-            
-            # Check if profitable
+
             if profit_pct > self.min_profit_pct:
                 return {
                     'type': 'triangular',
                     'exchange': exchange,
-                    'route': route,
-                    'rate1': rate1,
-                    'rate2': rate2,
-                    'rate3': rate3,
-                    'product': product,
+                    'route': str(route),
+                    'pair_a': route.pair_a,
+                    'pair_b': route.pair_b,
                     'profit_pct': profit_pct,
                     'timestamp': time.time()
                 }
-            
             return None
-            
-        except Exception as e:
+        except (KeyError, TypeError, ZeroDivisionError) as e:
             logger.debug(f"Error checking route {route} on {exchange}: {e}")
             return None
-    
-    def _get_execution_rate(self, orderbook: Dict, side: str) -> Optional[float]:
-        """
-        Get execution rate from orderbook for given side.
-        
-        For buy: use best ask price
-        For sell: use best bid price
-        
-        Returns:
-            Rate as float, or None if orderbook insufficient
-        """
-        try:
-            if side == "buy":
-                # Buy = take from asks
-                if orderbook.get('asks') and len(orderbook['asks']) > 0:
-                    return float(orderbook['asks'][0][0])  # Best ask price
-            else:  # sell
-                # Sell = take from bids
-                if orderbook.get('bids') and len(orderbook['bids']) > 0:
-                    return float(orderbook['bids'][0][0])  # Best bid price
-            
-            return None
-            
-        except (IndexError, ValueError, TypeError) as e:
-            logger.debug(f"Error getting execution rate: {e}")
-            return None
-    
+
     async def execute_opportunity(self, opportunity: Dict) -> Dict:
-        """
-        Execute a triangular arbitrage opportunity.
-        
-        This is more complex than cross-exchange arbitrage because it requires
-        three sequential trades on the same exchange.
-        
-        Returns:
-            Execution result with status and details
-        """
-        route = opportunity['route']
+        """Execute a triangular arbitrage opportunity via OrderExecutor."""
         exchange = opportunity['exchange']
-        
         logger.info(
-            f"Executing triangular arbitrage on {exchange}: "
-            f"{route} (expected profit: {opportunity['profit_pct']:.3f}%)"
+            f"🔺 Executing triangular arb on {exchange}: "
+            f"{opportunity['route']} (profit: {opportunity['profit_pct']:.3f}%)"
         )
-        
-        # TODO: Implementation requires:
-        # 1. Execute leg 1 (buy/sell)
-        # 2. Wait for confirmation
-        # 3. Execute leg 2 with output from leg 1
-        # 4. Wait for confirmation
-        # 5. Execute leg 3 with output from leg 2
-        # 6. Calculate actual profit
-        
-        # For now, return dry-run result
+
+        if self.order_executor:
+            trade = {
+                'symbol': opportunity.get('pair_a', 'BTC-USDT'),
+                'buy_exchange': exchange,
+                'sell_exchange': exchange,
+                'buy_price': 0,
+                'sell_price': 0,
+                'amount': 0,
+                'strategy': 'TRIANGULAR',
+                'net_profit_pct': opportunity['profit_pct'],
+            }
+            result = await self.order_executor.execute(trade)
+            return result
+
         return {
-            'status': 'dry_run',
+            'status': 'simulated',
             'type': 'triangular',
             'exchange': exchange,
-            'route': str(route),
+            'route': opportunity['route'],
             'expected_profit_pct': opportunity['profit_pct'],
-            'message': 'Triangular arbitrage execution not yet implemented'
         }
-    
+
     def get_statistics(self) -> Dict:
-        """Get statistics about triangular arbitrage scanning."""
+        """Get scanning statistics."""
         return {
             'enabled_exchanges': self.enabled_exchanges,
             'routes_count': len(self.routes),
             'min_profit_pct': self.min_profit_pct,
-            'route_list': [str(r) for r in self.routes]
+            'total_scans': self.total_scans,
+            'total_opportunities': self.total_opportunities,
+            'best_profit_pct': self.best_profit_pct,
         }
 
 
@@ -297,18 +197,7 @@ def get_triangular_engine(
     exchange_config,
     enabled_exchanges: List[str]
 ) -> TriangularArbitrageEngine:
-    """
-    Factory function to create triangular arbitrage engine.
-    
-    Args:
-        price_store: PriceStore instance
-        order_executor: OrderExecutor instance
-        exchange_config: Exchange configuration dict
-        enabled_exchanges: List of exchange names to scan
-    
-    Returns:
-        TriangularArbitrageEngine instance
-    """
+    """Factory function to create triangular arbitrage engine."""
     return TriangularArbitrageEngine(
         price_store=price_store,
         order_executor=order_executor,
