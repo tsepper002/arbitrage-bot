@@ -12,6 +12,7 @@ arbitrage on a $20 account where trade frequency is low.
 """
 import asyncio
 import json
+import socket
 import time
 import logging
 
@@ -39,6 +40,8 @@ class MEXC:
         "https://www.mexc.com/api/v3/depth",
     ]
     REST_POLL_INTERVAL = 1.5  # seconds between REST polls
+    REST_TIMEOUT = 5  # seconds per HTTP request
+    MAX_DNS_BACKOFF = 60.0  # max seconds between retries on DNS failure
 
     def __init__(self, store, symbols):
         self.store = store
@@ -84,7 +87,7 @@ class MEXC:
                 url,
                 ping_interval=20,
                 ping_timeout=10,
-                close_timeout=5,
+                close_timeout=self.REST_TIMEOUT,
             ) as ws:
                 log.info(f"MEXC WS connected to {url}")
                 self._backoff = 1.0
@@ -187,15 +190,23 @@ class MEXC:
 
     def _is_dns_error(self, exc):
         """Check if exception is a DNS resolution failure."""
+        # Check exception type first (most reliable)
+        if isinstance(exc, socket.gaierror):
+            return True
+        # Check wrapped exceptions (aiohttp wraps socket errors)
+        cause = getattr(exc, '__cause__', None) or getattr(exc, '__context__', None)
+        if isinstance(cause, socket.gaierror):
+            return True
+        # Fallback: check error message for DNS keywords
         err_str = str(exc).lower()
-        return "dns" in err_str or "name resolution" in err_str or "getaddrinfo" in err_str or "contact dns" in err_str
+        return "dns" in err_str or "name resolution" in err_str or "getaddrinfo" in err_str
 
     async def _try_alternative_urls(self, session):
         """Try each REST URL until one works. Returns working URL or None."""
         for url_base in self.REST_URLS:
             try:
                 test_url = f"{url_base}?symbol=BTCUSDT&limit=1"
-                async with session.get(test_url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                async with session.get(test_url, timeout=aiohttp.ClientTimeout(total=self.REST_TIMEOUT)) as resp:
                     if resp.status == 200:
                         log.info(f"✅ MEXC: Found working API domain: {url_base}")
                         return url_base
@@ -217,7 +228,7 @@ class MEXC:
                         break
                     try:
                         url = f"{self._active_rest_url}?symbol={mexc_sym}&limit=5"
-                        async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                        async with session.get(url, timeout=aiohttp.ClientTimeout(total=self.REST_TIMEOUT)) as resp:
                             if resp.status == 200:
                                 data = await resp.json()
                                 bids_raw = data.get("bids", [])
@@ -260,11 +271,11 @@ class MEXC:
                             self._dns_backoff = 1.5
                             continue  # Retry immediately with new URL
                         else:
-                            log.warning(f"MEXC: All API domains unreachable (DNS error). Retrying in {self._dns_backoff:.0f}s")
+                            log.warning(f"MEXC: All API domains unreachable. Retrying in {self._dns_backoff:.0f}s")
                     else:
                         log.debug(f"MEXC: DNS still failing, retry in {self._dns_backoff:.0f}s")
                     await asyncio.sleep(self._dns_backoff)
-                    self._dns_backoff = min(self._dns_backoff * 2, 60.0)
+                    self._dns_backoff = min(self._dns_backoff * 2, self.MAX_DNS_BACKOFF)
                 else:
                     consecutive_errors += 1
                     if consecutive_errors <= 3:
@@ -292,7 +303,7 @@ class MEXC:
                         None,
                         lambda u=url: urllib.request.urlopen(
                             urllib.request.Request(u, headers={"User-Agent": "arbitrage-bot/1.0"}),
-                            timeout=5
+                            timeout=self.REST_TIMEOUT
                         ).read()
                     )
                     data = json.loads(resp_bytes)
@@ -332,7 +343,7 @@ class MEXC:
                                 None,
                                 lambda u=test_url: urllib.request.urlopen(
                                     urllib.request.Request(u, headers={"User-Agent": "arbitrage-bot/1.0"}),
-                                    timeout=5
+                                    timeout=self.REST_TIMEOUT
                                 ).read()
                             )
                             self._active_rest_url = url_base
@@ -349,7 +360,7 @@ class MEXC:
                 else:
                     log.debug(f"MEXC: DNS still failing, retry in {self._dns_backoff:.0f}s")
                 await asyncio.sleep(self._dns_backoff)
-                self._dns_backoff = min(self._dns_backoff * 2, 60.0)
+                self._dns_backoff = min(self._dns_backoff * 2, self.MAX_DNS_BACKOFF)
             else:
                 consecutive_errors += 1
                 if consecutive_errors <= 3:

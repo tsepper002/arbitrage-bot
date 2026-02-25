@@ -3,7 +3,7 @@
 Comprehensive tests for the unified arbitrage bot.
 Tests all 200+ modules, 14 strategies, E2E flow.
 """
-import sys, os, asyncio, time, glob
+import sys, os, asyncio, time, glob, socket
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
@@ -964,6 +964,7 @@ def test_dry_run_records_success():
     # Test DNS error detection
     assert mexc._is_dns_error(Exception("Could not contact DNS servers"))
     assert mexc._is_dns_error(Exception("Name resolution failed"))
+    assert mexc._is_dns_error(socket.gaierror("DNS lookup failed"))
     assert not mexc._is_dns_error(Exception("Connection refused"))
     print(f"  ✅ MEXC REST: {len(mexc.REST_URLS)} fallback domains, DNS error detection works")
 
