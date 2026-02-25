@@ -365,7 +365,7 @@ class StrategyDispatcher:
         deviation = abs(mid - avg) / avg if avg > 0 else 0
         
         # Signal when price is moving away from center (grid needs rebalancing)
-        if deviation > range_pct * 0.3:
+        if deviation > range_pct * 0.1:
             opportunities.append({
                 'strategy': 'GRID_TRADING',
                 'type': 'rebalance',
@@ -409,7 +409,7 @@ class StrategyDispatcher:
         return opportunities
     
     async def _scan_market_making(self) -> List[Dict[str, Any]]:
-        """Market Making: check if spread is wide enough for profitability."""
+        """Market Making: check if cross-exchange spread is wide enough."""
         self.strategy_stats['MARKET_MAKING']['calls'] += 1
         opportunities = []
         
@@ -417,22 +417,35 @@ class StrategyDispatcher:
         if not mm:
             return opportunities
         
-        symbol = getattr(mm, 'symbol', 'BTC-USDT')
-        spread = self._get_spread(symbol)
-        if spread is None:
+        store = self._get_price_store()
+        if not store:
             return opportunities
+        snap = store.snapshot()
         
-        # Market making is profitable when spread > 2x taker fee
-        min_spread = getattr(mm, 'spread_pct', 0.002)
-        if spread > min_spread:
-            opportunities.append({
-                'strategy': 'MARKET_MAKING',
-                'type': 'liquidity',
-                'symbol': symbol,
-                'data': {'spread_pct': spread * 100, 'min_spread_pct': min_spread * 100}
-            })
-            self.strategy_stats['MARKET_MAKING']['opportunities'] += 1
-            logger.info(f"   📊 MM: {symbol} spread {spread*100:.3f}% > min {min_spread*100:.3f}%")
+        # Check cross-exchange spread for each symbol
+        for symbol, exmap in snap.items():
+            if len(exmap) < 2:
+                continue
+            best_bid, best_ask = 0.0, float('inf')
+            bid_ex, ask_ex = '', ''
+            for ex, rec in exmap.items():
+                b, a = rec.get("bid", 0), rec.get("ask", 0)
+                if b and b > best_bid:
+                    best_bid, bid_ex = b, ex
+                if a and a < best_ask:
+                    best_ask, ask_ex = a, ex
+            if best_bid > best_ask and bid_ex != ask_ex:
+                spread_pct = (best_bid - best_ask) / best_ask
+                if spread_pct > 0.0005:  # > 0.05% cross-exchange spread
+                    opportunities.append({
+                        'strategy': 'MARKET_MAKING',
+                        'type': 'cross_spread',
+                        'symbol': symbol,
+                        'data': {'spread_pct': spread_pct * 100, 'bid_ex': bid_ex, 'ask_ex': ask_ex}
+                    })
+                    self.strategy_stats['MARKET_MAKING']['opportunities'] += 1
+                    logger.info(f"   📊 MM: {symbol} cross-spread {spread_pct*100:.3f}% ({ask_ex}→{bid_ex})")
+                    break  # One signal per scan
         
         return opportunities
     
@@ -461,7 +474,7 @@ class StrategyDispatcher:
             return opportunities
         
         # Feed ratio into strategy's internal state if possible
-        entry_z = getattr(pairs, 'entry_z', 2.0)
+        entry_z = getattr(pairs, 'entry_z', 1.5)
         
         mean_ratio = sum(ratios) / len(ratios)
         std_ratio = (sum((r - mean_ratio) ** 2 for r in ratios) / len(ratios)) ** 0.5
@@ -634,12 +647,12 @@ class StrategyDispatcher:
         prices2 = self._get_prices_list(pair2)
         
         min_len = min(len(prices1), len(prices2))
-        if min_len < 30:
+        if min_len < 20:
             return opportunities
         
         # Calculate spread (difference ratio, skip zero prices)
         spreads = [(p1 - p2) / p1 for p1, p2 in zip(prices1[-min_len:], prices2[-min_len:]) if p1 > 0]
-        if len(spreads) < 30:
+        if len(spreads) < 20:
             return opportunities
         
         mean_s = sum(spreads) / len(spreads)
@@ -650,7 +663,7 @@ class StrategyDispatcher:
         else:
             z = 0
         
-        entry_z = getattr(spread_strat, 'entry_z_score', 2.0)
+        entry_z = getattr(spread_strat, 'entry_z_score', 1.5)
         if abs(z) > entry_z:
             opportunities.append({
                 'strategy': 'SPREAD_BETTING',
@@ -711,7 +724,7 @@ class StrategyDispatcher:
         
         for symbol in symbols:
             prices = self._get_prices_list(symbol)
-            if len(prices) < 50:
+            if len(prices) < 20:
                 continue
             
             current_price = prices[-1]
