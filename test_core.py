@@ -800,9 +800,10 @@ def test_mexc_rest_fallback():
     assert levels2[0][0] == (3000.0, 5.0)
     print(f"  ✅ _parse_levels: array format → bid={levels2[0][0]}")
 
-    # Test REST URL — exact match to avoid substring false positives
-    assert mexc.REST_URL == "https://api.mexc.com/api/v3/depth", f"REST URL wrong: {mexc.REST_URL}"
-    print(f"  ✅ REST fallback URL: {mexc.REST_URL}")
+    # Test REST URLs — primary + fallback domains
+    assert "https://api.mexc.com/api/v3/depth" in mexc.REST_URLS, f"Primary REST URL missing"
+    assert len(mexc.REST_URLS) >= 2, f"Need at least 2 REST URLs for DNS fallback"
+    print(f"  ✅ REST URLs: {len(mexc.REST_URLS)} domains ({mexc._active_rest_url})")
 
     # Test _signal_confidence (from IntegratedArbitrageBot)
     # We test the logic inline since we can't easily instantiate the full bot
@@ -958,8 +959,13 @@ def test_dry_run_records_success():
     from exchanges.mexc import MEXC
     mexc = MEXC(store, ['BTC-USDT'])
     assert mexc.REST_POLL_INTERVAL == 1.5
-    assert mexc.REST_URL == "https://api.mexc.com/api/v3/depth"
-    print(f"  ✅ MEXC REST pacing: 100ms between symbols, {mexc.REST_POLL_INTERVAL}s between cycles")
+    assert "https://api.mexc.com/api/v3/depth" in mexc.REST_URLS
+    assert mexc._active_rest_url == "https://api.mexc.com/api/v3/depth"
+    # Test DNS error detection
+    assert mexc._is_dns_error(Exception("Could not contact DNS servers"))
+    assert mexc._is_dns_error(Exception("Name resolution failed"))
+    assert not mexc._is_dns_error(Exception("Connection refused"))
+    print(f"  ✅ MEXC REST: {len(mexc.REST_URLS)} fallback domains, DNS error detection works")
 
 
 def test_triangular_engine():
