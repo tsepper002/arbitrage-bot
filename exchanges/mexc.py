@@ -226,7 +226,6 @@ class MEXC:
                     break
                 try:
                     url = f"{self.REST_URL}?symbol={mexc_sym}&limit=5"
-                    req = urllib.request.Request(url, headers={"User-Agent": "arbitrage-bot/1.0"})
                     # Run blocking HTTP in thread to avoid blocking event loop
                     loop = asyncio.get_event_loop()
                     resp_bytes = await loop.run_in_executor(
