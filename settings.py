@@ -183,7 +183,7 @@ CPU_CHECK_INTERVAL_SEC = _get_env_float("ARB_CPU_CHECK_INTERVAL", 5.0)
 CPU_HIGH_THRESHOLD = _get_env_float("ARB_CPU_HIGH_THRESHOLD", 60.0)  # Reduce activity above this
 CPU_CRITICAL_THRESHOLD = _get_env_float("ARB_CPU_CRITICAL_THRESHOLD", 80.0)  # Emergency mode
 CPU_LOW_THRESHOLD = _get_env_float("ARB_CPU_LOW_THRESHOLD", 30.0)  # Can increase activity
-MEMORY_MAX_MB = _get_env_int("ARB_MEMORY_MAX_MB", 200)  # Target max memory usage
+MEMORY_MAX_MB = _get_env_int("ARB_MEMORY_MAX_MB", 512)  # Target max memory usage
 
 # ============================================================================
 # AUTO-REBALANCING (Strategy A3)
