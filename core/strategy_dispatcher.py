@@ -285,7 +285,7 @@ class StrategyDispatcher:
                                 'type': 'limit_opportunity',
                                 'symbol': symbol,
                                 'exchange': ex,
-                                'data': {'spread_pct': spread_pct, 'ratio': spread_pct / fee_pct}
+                                'data': {'spread_pct': spread_pct, 'ratio': spread_pct / fee_pct if fee_pct > 0 else spread_pct / 0.01}
                             })
                             self.strategy_stats['SMART_ORDER']['signals'] += 1
                             smart_order_signal_found = True
