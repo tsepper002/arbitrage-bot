@@ -198,6 +198,7 @@ class ArbitrageEngine:
         # --- PER-SYMBOL ML OBSERVATION (runs every scan, regardless of spreads) ---
         # Compute representative mid-price from first exchange with valid data
         _mid_price = 0.0
+        _cached_regime = None  # Cache regime for use in pair loop
         for _ex in exchanges:
             _d = exmap.get(_ex, {})
             _b = _d.get("bid", 0) or 0
@@ -213,10 +214,10 @@ class ArbitrageEngine:
                     self.volatility_forecaster.observe(symbol, _mid_price)
                 except Exception:
                     pass
-            # Market Regime Detector — observe every symbol every scan
+            # Market Regime Detector — observe and cache regime for pair loop
             if self.market_regime_detector:
                 try:
-                    regime = self.market_regime_detector.detect(symbol, _mid_price)
+                    _cached_regime = self.market_regime_detector.detect(symbol, _mid_price)
                 except Exception:
                     pass
             # Price history for pattern recognition / market adaptive
@@ -383,18 +384,13 @@ class ArbitrageEngine:
                     except (AttributeError, ValueError, TypeError) as e:
                         logger.debug(f"ML spread predictor error: {e}")
                 
-                # P5: Market Regime Detection — adjust min ROI based on market conditions
-                # (detect() called per-symbol above; here we just READ the cached regime)
+                # P5: Market Regime Detection — adjust min ROI based on cached regime
                 regime_min_roi = self.min_net_pct
-                if self.market_regime_detector:
-                    try:
-                        regime = self.market_regime_detector.detect(symbol, _mid_price) if _mid_price > 0 else 'CALM'
-                        if regime == 'VOLATILE':
-                            regime_min_roi = self.min_net_pct * 1.5
-                        elif regime == 'CALM':
-                            regime_min_roi = self.min_net_pct * 0.8
-                    except (AttributeError, ValueError, TypeError) as e:
-                        logger.debug(f"Market regime detection error: {e}")
+                if _cached_regime:
+                    if _cached_regime == 'VOLATILE':
+                        regime_min_roi = self.min_net_pct * 1.5
+                    elif _cached_regime == 'CALM':
+                        regime_min_roi = self.min_net_pct * 0.8
                 
                 # P6: Fee Optimizer — record trade fee for VIP tier analysis
                 if self.fee_optimizer:

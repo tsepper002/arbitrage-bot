@@ -1162,14 +1162,14 @@ def test_ml_observation_outside_prefilter():
     engine.ml_spread_predictor = spread_pred
     
     # Set up data with SMALL spread (0.01%) — well below fees (0.20%)
-    # This means the prefilter at line 243 will SKIP the pair
+    # The prefilter in the pair loop will SKIP the pair — but ML observation runs before it
     for i in range(25):
         price = 50000 + i * 10
         loop.run_until_complete(store.update_levels("Bybit", "BTC-USDT",
             bids_levels=[(price - 2.5, 1.0)], asks_levels=[(price + 2.5, 1.0)]))
         loop.run_until_complete(store.update_levels("KuCoin", "BTC-USDT",
             bids_levels=[(price - 2.0, 1.0)], asks_levels=[(price + 3.0, 1.0)]))
-        # Spread = tiny — will be SKIPPED by prefilter
+        # Spread is tiny — will be SKIPPED by prefilter in pair loop
         loop.run_until_complete(engine.scan_once("BTC-USDT"))
     
     # BEFORE fix: all 3 would have 0 data points (stuck inside prefilter gate)
