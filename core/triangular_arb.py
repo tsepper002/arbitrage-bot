@@ -168,7 +168,7 @@ class TriangularArbitrageEngine:
                 'strategy': 'TRIANGULAR',
                 'net_profit_pct': opportunity['profit_pct'],
             }
-            result = await self.order_executor.execute(trade)
+            result = await self.order_executor.execute_arbitrage(trade)
             return result
 
         return {
