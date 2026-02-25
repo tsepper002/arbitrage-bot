@@ -1156,7 +1156,7 @@ class IntegratedArbitrageBot:
                             if self.strategy_dispatcher:
                                 self.strategy_dispatcher.strategy_stats['TRIANGULAR']['opportunities'] += 1
                 except Exception as e:
-                    logger.debug(f"Triangular scan error: {e}")
+                    logger.warning(f"Triangular scan error: {e}")
                 await asyncio.sleep(2)  # Scan every 2 seconds
         except asyncio.CancelledError:
             logger.info("Triangular scan loop cancelled")
