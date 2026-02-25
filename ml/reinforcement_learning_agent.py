@@ -30,9 +30,9 @@ class ReinforcementLearningAgent:
         # Hyper-parameters
         self.gamma = 0.95
         self.learning_rate = 0.1
-        self.epsilon = 1.0
+        self.epsilon = 0.3  # 70% exploitation from start (arbitrage is well-defined)
         self.epsilon_min = 0.05
-        self.epsilon_decay = 0.999
+        self.epsilon_decay = 0.995
 
         self.episode_count = 0
         self.memory: List[dict] = []
@@ -104,7 +104,8 @@ class ReinforcementLearningAgent:
             state = self._discretize_state(features)
 
             if exploration and random.random() < self.epsilon:
-                action = random.choice(self.actions)
+                # Bias exploration toward TRADE (60%) since profitable spreads should be taken
+                action = random.choices(self.actions, weights=[0.6, 0.2, 0.2], k=1)[0]
             else:
                 action = self._best_action(state)
 
