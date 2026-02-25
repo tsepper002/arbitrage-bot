@@ -162,7 +162,7 @@ class OrderExecutor:
         
         return {
             'status': 'simulated',
-            'order_info': order_info,
+            'trade_info': order_info,
             'message': 'Orders simulated successfully (dry run mode)'
         }
     

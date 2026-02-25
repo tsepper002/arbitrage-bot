@@ -842,6 +842,54 @@ def test_mexc_rest_fallback():
     print(f"  ✅ FUNDING premium=0.5%: confidence={conf4:.2f}")
 
 
+def test_flash_crash_protector_no_keyerror():
+    """TEST 22: FlashCrashProtector doesn't crash on unknown symbols (was KeyError)"""
+    print("\n" + "="*60)
+    print("TEST 22: FlashCrashProtector KeyError Fix + Dry-Run trade_info Key")
+    print("="*60)
+    from professional_features.flash_crash_protector import FlashCrashProtector
+
+    fcp = FlashCrashProtector()
+
+    # Previously: should_stop_trading('NEW-SYMBOL') raised KeyError
+    # because price_history was a dict and 'NEW-SYMBOL' key didn't exist
+    try:
+        result = fcp.should_stop_trading('NEVER-SEEN-SYMBOL')
+        assert result is False or result is True  # should not crash
+        print(f"  ✅ should_stop_trading('NEVER-SEEN-SYMBOL') returned {result} (no KeyError)")
+    except KeyError as e:
+        raise AssertionError(f"KeyError still occurs: {e}")
+
+    # Test is_flash_crash on unknown symbol
+    is_crash, reasons = fcp.is_flash_crash('ANOTHER-UNKNOWN')
+    assert is_crash is False
+    print(f"  ✅ is_flash_crash('ANOTHER-UNKNOWN') = {is_crash} (no crash)")
+
+    # Test full scan_once with FlashCrashProtector (was crashing every scan)
+    from core.price_store import PriceStore
+    from core.arbitrage import ArbitrageEngine
+    from core.order_executor import OrderExecutor
+
+    store = PriceStore()
+    loop.run_until_complete(store.update_levels('HTX', 'DOT-USDT',
+        bids_levels=[(4.990, 100.0)], asks_levels=[(5.000, 100.0)]))
+    loop.run_until_complete(store.update_levels('Bybit', 'DOT-USDT',
+        bids_levels=[(5.020, 100.0)], asks_levels=[(5.025, 100.0)]))
+
+    executor = OrderExecutor(dry_run=True)
+    engine = ArbitrageEngine(store, executor=executor, flash_crash_protector=fcp)
+
+    result = loop.run_until_complete(engine.scan_once('DOT-USDT'))
+    assert len(result) >= 1, f"Expected >=1 opp with 0.4% spread, got {len(result)}"
+    print(f"  ✅ scan_once with FlashCrashProtector: {len(result)} opportunity (was crashing with KeyError)")
+
+    # Verify dry_run returns trade_info (not order_info)
+    exec_result = loop.run_until_complete(executor.execute_arbitrage(result[0]))
+    assert 'trade_info' in exec_result, f"Expected trade_info key, got keys: {list(exec_result.keys())}"
+    assert exec_result['trade_info']['net_profit'] > 0
+    print(f"  ✅ dry_run returns trade_info key (was order_info) with net_profit=${exec_result['trade_info']['net_profit']:.6f}")
+
+
 if __name__ == "__main__":
     tests = [
         test_settings, test_price_store, test_exchange_config, test_order_executor,
@@ -851,6 +899,7 @@ if __name__ == "__main__":
         test_e2e_arbitrage, test_mexc_depth_parsing, test_scan_fast_strategies,
         test_engine_feeds_dispatcher, test_ml_integration_in_engine,
         test_strategy_signal_execution, test_mexc_rest_fallback,
+        test_flash_crash_protector_no_keyerror,
     ]
     passed = failed = 0
     for t in tests:

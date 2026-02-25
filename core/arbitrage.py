@@ -430,9 +430,10 @@ class ArbitrageEngine:
                 scan_results = []
             
             for s, opps in zip(ready_symbols, scan_results):
-                # Skip exceptions from individual scans
+                # Log exceptions from individual scans at ERROR level (not DEBUG)
+                # A KeyError/AttributeError here means a component is crashing silently
                 if isinstance(opps, Exception):
-                    logger.debug(f"Scan error for {s}: {opps}")
+                    logger.error(f"❌ Scan error for {s}: {type(opps).__name__}: {opps}")
                     continue
                 if not opps:
                     continue

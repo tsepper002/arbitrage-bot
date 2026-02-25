@@ -72,7 +72,7 @@ class FlashCrashProtector:
     
     def _calculate_volatility(self, symbol: str) -> float:
         """Вычислить текущую волатильность"""
-        prices = [p for _, p in list(self.price_history[symbol])[-20:]]
+        prices = [p for _, p in list(self.price_history.get(symbol, []))[-20:]]
         if len(prices) < 2:
             return 0.0
         
@@ -84,10 +84,10 @@ class FlashCrashProtector:
     
     def _detect_price_anomaly(self, symbol: str) -> Tuple[bool, str]:
         """Обнаружить аномалию в цене"""
-        if len(self.price_history[symbol]) < 10:
+        if len(self.price_history.get(symbol, [])) < 10:
             return False, ""
         
-        prices = [p for _, p in list(self.price_history[symbol])]
+        prices = [p for _, p in list(self.price_history.get(symbol, []))]
         current_price = prices[-1]
         
         # Проверка резкого падения
@@ -108,10 +108,10 @@ class FlashCrashProtector:
     
     def _detect_volatility_spike(self, symbol: str) -> Tuple[bool, str]:
         """Обнаружить всплеск волатильности"""
-        if len(self.volatility_history[symbol]) < 10:
+        if len(self.volatility_history.get(symbol, [])) < 10:
             return False, ""
         
-        volatilities = [v for _, v in list(self.volatility_history[symbol])]
+        volatilities = [v for _, v in list(self.volatility_history.get(symbol, []))]
         current_vol = volatilities[-1]
         avg_vol = statistics.mean(volatilities[:-1])
         
@@ -127,10 +127,10 @@ class FlashCrashProtector:
     
     def _detect_volume_anomaly(self, symbol: str) -> Tuple[bool, str]:
         """Обнаружить аномалию в объеме"""
-        if len(self.volume_history[symbol]) < 10:
+        if len(self.volume_history.get(symbol, [])) < 10:
             return False, ""
         
-        volumes = [v for _, v in list(self.volume_history[symbol])]
+        volumes = [v for _, v in list(self.volume_history.get(symbol, []))]
         current_volume = volumes[-1]
         avg_volume = statistics.mean(volumes[:-1])
         

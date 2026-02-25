@@ -61,22 +61,12 @@ class MEXC:
         which is fine since MEXC has 0% spot trading fees.
         """
         if HAS_AIOHTTP:
-            log.info("MEXC: using REST polling (0% fees, reliable JSON data)")
+            log.info("MEXC: using aiohttp REST polling (0% fees, reliable JSON data)")
             await self._run_rest_poll()
-        elif HAS_WS:
-            # Fallback to WS if aiohttp not installed
-            for url in [self.WS_URL, self.WS_URL_LEGACY]:
-                if self._stop:
-                    return
-                try:
-                    await self._run_ws(url)
-                    if self._data_received:
-                        return
-                except Exception as e:
-                    log.warning(f"MEXC WS {url} failed: {e}")
-                    continue
         else:
-            log.error("MEXC: neither aiohttp nor websockets available — cannot connect")
+            # Fallback: stdlib urllib REST polling (no extra packages needed)
+            log.info("MEXC: using urllib REST polling (aiohttp not installed)")
+            await self._run_rest_poll_stdlib()
 
     async def _run_ws(self, url: str):
         """Try WebSocket connection. Exits after 10s with no data (protobuf detection)."""
@@ -213,3 +203,33 @@ class MEXC:
                         log.debug(f"MEXC REST {mexc_sym} error: {e}")
 
                 await asyncio.sleep(self.REST_POLL_INTERVAL)
+
+    async def _run_rest_poll_stdlib(self):
+        """Fallback REST polling using stdlib urllib (no extra packages needed)."""
+        import urllib.request
+        log.info(f"MEXC stdlib REST polling started for {len(self._mexc_symbols)} symbols")
+        while not self._stop:
+            for mexc_sym in self._mexc_symbols:
+                if self._stop:
+                    break
+                try:
+                    url = f"{self.REST_URL}?symbol={mexc_sym}&limit=5"
+                    req = urllib.request.Request(url, headers={"User-Agent": "arbitrage-bot/1.0"})
+                    # Run blocking HTTP in thread to avoid blocking event loop
+                    loop = asyncio.get_event_loop()
+                    resp_bytes = await loop.run_in_executor(
+                        None,
+                        lambda: urllib.request.urlopen(req, timeout=5).read()
+                    )
+                    data = json.loads(resp_bytes)
+                    bids_raw = data.get("bids", [])
+                    asks_raw = data.get("asks", [])
+                    if bids_raw and asks_raw:
+                        bids_levels = [(float(b[0]), float(b[1])) for b in bids_raw]
+                        asks_levels = [(float(a[0]), float(a[1])) for a in asks_raw]
+                        std_symbol = self._sym_map.get(mexc_sym, mexc_sym)
+                        await self.store.update_levels("MEXC", std_symbol, bids_levels, asks_levels, time.time())
+                        self._data_received = True
+                except Exception as e:
+                    log.debug(f"MEXC stdlib REST {mexc_sym} error: {e}")
+            await asyncio.sleep(self.REST_POLL_INTERVAL)

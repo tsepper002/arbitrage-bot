@@ -927,7 +927,7 @@ class IntegratedArbitrageBot:
                 if ml_parts:
                     print(f" 🧠 {' | '.join(ml_parts)}")
                 
-                # Engine analytics: best spread seen + near-miss tracking
+                # Engine analytics: best spread seen THIS cycle + near-miss tracking
                 if self.engine:
                     best_spread = getattr(self.engine, '_best_spread_pct', 0)
                     best_info = getattr(self.engine, '_best_spread_info', '')
@@ -938,8 +938,12 @@ class IntegratedArbitrageBot:
                         gap = best_fees - best_spread
                         pct_of_fees = (best_spread / best_fees * 100) if best_fees > 0 else 0
                         print(f" 📊 Best spread: {best_spread:.4f}% ({pct_of_fees:.0f}% of {best_fees:.3f}% fees, gap={gap:.4f}%) | {best_info}")
-                    if near_misses > 0:
+                    if near_misses > 0 or total_analyzed > 0:
                         print(f" 🔍 Near-misses: {near_misses} | Pairs analyzed: {total_analyzed}")
+                    # Reset per-cycle metrics so dashboard shows CURRENT state
+                    self.engine._best_spread_pct = 0.0
+                    self.engine._best_spread_info = ""
+                    self.engine._best_spread_fees_pct = 0.0
                 
                 print(f"{'='*70}")
                 
