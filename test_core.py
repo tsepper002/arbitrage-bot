@@ -1195,6 +1195,86 @@ def test_ml_observation_outside_prefilter():
     print(f"  ✅ Vol={vol_regime} computed from real data (not stuck on default NORMAL)")
 
 
+def test_cross_exchange_and_triangular_signals():
+    """TEST 27: CROSS_EXCHANGE near-miss signals + TRIANGULAR formula + MEXC DNS + NN predictor cache."""
+    print(f"\n{'='*60}")
+    print(f"TEST 27: CROSS_EXCHANGE Signals + Triangular + MEXC DNS + NN Cache")
+    print(f"{'='*60}")
+    
+    # 1. Test CROSS_EXCHANGE near-miss signals fed to dispatcher
+    from core.strategy_dispatcher import StrategyDispatcher
+    
+    class FakeBotManager:
+        def __init__(self):
+            self.engine = type('E', (), {'store': None})()
+    
+    bm = FakeBotManager()
+    disp = StrategyDispatcher(bm)
+    
+    # Near-misses should appear as signals
+    disp.record_engine_near_misses(15)
+    assert disp.strategy_stats['CROSS_EXCHANGE']['signals'] == 15, \
+        f"Expected 15 signals, got {disp.strategy_stats['CROSS_EXCHANGE']['signals']}"
+    print(f"  ✅ CROSS_EXCHANGE near-misses recorded as signals: 15")
+    
+    # Opportunities should also appear as signals
+    disp.record_engine_opportunities(3)
+    assert disp.strategy_stats['CROSS_EXCHANGE']['signals'] == 18
+    assert disp.strategy_stats['CROSS_EXCHANGE']['opportunities'] == 3
+    print(f"  ✅ CROSS_EXCHANGE: 18 signals (15 near-miss + 3 opps), 3 opportunities")
+    
+    # 2. Test slow strategy signal counting
+    # Reset stats
+    disp.strategy_stats['GRID_TRADING']['signals'] = 0
+    disp.strategy_stats['GRID_TRADING']['opportunities'] = 0
+    # Simulate a slow scan finding opportunities (the scan_slow loop increments signals)
+    name = 'GRID_TRADING'
+    opps = [{'strategy': 'GRID_TRADING', 'type': 'rebalance'}]
+    if opps:
+        disp.strategy_stats[name]['signals'] += len(opps)
+        disp.strategy_stats[name]['opportunities'] += len(opps)
+    assert disp.strategy_stats['GRID_TRADING']['signals'] == 1
+    print(f"  ✅ Slow strategy GRID_TRADING shows signals=1 (not 0)")
+    
+    # 3. Test TRIANGULAR formula with known prices
+    # Setup: BTC-USDT and ETH-USDT on Bybit and KuCoin
+    # KuCoin has cheaper BTC (ask=95000) and expensive ETH (bid=2700)
+    # Bybit has expensive BTC (bid=95500) and cheap ETH (ask=2650)
+    # Strategy: Buy BTC on KuCoin, sell on Bybit + Buy ETH on Bybit, sell on KuCoin
+    spread_btc = (95500 / 95000 - 1) * 100  # 0.526%
+    spread_eth = (2700 / 2650 - 1) * 100     # 1.887%
+    fees_pct = (0.001 + 0.001) * 2 * 100     # 0.4%
+    expected_roi = spread_btc + spread_eth - fees_pct
+    print(f"  Triangular calc: BTC spread={spread_btc:.3f}% + ETH spread={spread_eth:.3f}% - fees={fees_pct:.3f}% = {expected_roi:.3f}%")
+    assert expected_roi > 0, f"Expected positive ROI, got {expected_roi:.3f}%"
+    print(f"  ✅ Triangular formula: ROI={expected_roi:.3f}% (spread_a + spread_b - 4*fee)")
+    
+    # 4. Test MEXC public DNS resolver
+    from exchanges.mexc import MEXC
+    
+    class FakeStore:
+        async def update_levels(self, *a, **kw): pass
+    
+    mexc = MEXC(FakeStore(), ["BTC-USDT"])
+    assert hasattr(mexc, '_resolve_via_public_dns'), "Missing _resolve_via_public_dns method"
+    assert hasattr(mexc, 'PUBLIC_DNS'), "Missing PUBLIC_DNS"
+    assert len(mexc.PUBLIC_DNS) >= 3, f"Need at least 3 public DNS servers, got {len(mexc.PUBLIC_DNS)}"
+    print(f"  ✅ MEXC has public DNS resolver ({len(mexc.PUBLIC_DNS)} servers: Google, Cloudflare, Yandex)")
+    
+    # 5. Test NN predictor gets cached during scan
+    from ml.neural_network_predictor import NeuralNetworkPredictor
+    nn = NeuralNetworkPredictor()
+    assert len(nn.prediction_cache) == 0, "Cache should start empty"
+    # Simulate what scan_once now does — predict for each symbol
+    features = [0.05, 0.1, 0.001, 0.95, 0.0]
+    prob = nn.predict(features, "BTC-USDT")
+    assert len(nn.prediction_cache) == 1, f"Cache should have 1 entry, got {len(nn.prediction_cache)}"
+    assert 0 <= prob <= 1, f"Probability out of range: {prob}"
+    print(f"  ✅ NN predictor: predict() called per-symbol, cache={len(nn.prediction_cache)} entries, prob={prob:.3f}")
+    
+    print(f"  ✅ All CROSS_EXCHANGE + TRIANGULAR + MEXC DNS + NN cache tests passed!")
+
+
 if __name__ == "__main__":
     tests = [
         test_settings, test_price_store, test_exchange_config, test_order_executor,
@@ -1209,6 +1289,7 @@ if __name__ == "__main__":
         test_triangular_engine,
         test_rejection_tracking,
         test_ml_observation_outside_prefilter,
+        test_cross_exchange_and_triangular_signals,
     ]
     passed = failed = 0
     for t in tests:

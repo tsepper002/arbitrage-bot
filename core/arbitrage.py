@@ -227,6 +227,7 @@ class ArbitrageEngine:
                 self._symbol_prices[symbol] = hist[-200:]
 
         # ML Spread Predictor — compute best spread for this symbol and observe
+        _best_cross_spread = 0.0
         if self.ml_spread_predictor and len(exchanges) >= 2:
             try:
                 best_ask = float('inf')
@@ -240,8 +241,16 @@ class ArbitrageEngine:
                     if _b > best_bid:
                         best_bid = _b
                 if best_ask < float('inf') and best_bid > 0 and best_ask > 0:
-                    cross_spread = (best_bid - best_ask) / best_ask
-                    self.ml_spread_predictor.observe(symbol, cross_spread)
+                    _best_cross_spread = (best_bid - best_ask) / best_ask
+                    self.ml_spread_predictor.observe(symbol, _best_cross_spread)
+            except Exception:
+                pass
+
+        # Neural Network — run predict on every symbol to populate cache (for dashboard)
+        if getattr(self, 'nn_predictor', None) and _mid_price > 0:
+            try:
+                features = [_best_cross_spread * 100, 0.0, 0.0, _mid_price / 100000.0, 0.0]
+                self.nn_predictor.predict(features, symbol)
             except Exception:
                 pass
 
@@ -596,6 +605,10 @@ class ArbitrageEngine:
                 # Feed opportunity count back to strategy dispatcher
                 if self.strategy_dispatcher:
                     self.strategy_dispatcher.record_engine_opportunities(len(opps))
+                    # Feed near-misses as CROSS_EXCHANGE signals for visibility
+                    nm = self._near_miss_count
+                    if nm > 0:
+                        self.strategy_dispatcher.record_engine_near_misses(nm)
                 for o in opps:
                     # Check risk manager before executing
                     if self.risk_manager:

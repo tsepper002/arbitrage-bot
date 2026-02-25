@@ -147,6 +147,13 @@ class StrategyDispatcher:
     def record_engine_opportunities(self, count: int):
         """Called by main loop to feed ArbitrageEngine results into stats."""
         self.strategy_stats['CROSS_EXCHANGE']['opportunities'] += count
+        if count > 0:
+            self.strategy_stats['CROSS_EXCHANGE']['signals'] += count
+
+    def record_engine_near_misses(self, count: int):
+        """Called by main loop to feed ArbitrageEngine near-misses as signals."""
+        if count > 0:
+            self.strategy_stats['CROSS_EXCHANGE']['signals'] += count
 
     async def scan_fast(self) -> List[Dict[str, Any]]:
         """
@@ -174,16 +181,14 @@ class StrategyDispatcher:
                 return opportunities
             snap = store.snapshot()
 
-            # --- TRIANGULAR: Cross-exchange implied rate arbitrage ---
-            # With only USDT pairs, single-exchange triangular is impossible
-            # (all paths reduce to spread products < 1). But CROSS-EXCHANGE
-            # triangular works: compare how pair_a and pair_b are priced on
-            # different exchanges. If Ex1 overprices BTC but underprices ETH
-            # (relative to Ex2), there's an arbitrage cycle.
+            # --- TRIANGULAR: Cross-exchange pairs arbitrage ---
+            # Check if pair_a is mispriced on ex1 vs ex2, and pair_b is 
+            # mispriced in the OPPOSITE direction. This creates a hedged 
+            # arbitrage: go long pair_a cross-exchange + short pair_b cross-exchange.
             #
-            # Formula (for pair_a, pair_b across ex1, ex2):
-            #   roi = (bid_b_ex2 × bid_a_ex1) / (ask_a_ex2 × ask_b_ex1) × (1-fee)^3 - 1
-            # This is asymmetric: forward (ex1→ex2) ≠ reverse (ex2→ex1).
+            # Real ROI = spread_a + spread_b - 4 * fee  (4 legs total)
+            # where spread_a = bid_a_ex2/ask_a_ex1 - 1  (buy ex1, sell ex2)
+            #       spread_b = bid_b_ex1/ask_b_ex2 - 1  (buy ex2, sell ex1)
             from core.exchange_config import EXCHANGE_PARAMS
             tri_pairs = [
                 ('BTC-USDT', 'ETH-USDT'),
@@ -191,20 +196,25 @@ class StrategyDispatcher:
                 ('BTC-USDT', 'BNB-USDT'),
                 ('ETH-USDT', 'SOL-USDT'),
                 ('BTC-USDT', 'XRP-USDT'),
+                ('ETH-USDT', 'BNB-USDT'),
+                ('BTC-USDT', 'DOGE-USDT'),
+                ('SOL-USDT', 'XRP-USDT'),
             ]
+            best_tri_roi = -999
+            best_tri_info = ""
             for pair_a, pair_b in tri_pairs:
                 exmap_a = snap.get(pair_a, {})
                 exmap_b = snap.get(pair_b, {})
-                # Collect exchanges that have BOTH pairs
                 common_exs = [ex for ex in exmap_a if ex in exmap_b]
                 if len(common_exs) < 2:
                     continue
-                # Check all exchange pairs for asymmetric mispricing
                 for i, ex1 in enumerate(common_exs):
                     rec_a1, rec_b1 = exmap_a[ex1], exmap_b[ex1]
                     bid_a1, ask_a1 = rec_a1.get("bid"), rec_a1.get("ask")
                     bid_b1, ask_b1 = rec_b1.get("bid"), rec_b1.get("ask")
                     if not (bid_a1 and ask_a1 and bid_b1 and ask_b1):
+                        continue
+                    if ask_a1 <= 0 or ask_b1 <= 0:
                         continue
                     for ex2 in common_exs[i+1:]:
                         rec_a2, rec_b2 = exmap_a[ex2], exmap_b[ex2]
@@ -212,24 +222,35 @@ class StrategyDispatcher:
                         bid_b2, ask_b2 = rec_b2.get("bid"), rec_b2.get("ask")
                         if not (bid_a2 and ask_a2 and bid_b2 and ask_b2):
                             continue
-                        if ask_a2 <= 0 or ask_b1 <= 0 or ask_b2 <= 0 or ask_a1 <= 0:
+                        if ask_a2 <= 0 or ask_b2 <= 0:
                             continue
-                        # Use worst (highest) fee between the two exchanges
                         fee1 = EXCHANGE_PARAMS.get(ex1, {}).get("taker", 0.001)
                         fee2 = EXCHANGE_PARAMS.get(ex2, {}).get("taker", 0.001)
-                        fee = max(fee1, fee2)
-                        # Forward: buy pair_a on ex1 (cheap), sell pair_b on ex2 (expensive)
-                        fwd = (bid_b2 * bid_a1) / (ask_a2 * ask_b1) * ((1 - fee) ** 3)
-                        fwd_roi = (fwd - 1) * 100
-                        # Reverse: buy pair_a on ex2, sell pair_b on ex1
-                        rev = (bid_b1 * bid_a2) / (ask_a1 * ask_b2) * ((1 - fee) ** 3)
-                        rev_roi = (rev - 1) * 100
-                        best_roi = max(fwd_roi, rev_roi)
-                        if best_roi > settings.MIN_NET_ROI_PCT:
-                            if fwd_roi >= rev_roi:
-                                direction = f"{pair_a}@{ex1}+{pair_b}@{ex2}"
+                        
+                        # Direction 1: buy pair_a on ex1, sell on ex2 + buy pair_b on ex2, sell on ex1
+                        spread_a_fwd = (bid_a2 / ask_a1 - 1) * 100  # pair_a: ex1→ex2
+                        spread_b_rev = (bid_b1 / ask_b2 - 1) * 100  # pair_b: ex2→ex1
+                        fees_pct = (fee1 + fee2) * 2 * 100  # 4 legs total
+                        roi1 = spread_a_fwd + spread_b_rev - fees_pct
+                        
+                        # Direction 2: buy pair_a on ex2, sell on ex1 + buy pair_b on ex1, sell on ex2
+                        spread_a_rev = (bid_a1 / ask_a2 - 1) * 100
+                        spread_b_fwd = (bid_b2 / ask_b1 - 1) * 100
+                        roi2 = spread_a_rev + spread_b_fwd - fees_pct
+                        
+                        best_roi = max(roi1, roi2)
+                        if best_roi > best_tri_roi:
+                            best_tri_roi = best_roi
+                            if roi1 >= roi2:
+                                best_tri_info = f"{pair_a}:{ex1}→{ex2} + {pair_b}:{ex2}→{ex1}"
                             else:
-                                direction = f"{pair_a}@{ex2}+{pair_b}@{ex1}"
+                                best_tri_info = f"{pair_a}:{ex2}→{ex1} + {pair_b}:{ex1}→{ex2}"
+                        
+                        if best_roi > settings.MIN_NET_ROI_PCT:
+                            if roi1 >= roi2:
+                                direction = f"{pair_a}:{ex1}→{ex2} + {pair_b}:{ex2}→{ex1}"
+                            else:
+                                direction = f"{pair_a}:{ex2}→{ex1} + {pair_b}:{ex1}→{ex2}"
                             opportunities.append({
                                 'strategy': 'TRIANGULAR',
                                 'type': 'cross_exchange_triangle',
@@ -237,7 +258,12 @@ class StrategyDispatcher:
                                 'data': {'roi_pct': best_roi}
                             })
                             self.strategy_stats['TRIANGULAR']['opportunities'] += 1
+                            self.strategy_stats['TRIANGULAR']['signals'] += 1
                             logger.info(f"   🔺 TRI: {direction} net_roi={best_roi:.3f}%")
+            
+            # Track best triangular near-miss for dashboard visibility
+            if best_tri_roi > -999 and best_tri_roi <= settings.MIN_NET_ROI_PCT:
+                self.strategy_stats['TRIANGULAR']['signals'] += 1  # Count as signal (near-miss)
 
             # --- SMART_ORDER: detect when spread is wide enough for limit orders ---
             # These are market condition SIGNALS (wide spread on single exchange).
@@ -323,6 +349,9 @@ class StrategyDispatcher:
             for name, scanner in scanners:
                 try:
                     opps = await scanner()
+                    if opps:
+                        # Count signals for slow strategies (each opp = 1 signal)
+                        self.strategy_stats[name]['signals'] += len(opps)
                     opportunities.extend(opps)
                 except Exception as e:
                     logger.debug(f"{name} scan error: {e}")

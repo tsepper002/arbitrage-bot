@@ -30,6 +30,14 @@ except ImportError:
 
 log = logging.getLogger("MEXC")
 
+
+class _SwitchToStdlib(Exception):
+    """Internal signal to switch from aiohttp to stdlib with resolved IP."""
+    def __init__(self, ip, hostname):
+        self.ip = ip
+        self.hostname = hostname
+
+
 class MEXC:
     # New endpoint (Aug 2025 migration)
     WS_URL = "wss://wbs-api.mexc.com/ws"
@@ -38,6 +46,13 @@ class MEXC:
     REST_URLS = [
         "https://api.mexc.com/api/v3/depth",
         "https://www.mexc.com/api/v3/depth",
+    ]
+    # Public DNS servers for fallback when system DNS is blocked
+    PUBLIC_DNS = [
+        ("8.8.8.8", 53),         # Google
+        ("1.1.1.1", 53),         # Cloudflare
+        ("77.88.8.8", 53),       # Yandex (works in Russia)
+        ("8.8.4.4", 53),         # Google secondary
     ]
     REST_POLL_INTERVAL = 1.5  # seconds between REST polls
     REST_TIMEOUT = 5  # seconds per HTTP request
@@ -73,6 +88,11 @@ class MEXC:
             try:
                 log.info("MEXC: using aiohttp REST polling (0% fees, reliable JSON data)")
                 await self._run_rest_poll()
+            except _SwitchToStdlib as switch:
+                log.info(f"MEXC: Switching to stdlib REST with resolved IP {switch.ip} ({switch.hostname})")
+                self._dns_ip_resolved = switch.ip
+                self._dns_hostname = switch.hostname
+                await self._run_rest_poll_stdlib()
             except Exception as e:
                 log.warning(f"MEXC: aiohttp REST failed ({type(e).__name__}: {e}), falling back to urllib")
                 await self._run_rest_poll_stdlib()
@@ -199,7 +219,88 @@ class MEXC:
             return True
         # Fallback: check error message for DNS keywords
         err_str = str(exc).lower()
-        return "dns" in err_str or "name resolution" in err_str or "getaddrinfo" in err_str
+        return "dns" in err_str or "name resolution" in err_str or "getaddrinfo" in err_str or "contact dns" in err_str
+
+    def _resolve_via_public_dns(self, hostname):
+        """Resolve hostname using public DNS servers when system DNS is blocked.
+        
+        Uses UDP socket to send raw DNS query to public DNS servers (8.8.8.8, 1.1.1.1, etc.).
+        Returns IP address string or None.
+        """
+        import struct
+        
+        # Build minimal DNS query for A record
+        query_id = 0x1234
+        flags = 0x0100  # Standard recursive query
+        header = struct.pack('>HHHHHH', query_id, flags, 1, 0, 0, 0)
+        
+        # Encode domain name (e.g. "api.mexc.com" -> b"\x03api\x04mexc\x03com\x00")
+        qname = b''
+        for label in hostname.split('.'):
+            qname += bytes([len(label)]) + label.encode()
+        qname += b'\x00'
+        
+        # A record, IN class
+        question = qname + struct.pack('>HH', 1, 1)
+        packet = header + question
+        
+        for dns_ip, dns_port in self.PUBLIC_DNS:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.settimeout(3.0)
+                sock.sendto(packet, (dns_ip, dns_port))
+                data, _ = sock.recvfrom(512)
+                sock.close()
+                
+                # Parse response: skip header (12 bytes) + question section
+                if len(data) < 12:
+                    continue
+                answer_count = struct.unpack('>H', data[6:8])[0]
+                if answer_count == 0:
+                    continue
+                
+                # Skip question section
+                pos = 12
+                while pos < len(data) and data[pos] != 0:
+                    pos += data[pos] + 1
+                pos += 5  # null byte + QTYPE + QCLASS
+                
+                # Read answer records
+                for _ in range(answer_count):
+                    if pos + 12 > len(data):
+                        break
+                    # Name (2 bytes if pointer), Type (2), Class (2), TTL (4), RDLength (2)
+                    if data[pos] & 0xC0 == 0xC0:
+                        pos += 2  # Compressed pointer
+                    else:
+                        while pos < len(data) and data[pos] != 0:
+                            pos += data[pos] + 1
+                        pos += 1
+                    
+                    if pos + 10 > len(data):
+                        break
+                    rtype, rclass, _, rdlen = struct.unpack('>HHIH', data[pos:pos+10])
+                    pos += 10
+                    
+                    if rtype == 1 and rdlen == 4:  # A record
+                        ip = '.'.join(str(b) for b in data[pos:pos+4])
+                        log.info(f"✅ MEXC DNS resolved via {dns_ip}: {hostname} → {ip}")
+                        return ip
+                    pos += rdlen
+                    
+            except Exception as e:
+                log.debug(f"DNS query to {dns_ip} failed: {e}")
+                if 'sock' in dir():
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
+        
+        return None
+
+    def _build_ip_url(self, ip, path_with_params):
+        """Build URL using IP address with Host header workaround."""
+        return f"https://{ip}{path_with_params}"
 
     async def _try_alternative_urls(self, session):
         """Try each REST URL until one works. Returns working URL or None."""
@@ -262,7 +363,7 @@ class MEXC:
                     await asyncio.sleep(self.REST_POLL_INTERVAL)
                 elif dns_failed:
                     consecutive_errors += 1
-                    # Try alternative domains
+                    # Try alternative domains first
                     if consecutive_errors <= 2:
                         log.warning(f"MEXC: DNS failure for {self._active_rest_url} — trying alternative domains...")
                         alt_url = await self._try_alternative_urls(session)
@@ -270,8 +371,20 @@ class MEXC:
                             self._active_rest_url = alt_url
                             self._dns_backoff = 1.5
                             continue  # Retry immediately with new URL
-                        else:
-                            log.warning(f"MEXC: All API domains unreachable. Retrying in {self._dns_backoff:.0f}s")
+                    
+                    # Try public DNS resolution as last resort
+                    if consecutive_errors <= 4 and not getattr(self, '_dns_ip_resolved', None):
+                        log.warning("MEXC: System DNS blocked — trying public DNS (8.8.8.8, 1.1.1.1, Yandex)...")
+                        for domain in ["api.mexc.com", "www.mexc.com"]:
+                            ip = self._resolve_via_public_dns(domain)
+                            if ip:
+                                # Use IP-based URL with ssl=False for aiohttp
+                                self._dns_ip_resolved = ip
+                                self._dns_hostname = domain
+                                log.info(f"✅ MEXC: Resolved {domain} → {ip} via public DNS. Switching to stdlib for IP access.")
+                                # Switch to stdlib which can use Host header
+                                raise _SwitchToStdlib(ip, domain)
+                        log.warning(f"MEXC: Public DNS also failed. Retrying in {self._dns_backoff:.0f}s")
                     else:
                         log.debug(f"MEXC: DNS still failing, retry in {self._dns_backoff:.0f}s")
                     await asyncio.sleep(self._dns_backoff)
@@ -284,10 +397,22 @@ class MEXC:
                     await asyncio.sleep(self.REST_POLL_INTERVAL)
 
     async def _run_rest_poll_stdlib(self):
-        """Fallback REST polling using stdlib urllib (no extra packages needed)."""
+        """Fallback REST polling using stdlib urllib (no extra packages needed).
+        
+        When _dns_ip_resolved is set, uses IP address with Host header to bypass DNS.
+        """
         import urllib.request
         import urllib.error
-        log.info(f"MEXC stdlib REST polling started for {len(self._mexc_symbols)} symbols")
+        import ssl
+        
+        ip = getattr(self, '_dns_ip_resolved', None)
+        hostname = getattr(self, '_dns_hostname', 'api.mexc.com')
+        
+        if ip:
+            log.info(f"MEXC stdlib REST polling started (IP: {ip}, Host: {hostname}) for {len(self._mexc_symbols)} symbols")
+        else:
+            log.info(f"MEXC stdlib REST polling started for {len(self._mexc_symbols)} symbols")
+        
         consecutive_errors = 0
         while not self._stop:
             success_count = 0
@@ -297,15 +422,33 @@ class MEXC:
                 if self._stop or dns_failed:
                     break
                 try:
-                    url = f"{self._active_rest_url}?symbol={mexc_sym}&limit=5"
+                    if ip:
+                        # Use IP address directly with Host header to bypass DNS
+                        url = f"https://{ip}/api/v3/depth?symbol={mexc_sym}&limit=5"
+                        req = urllib.request.Request(url, headers={
+                            "User-Agent": "arbitrage-bot/1.0",
+                            "Host": hostname,
+                        })
+                        # Create SSL context that doesn't verify hostname (we verified via DNS)
+                        ctx = ssl.create_default_context()
+                        ctx.check_hostname = False
+                        ctx.verify_mode = ssl.CERT_NONE
+                    else:
+                        url = f"{self._active_rest_url}?symbol={mexc_sym}&limit=5"
+                        req = urllib.request.Request(url, headers={"User-Agent": "arbitrage-bot/1.0"})
+                        ctx = None
+                    
                     loop = asyncio.get_running_loop()
-                    resp_bytes = await loop.run_in_executor(
-                        None,
-                        lambda u=url: urllib.request.urlopen(
-                            urllib.request.Request(u, headers={"User-Agent": "arbitrage-bot/1.0"}),
-                            timeout=self.REST_TIMEOUT
-                        ).read()
-                    )
+                    if ctx:
+                        resp_bytes = await loop.run_in_executor(
+                            None,
+                            lambda u=req, c=ctx: urllib.request.urlopen(u, timeout=self.REST_TIMEOUT, context=c).read()
+                        )
+                    else:
+                        resp_bytes = await loop.run_in_executor(
+                            None,
+                            lambda u=req: urllib.request.urlopen(u, timeout=self.REST_TIMEOUT).read()
+                        )
                     data = json.loads(resp_bytes)
                     bids_raw = data.get("bids", [])
                     asks_raw = data.get("asks", [])
@@ -356,7 +499,22 @@ class MEXC:
                         self._dns_backoff = 1.5
                         continue
                     else:
-                        log.warning(f"MEXC: All API domains unreachable. Retrying in {self._dns_backoff:.0f}s")
+                        # Last resort: try public DNS resolution
+                        if not ip:
+                            log.warning("MEXC: Trying public DNS resolution (8.8.8.8, Yandex)...")
+                            for domain in ["api.mexc.com", "www.mexc.com"]:
+                                resolved_ip = self._resolve_via_public_dns(domain)
+                                if resolved_ip:
+                                    ip = resolved_ip
+                                    hostname = domain
+                                    self._dns_ip_resolved = ip
+                                    self._dns_hostname = hostname
+                                    self._dns_backoff = 1.5
+                                    log.info(f"✅ MEXC: Resolved {domain} → {ip}. Retrying with IP access.")
+                                    break
+                            if ip:
+                                continue  # Retry with IP-based access
+                        log.warning(f"MEXC: All domains + public DNS failed. Retrying in {self._dns_backoff:.0f}s")
                 else:
                     log.debug(f"MEXC: DNS still failing, retry in {self._dns_backoff:.0f}s")
                 await asyncio.sleep(self._dns_backoff)
