@@ -49,7 +49,18 @@ class ArbitrageEngine:
                  metrics_collector = None,
                  market_regime_detector = None,
                  fee_optimizer = None,
-                 ml_spread_predictor = None):
+                 ml_spread_predictor = None,
+                 order_flow_tracker = None,
+                 iceberg_detector = None,
+                 slippage_predictor = None,
+                 nn_predictor = None,
+                 rl_agent = None,
+                 volatility_forecaster = None,
+                 auto_parameter_tuner = None,
+                 pattern_recognition = None,
+                 market_adaptive_strategy = None,
+                 ml_model_trainer = None,
+                 twap_engine = None):
         self.store = store
         self.params = EXCHANGE_PARAMS
         
@@ -93,6 +104,17 @@ class ArbitrageEngine:
         self.market_regime_detector = market_regime_detector
         self.fee_optimizer = fee_optimizer
         self.ml_spread_predictor = ml_spread_predictor
+        self.order_flow_tracker = order_flow_tracker
+        self.iceberg_detector = iceberg_detector
+        self.slippage_predictor = slippage_predictor
+        self.nn_predictor = nn_predictor
+        self.rl_agent = rl_agent
+        self.volatility_forecaster = volatility_forecaster
+        self.auto_parameter_tuner = auto_parameter_tuner
+        self.pattern_recognition = pattern_recognition
+        self.market_adaptive_strategy = market_adaptive_strategy
+        self.ml_model_trainer = ml_model_trainer
+        self.twap_engine = twap_engine
 
         # Event-driven scanning state
         self.updated_symbols: Set[str] = set()
@@ -343,6 +365,81 @@ class ArbitrageEngine:
                     self.metrics_collector.record('roi_pct', roi_pct)
                     self.metrics_collector.record('net_profit_usdt', net)
 
+                # --- PRE-TRADE ML/EXECUTION CHECKS ---
+
+                # M1: Order Flow Tracker — reduce confidence if smart money disagrees
+                ml_skip = False
+                if getattr(self, 'order_flow_tracker', None):
+                    try:
+                        smart_signal = self.order_flow_tracker.get_smart_money_signal(buy_ex, symbol)
+                        if smart_signal == 'sell':
+                            roi_pct *= 0.7  # Reduce confidence when smart money sells
+                            logger.debug(f"Order flow: smart money SELL signal for {symbol}, reduced ROI to {roi_pct:.3f}%")
+                    except Exception as e:
+                        logger.debug(f"Order flow tracker error: {e}")
+
+                # M2: Iceberg Detector — log hidden orders
+                if getattr(self, 'iceberg_detector', None):
+                    try:
+                        orderbook_data = {'bids': bids[:10], 'asks': asks[:10]}
+                        icebergs = self.iceberg_detector.detect(symbol, orderbook_data)
+                        if icebergs:
+                            logger.info(f"🧊 Iceberg orders detected for {symbol}: {len(icebergs)} hidden orders")
+                    except Exception as e:
+                        logger.debug(f"Iceberg detector error: {e}")
+
+                # M3: Slippage Predictor — subtract predicted slippage from ROI
+                predicted_slippage = 0.0
+                if getattr(self, 'slippage_predictor', None):
+                    try:
+                        predicted_slippage = self.slippage_predictor.predict(
+                            symbol, buy_ex, order_size_usdt=invested
+                        )
+                        roi_pct -= predicted_slippage * 100.0
+                        logger.debug(f"Slippage prediction for {symbol}: {predicted_slippage*100:.4f}%, adjusted ROI: {roi_pct:.3f}%")
+                    except Exception as e:
+                        logger.debug(f"Slippage predictor error: {e}")
+
+                # M4: Neural Network — skip if prediction confidence is very low
+                nn_prob = None
+                if getattr(self, 'nn_predictor', None):
+                    try:
+                        features = [roi_pct, gross_spread_pct, filled, invested, imbalance_adj]
+                        nn_prob = self.nn_predictor.predict(features, symbol)
+                        if nn_prob < 0.3:
+                            ml_skip = True
+                            logger.debug(f"NN predictor: low probability {nn_prob:.2f} for {symbol}, skipping")
+                    except Exception as e:
+                        logger.debug(f"Neural network predictor error: {e}")
+
+                # M5: RL Agent — skip if action is SKIP
+                rl_action = None
+                if getattr(self, 'rl_agent', None) and not ml_skip:
+                    try:
+                        state_features = {
+                            'spread': gross_spread_pct,
+                            'volatility': 0.0,
+                            'trend': imbalance_adj,
+                        }
+                        rl_action = self.rl_agent.get_action(state_features)
+                        if rl_action == 'SKIP':
+                            ml_skip = True
+                            logger.debug(f"RL agent: SKIP action for {symbol}")
+                    except Exception as e:
+                        logger.debug(f"RL agent error: {e}")
+
+                # M6: Volatility Forecaster — observe price for learning
+                if getattr(self, 'volatility_forecaster', None):
+                    try:
+                        mid = (top_bid + top_ask) / 2 if (top_bid and top_ask) else 0
+                        if mid > 0:
+                            self.volatility_forecaster.observe(symbol, mid)
+                    except Exception as e:
+                        logger.debug(f"Volatility forecaster error: {e}")
+
+                if ml_skip:
+                    continue
+
                 info = {
                     "symbol": symbol,
                     "buy_ex": buy_ex,
@@ -450,6 +547,18 @@ class ArbitrageEngine:
                             continue
                     
                     # Execute or log the opportunity
+                    # For large orders, use TWAP to split into smaller slices
+                    order_value = o.get('qty', 0) * o.get('buy_avg', 0)
+                    twap_threshold = 20.0 if not settings.DRY_RUN else 50.0
+                    if getattr(self, 'twap_engine', None) and order_value > twap_threshold:
+                        try:
+                            logger.info(f"📐 Large order ${order_value:.2f} > ${twap_threshold}, using TWAP execution")
+                            await self.twap_engine.execute(
+                                o['buy_ex'], o['symbol'], 'buy',
+                                total_quantity=o['qty'], duration_seconds=30
+                            )
+                        except Exception as e:
+                            logger.debug(f"TWAP execution error: {e}")
                     result = await self.executor.execute_arbitrage(o)
                     
                     # Record trade to strategy manager
@@ -499,6 +608,60 @@ class ArbitrageEngine:
                             self.metrics_collector.record('execution_time_ms', result.get('execution_time', 0) * 1000)
                             if result['status'] in ('success', 'simulated'):
                                 self.metrics_collector.record('successful_trades', 1)
+                        
+                        # --- POST-TRADE ML UPDATES ---
+                        trade_profit = trade_info.get('net_profit', 0)
+                        trade_successful = result['status'] in ('success', 'simulated')
+                        
+                        # MT1: Order Flow Tracker — track executed order
+                        if getattr(self, 'order_flow_tracker', None):
+                            try:
+                                self.order_flow_tracker.track_order(
+                                    o['buy_ex'], o['symbol'],
+                                    {'amount': o['qty'], 'price': o['buy_avg'],
+                                     'side': 'buy', 'timestamp': __import__('datetime').datetime.now()}
+                                )
+                            except Exception as e:
+                                logger.debug(f"Order flow tracker post-trade error: {e}")
+                        
+                        # MT2: Slippage Predictor — observe actual vs predicted
+                        if getattr(self, 'slippage_predictor', None):
+                            try:
+                                actual_slippage = abs(trade_info.get('slippage', 0.0))
+                                self.slippage_predictor.observe(
+                                    o['symbol'], o['buy_ex'],
+                                    predicted_slippage=0.001, actual_slippage=actual_slippage,
+                                    order_size=o.get('qty', 0) * o.get('buy_avg', 0)
+                                )
+                            except Exception as e:
+                                logger.debug(f"Slippage predictor post-trade error: {e}")
+                        
+                        # MT3: RL Agent — update with trade outcome
+                        if getattr(self, 'rl_agent', None):
+                            try:
+                                state = {'spread': o.get('roi_pct', 0), 'volatility': 0, 'trend': 0}
+                                reward = trade_profit if trade_successful else -abs(trade_profit)
+                                self.rl_agent.update(state, 'TRADE', reward, state)
+                            except Exception as e:
+                                logger.debug(f"RL agent post-trade error: {e}")
+                        
+                        # MT4: Neural Network — train on trade outcome
+                        if getattr(self, 'nn_predictor', None):
+                            try:
+                                features = [o.get('roi_pct', 0), 0, o.get('qty', 0),
+                                            o.get('qty', 0) * o.get('buy_avg', 0), 0]
+                                target = 1.0 if trade_successful and trade_profit > 0 else 0.0
+                                self.nn_predictor.train(features, target)
+                            except Exception as e:
+                                logger.debug(f"Neural network post-trade error: {e}")
+                        
+                        # MT5: ML Spread Predictor — observe actual spread
+                        if getattr(self, 'ml_spread_predictor', None):
+                            try:
+                                actual_spread = o.get('roi_pct', 0) / 100.0
+                                self.ml_spread_predictor.observe(o['symbol'], actual_spread)
+                            except Exception as e:
+                                logger.debug(f"ML spread predictor post-trade error: {e}")
                     
                     # Update risk manager after trade
                     if self.risk_manager and result.get('trade_info'):

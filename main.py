@@ -93,6 +93,23 @@ from professional_features.order_flow_tracker import OrderFlowTracker
 from ml.market_regime_detector import MarketRegimeDetector
 from ml.ml_spread_predictor import MLSpreadPredictor
 from ml.auto_parameter_optimizer import AutoParameterOptimizer
+from ml.volatility_forecaster import VolatilityForecaster
+from ml.neural_network_predictor import NeuralNetworkPredictor
+from ml.reinforcement_learning_agent import ReinforcementLearningAgent
+from ml.slippage_predictor import SlippagePredictor
+from ml.auto_parameter_tuner import AutoParameterTuner
+try:
+    from ml.pattern_recognition import PatternRecognition
+except ImportError:
+    PatternRecognition = None
+try:
+    from ml.market_adaptive_strategy import MarketAdaptiveStrategy
+except ImportError:
+    MarketAdaptiveStrategy = None
+try:
+    from ml.ml_model_trainer import MLModelTrainer
+except ImportError:
+    MLModelTrainer = None
 
 # Fee optimization
 from core.fee_optimizer import FeeOptimizer
@@ -237,6 +254,16 @@ class IntegratedArbitrageBot:
         self.vwap_engine = None
         self.iceberg_detector = None
         self.order_flow_tracker = None
+        
+        # ML modules (Phase 6)
+        self.volatility_forecaster = None
+        self.nn_predictor = None
+        self.rl_agent = None
+        self.slippage_predictor = None
+        self.auto_parameter_tuner = None
+        self.pattern_recognition = None
+        self.market_adaptive_strategy = None
+        self.ml_model_trainer = None
         
         # Strategy Dispatcher (NEW: All 14 strategies!)
         self.strategy_dispatcher = None
@@ -480,6 +507,22 @@ class IntegratedArbitrageBot:
             logger.info("✅ Fee Optimizer initialized")
             self.auto_parameter_optimizer = AutoParameterOptimizer()
             logger.info("✅ Auto Parameter Optimizer initialized")
+            self.volatility_forecaster = VolatilityForecaster()
+            logger.info("✅ Volatility Forecaster initialized")
+            self.nn_predictor = NeuralNetworkPredictor()
+            logger.info("✅ Neural Network Predictor initialized")
+            self.rl_agent = ReinforcementLearningAgent()
+            logger.info("✅ Reinforcement Learning Agent initialized")
+            self.slippage_predictor = SlippagePredictor()
+            logger.info("✅ Slippage Predictor initialized")
+            self.auto_parameter_tuner = AutoParameterTuner()
+            logger.info("✅ Auto Parameter Tuner initialized")
+            self.pattern_recognition = PatternRecognition() if PatternRecognition else None
+            logger.info(f"{'✅' if self.pattern_recognition else '⚠️'} Pattern Recognition {'initialized' if self.pattern_recognition else 'unavailable (numpy)'}")
+            self.market_adaptive_strategy = MarketAdaptiveStrategy() if MarketAdaptiveStrategy else None
+            logger.info(f"{'✅' if self.market_adaptive_strategy else '⚠️'} Market Adaptive Strategy {'initialized' if self.market_adaptive_strategy else 'unavailable (numpy)'}")
+            self.ml_model_trainer = MLModelTrainer() if MLModelTrainer else None
+            logger.info(f"{'✅' if self.ml_model_trainer else '⚠️'} ML Model Trainer {'initialized' if self.ml_model_trainer else 'unavailable (numpy)'}")
             
             logger.info("\n🎯 All professional components initialized successfully!")
             
@@ -737,7 +780,18 @@ class IntegratedArbitrageBot:
                 metrics_collector=self.metrics_collector,
                 market_regime_detector=self.market_regime_detector,
                 fee_optimizer=self.fee_optimizer,
-                ml_spread_predictor=self.ml_spread_predictor
+                ml_spread_predictor=self.ml_spread_predictor,
+                order_flow_tracker=self.order_flow_tracker,
+                iceberg_detector=self.iceberg_detector,
+                slippage_predictor=self.slippage_predictor,
+                nn_predictor=self.nn_predictor,
+                rl_agent=self.rl_agent,
+                volatility_forecaster=self.volatility_forecaster,
+                auto_parameter_tuner=self.auto_parameter_tuner,
+                pattern_recognition=self.pattern_recognition,
+                market_adaptive_strategy=self.market_adaptive_strategy,
+                ml_model_trainer=self.ml_model_trainer,
+                twap_engine=self.twap_engine
             )
             logger.info("✅ Main Arbitrage Engine initialized with professional components + ML")
             
@@ -913,19 +967,51 @@ class IntegratedArbitrageBot:
                     virt = " (virtual)" if settings.DRY_RUN else ""
                     print(f" 💵 Capital: ${total_bal:.2f} USDT{virt}")
                 
-                # ML module status
+                # ML module status — comprehensive line
                 ml_parts = []
                 if self.market_regime_detector:
                     regimes = self.market_regime_detector.get_all_regimes()
                     if regimes:
-                        regime_counts = {}
-                        for r in regimes.values():
-                            regime_counts[r] = regime_counts.get(r, 0) + 1
-                        ml_parts.append("Regime:" + "/".join(f"{r}×{c}" for r, c in regime_counts.items()))
+                        from collections import Counter
+                        rc = Counter(regimes.values())
+                        top_regime = rc.most_common(1)[0][0] if rc else 'N/A'
+                        ml_parts.append(f"Regime={top_regime}")
+                    else:
+                        ml_parts.append("Regime=N/A")
+                if self.nn_predictor:
+                    try:
+                        cache = getattr(self.nn_predictor, 'prediction_cache', {})
+                        if cache:
+                            last_val = list(cache.values())[-1][1]
+                            ml_parts.append(f"NN conf={last_val:.2f}")
+                        else:
+                            ml_parts.append("NN conf=N/A")
+                    except Exception:
+                        ml_parts.append("NN conf=N/A")
+                if self.rl_agent:
+                    try:
+                        eps = getattr(self.rl_agent, 'epsilon', 0)
+                        ml_parts.append(f"RL ε={eps:.2f}")
+                    except Exception:
+                        pass
                 if self.ml_spread_predictor:
-                    ml_parts.append(f"Spread ML:{'trained' if self.ml_spread_predictor.is_trained else 'learning'}")
+                    ewma_vals = getattr(self.ml_spread_predictor, 'ewma_values', {})
+                    if ewma_vals:
+                        avg_ewma = sum(ewma_vals.values()) / len(ewma_vals)
+                        ml_parts.append(f"Spread EWMA={avg_ewma*100:.2f}%")
+                    else:
+                        ml_parts.append("Spread EWMA=learning")
+                if self.volatility_forecaster:
+                    try:
+                        vol_regimes = {s: self.volatility_forecaster.get_regime(s)
+                                       for s in list(getattr(self.volatility_forecaster, 'ewma_var', {}).keys())[:3]}
+                        if vol_regimes:
+                            top_vol = next(iter(vol_regimes.values()), 'N/A')
+                            ml_parts.append(f"Vol={top_vol}")
+                    except Exception:
+                        pass
                 if ml_parts:
-                    print(f" 🧠 {' | '.join(ml_parts)}")
+                    print(f" 🧠 ML: {' | '.join(ml_parts)}")
                 
                 # Engine analytics: best spread seen THIS cycle + near-miss tracking
                 if self.engine:
