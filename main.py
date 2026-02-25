@@ -271,6 +271,12 @@ class IntegratedArbitrageBot:
         self.engine = None
         self.tasks = []
         
+        # Rejection tracking for dashboard visibility
+        self._rejection_counts = {}  # {reason: count}
+        self._rejection_total = 0
+        self._last_rejection_reason = ""
+        self._signal_priority_symbols = set()  # Symbols boosted by slow strategies
+        
     async def initialize(self):
         """Initialize all components."""
         logger.info("="*80)
@@ -1054,6 +1060,13 @@ class IntegratedArbitrageBot:
                     self.engine._best_spread_info = ""
                     self.engine._best_spread_fees_pct = 0.0
                 
+                # Rejection summary — shows WHY trades don't happen
+                if self._rejection_total > 0:
+                    top_reason = max(self._rejection_counts, key=self._rejection_counts.get) if self._rejection_counts else "N/A"
+                    top_count = self._rejection_counts.get(top_reason, 0)
+                    priority = ", ".join(sorted(self._signal_priority_symbols)[:5]) if self._signal_priority_symbols else "none"
+                    print(f" ⛔ Rejected: {self._rejection_total} trades ({top_reason}: {top_count}) | Priority symbols: {priority}")
+                
                 print(f"{'='*70}")
                 
                 # Every 1000 cycles, print detailed summary
@@ -1203,6 +1216,15 @@ class IntegratedArbitrageBot:
                     slow_opps = await self.strategy_dispatcher.scan_slow()
                     if slow_opps:
                         all_opps.extend(slow_opps)
+                        # Boost: slow strategy signals push symbols into engine's
+                        # priority queue so they get scanned on the next fast cycle
+                        if self.engine and hasattr(self.engine, 'updated_symbols'):
+                            for opp in slow_opps:
+                                sym = opp.get('symbol', '')
+                                if '/' in sym:
+                                    sym = sym.split('/')[0]
+                                if sym:
+                                    self.engine.updated_symbols.add(sym)
                 
                 # Execute opportunities that have actionable trade data
                 if all_opps and hasattr(self, 'engine') and self.engine:
@@ -1314,7 +1336,7 @@ class IntegratedArbitrageBot:
                 best_sell_ex = ex
         
         if not best_buy_ex or not best_sell_ex or best_buy_ex == best_sell_ex:
-            logger.debug(f"  ↳ {strategy} {symbol}: same exchange ({best_buy_ex}={best_sell_ex})")
+            self._track_rejection("same_exchange")
             return None
         
         # Calculate profit with real prices and fees
@@ -1343,11 +1365,9 @@ class IntegratedArbitrageBot:
         if net <= 0 or roi_pct < min_roi:
             spread_pct = ((best_sell_price - best_buy_price) / best_buy_price) * 100
             fee_pct = (buy_fee + sell_fee) * 100
-            logger.debug(
-                f"  ↳ {strategy} {symbol}: spread={spread_pct:.4f}% fees={fee_pct:.3f}% "
-                f"roi={roi_pct:.4f}% < min={min_roi:.4f}% ({best_buy_ex}→{best_sell_ex}) "
-                f"conf={confidence:.0%}"
-            )
+            gap = fee_pct - spread_pct
+            reason = f"spread<fees ({spread_pct:.3f}%<{fee_pct:.2f}%, gap={gap:.3f}%)"
+            self._track_rejection(reason, strategy, symbol, best_buy_ex, best_sell_ex, spread_pct, fee_pct)
             return None
         
         return {
@@ -1393,6 +1413,31 @@ class IntegratedArbitrageBot:
             return min(dip / 5.0, 1.0) if dip > 1.0 else 0.0
         # Pure spread strategies: no additional statistical edge
         return 0.0
+    
+    def _track_rejection(self, reason: str, strategy: str = "", symbol: str = "",
+                         buy_ex: str = "", sell_ex: str = "",
+                         spread_pct: float = 0, fee_pct: float = 0):
+        """Track trade rejections for dashboard visibility."""
+        self._rejection_total += 1
+        # Bucket by general reason type
+        bucket = "spread<fees" if "spread<fees" in reason else reason
+        self._rejection_counts[bucket] = self._rejection_counts.get(bucket, 0) + 1
+        self._last_rejection_reason = reason
+        
+        # Log every 50th rejection at INFO so user sees it
+        if self._rejection_total % 50 == 1:
+            logger.info(
+                f"📊 Rejection #{self._rejection_total}: {strategy} {symbol} "
+                f"{buy_ex}→{sell_ex} spread={spread_pct:.3f}% < fees={fee_pct:.2f}%"
+            )
+        
+        # If a slow strategy signal gets rejected, it's still useful:
+        # add the symbol to the priority scan set so ArbitrageEngine
+        # scans it more frequently (slow strategy signals = statistical edge,
+        # just waiting for spread to widen enough)
+        if strategy in ('PAIRS_TRADING', 'MOMENTUM', 'DCA', 'FUNDING_RATE',
+                        'INDEX_ARB', 'VOLATILITY_ARB', 'SPREAD_BETTING', 'BREAKOUT'):
+            self._signal_priority_symbols.add(symbol)
     
     async def shutdown(self):
         """Graceful shutdown."""

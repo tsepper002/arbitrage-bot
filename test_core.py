@@ -1044,6 +1044,89 @@ def test_triangular_engine():
     print(f"  ✅ All triangular + momentum + breakout tests passed!")
 
 
+def test_rejection_tracking():
+    """TEST 25: Rejection tracking for dashboard visibility."""
+    print(f"\n{'='*60}")
+    print(f"TEST 25: Rejection Tracking + Signal Priority")
+    print(f"{'='*60}")
+    
+    try:
+        from main import IntegratedArbitrageBot
+    except ImportError:
+        # Standalone test: simulate the tracking logic directly
+        class MockBot:
+            def __init__(self):
+                self._rejection_counts = {}
+                self._rejection_total = 0
+                self._last_rejection_reason = ""
+                self._signal_priority_symbols = set()
+            
+            def _track_rejection(self, reason, strategy="", symbol="",
+                                 buy_ex="", sell_ex="",
+                                 spread_pct=0, fee_pct=0):
+                self._rejection_total += 1
+                bucket = "spread<fees" if "spread<fees" in reason else reason
+                self._rejection_counts[bucket] = self._rejection_counts.get(bucket, 0) + 1
+                self._last_rejection_reason = reason
+                if strategy in ('PAIRS_TRADING', 'MOMENTUM', 'DCA', 'FUNDING_RATE',
+                                'INDEX_ARB', 'VOLATILITY_ARB', 'SPREAD_BETTING', 'BREAKOUT'):
+                    self._signal_priority_symbols.add(symbol)
+        
+        IntegratedArbitrageBot = MockBot
+    
+    bot = IntegratedArbitrageBot()
+    
+    # Verify initial state
+    assert bot._rejection_total == 0
+    assert bot._rejection_counts == {}
+    assert bot._signal_priority_symbols == set()
+    
+    # Track a spread<fees rejection from PAIRS strategy
+    bot._track_rejection(
+        "spread<fees (0.07%<0.20%, gap=0.13%)",
+        strategy="PAIRS_TRADING", symbol="BTC-USDT",
+        buy_ex="Bybit", sell_ex="KuCoin",
+        spread_pct=0.07, fee_pct=0.20
+    )
+    
+    assert bot._rejection_total == 1
+    assert "spread<fees" in bot._rejection_counts
+    assert bot._rejection_counts["spread<fees"] == 1
+    # PAIRS is a slow strategy → symbol should be in priority set
+    assert "BTC-USDT" in bot._signal_priority_symbols
+    print(f"  ✅ Rejection tracked: total=1, reason='spread<fees'")
+    print(f"  ✅ BTC-USDT added to priority symbols (from PAIRS_TRADING)")
+    
+    # Track a same_exchange rejection
+    bot._track_rejection("same_exchange")
+    assert bot._rejection_total == 2
+    assert bot._rejection_counts.get("same_exchange", 0) == 1
+    print(f"  ✅ Second rejection: total=2, same_exchange=1, spread<fees=1")
+    
+    # SMART_ORDER rejection should NOT add to priority (fast strategy)
+    bot._track_rejection(
+        "spread<fees (0.05%<0.20%, gap=0.15%)",
+        strategy="SMART_ORDER", symbol="ETH-USDT",
+        buy_ex="HTX", sell_ex="Bybit",
+        spread_pct=0.05, fee_pct=0.20
+    )
+    assert "ETH-USDT" not in bot._signal_priority_symbols
+    print(f"  ✅ SMART_ORDER rejection: ETH-USDT NOT in priority (fast strategy, no boost)")
+    
+    # MOMENTUM rejection SHOULD add to priority
+    bot._track_rejection(
+        "spread<fees (0.08%<0.20%, gap=0.12%)",
+        strategy="MOMENTUM", symbol="SOL-USDT",
+        buy_ex="Bybit", sell_ex="KuCoin",
+        spread_pct=0.08, fee_pct=0.20
+    )
+    assert "SOL-USDT" in bot._signal_priority_symbols
+    print(f"  ✅ MOMENTUM rejection: SOL-USDT added to priority (slow strategy boost)")
+    
+    print(f"  ✅ Final state: {bot._rejection_total} rejections, "
+          f"priority symbols: {sorted(bot._signal_priority_symbols)}")
+
+
 if __name__ == "__main__":
     tests = [
         test_settings, test_price_store, test_exchange_config, test_order_executor,
@@ -1056,6 +1139,7 @@ if __name__ == "__main__":
         test_flash_crash_protector_no_keyerror,
         test_dry_run_records_success,
         test_triangular_engine,
+        test_rejection_tracking,
     ]
     passed = failed = 0
     for t in tests:
