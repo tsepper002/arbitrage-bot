@@ -213,7 +213,7 @@ class FlashCrashProtector:
         health_score = 1.0
         
         # Проверка волатильности
-        if len(self.volatility_history[symbol]) >= 5:
+        if len(self.volatility_history.get(symbol, [])) >= 5:
             current_vol = list(self.volatility_history[symbol])[-1][1]
             avg_vol = statistics.mean([v for _, v in list(self.volatility_history[symbol])[:-1]])
             if avg_vol > 0:

@@ -181,6 +181,7 @@ class MEXC:
         log.info(f"MEXC REST polling started for {len(self._mexc_symbols)} symbols")
         async with aiohttp.ClientSession() as session:
             while not self._stop:
+                success_count = 0
                 for mexc_sym in self._mexc_symbols:
                     if self._stop:
                         break
@@ -197,10 +198,20 @@ class MEXC:
                                     std_symbol = self._sym_map.get(mexc_sym, mexc_sym)
                                     await self.store.update_levels("MEXC", std_symbol, bids_levels, asks_levels, time.time())
                                     self._data_received = True
+                                    success_count += 1
+                            elif resp.status == 429:
+                                log.warning(f"MEXC REST rate-limited, pausing 2s")
+                                await asyncio.sleep(2.0)
                             else:
                                 log.debug(f"MEXC REST {mexc_sym}: HTTP {resp.status}")
                     except Exception as e:
                         log.debug(f"MEXC REST {mexc_sym} error: {e}")
+                    # Pace requests: 100ms between each to avoid rate limits (10 req/s safe)
+                    await asyncio.sleep(0.1)
+
+                if success_count > 0 and not self._data_received:
+                    log.info(f"MEXC REST: first data received ({success_count} symbols)")
+                    self._data_received = True
 
                 await asyncio.sleep(self.REST_POLL_INTERVAL)
 
@@ -209,6 +220,7 @@ class MEXC:
         import urllib.request
         log.info(f"MEXC stdlib REST polling started for {len(self._mexc_symbols)} symbols")
         while not self._stop:
+            success_count = 0
             for mexc_sym in self._mexc_symbols:
                 if self._stop:
                     break
@@ -219,7 +231,10 @@ class MEXC:
                     loop = asyncio.get_event_loop()
                     resp_bytes = await loop.run_in_executor(
                         None,
-                        lambda: urllib.request.urlopen(req, timeout=5).read()
+                        lambda u=url: urllib.request.urlopen(
+                            urllib.request.Request(u, headers={"User-Agent": "arbitrage-bot/1.0"}),
+                            timeout=5
+                        ).read()
                     )
                     data = json.loads(resp_bytes)
                     bids_raw = data.get("bids", [])
@@ -230,6 +245,14 @@ class MEXC:
                         std_symbol = self._sym_map.get(mexc_sym, mexc_sym)
                         await self.store.update_levels("MEXC", std_symbol, bids_levels, asks_levels, time.time())
                         self._data_received = True
+                        success_count += 1
                 except Exception as e:
                     log.debug(f"MEXC stdlib REST {mexc_sym} error: {e}")
+                # Pace requests: 100ms between each to avoid rate limits
+                await asyncio.sleep(0.1)
+
+            if success_count > 0 and not self._data_received:
+                log.info(f"MEXC stdlib REST: first data received ({success_count} symbols)")
+                self._data_received = True
+
             await asyncio.sleep(self.REST_POLL_INTERVAL)

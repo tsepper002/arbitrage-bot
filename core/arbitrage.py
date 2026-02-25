@@ -455,7 +455,8 @@ class ArbitrageEngine:
                     # Record trade to strategy manager
                     if self.strategy_manager and result.get('trade_info'):
                         strategy = o.get('strategy', 'cross_exchange')
-                        success = result['status'] == 'success'
+                        # Both 'simulated' (dry-run) and 'success' (live) count as successful trades
+                        success = result['status'] in ('success', 'simulated')
                         profit = result['trade_info'].get('net_profit', 0)
                         execution_time = result.get('execution_time', 0)
                         self.strategy_manager.record_trade(
@@ -496,7 +497,7 @@ class ArbitrageEngine:
                         if self.metrics_collector:
                             self.metrics_collector.record('trades_executed', 1)
                             self.metrics_collector.record('execution_time_ms', result.get('execution_time', 0) * 1000)
-                            if result['status'] == 'success':
+                            if result['status'] in ('success', 'simulated'):
                                 self.metrics_collector.record('successful_trades', 1)
                     
                     # Update risk manager after trade
