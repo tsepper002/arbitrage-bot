@@ -565,6 +565,25 @@ class IntegratedArbitrageBot:
             logger.error(f"❌ Error during startup validation: {e}")
             return False
     
+    def _on_mexc_task_done(self, task):
+        """Callback when MEXC task completes (crash detection)."""
+        try:
+            exc = task.exception()
+            if exc:
+                logger.error(f"❌ MEXC task crashed: {type(exc).__name__}: {exc}")
+                logger.error("   MEXC data will not be available. Restarting REST poll...")
+                # Restart MEXC task with stdlib fallback
+                mexc_exchanges = [e for e in getattr(self, 'exchanges', []) if isinstance(e, MEXC)]
+                if mexc_exchanges:
+                    mexc = mexc_exchanges[0]
+                    mexc._ws_failed = True
+                    self._mexc_task = asyncio.create_task(mexc._run_rest_poll_stdlib())
+                    self._mexc_task.add_done_callback(self._on_mexc_task_done)
+        except asyncio.CancelledError:
+            pass  # Normal shutdown
+        except asyncio.InvalidStateError:
+            pass  # Task not done yet
+
     async def _initialize_exchanges(self):
         """Initialize WebSocket connections to all exchanges."""
         try:
@@ -589,6 +608,7 @@ class IntegratedArbitrageBot:
             # MEXC uses async coroutine (not thread), start it as a task
             mexc = MEXC(self.store, symbols)
             self._mexc_task = asyncio.create_task(mexc.run())
+            self._mexc_task.add_done_callback(self._on_mexc_task_done)
             await asyncio.sleep(stagger)
             
             binance = BinanceWS(symbols, self.store, self.loop, exchange_name="Binance", stagger_start=stagger)
