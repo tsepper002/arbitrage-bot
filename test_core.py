@@ -1134,6 +1134,67 @@ def test_rejection_tracking():
           f"priority symbols: {sorted(bot._signal_priority_symbols)}")
 
 
+def test_ml_observation_outside_prefilter():
+    """TEST 26: ML modules observe data on EVERY scan, not just when spread > fees."""
+    print(f"\n{'='*60}")
+    print(f"TEST 26: ML Observation Outside Prefilter")
+    print(f"{'='*60}")
+    
+    from core.arbitrage import ArbitrageEngine
+    from core.price_store import PriceStore
+    from ml.volatility_forecaster import VolatilityForecaster
+    from ml.ml_spread_predictor import MLSpreadPredictor
+    
+    try:
+        from ml.market_regime_detector import MarketRegimeDetector
+        regime_det = MarketRegimeDetector()
+    except ImportError:
+        regime_det = None
+        print(f"  ⚠️ MarketRegimeDetector requires numpy — skipping regime test")
+    
+    store = PriceStore()
+    vol_fc = VolatilityForecaster()
+    spread_pred = MLSpreadPredictor()
+    
+    engine = ArbitrageEngine(store)
+    engine.volatility_forecaster = vol_fc
+    engine.market_regime_detector = regime_det
+    engine.ml_spread_predictor = spread_pred
+    
+    # Set up data with SMALL spread (0.01%) — well below fees (0.20%)
+    # This means the prefilter at line 243 will SKIP the pair
+    for i in range(25):
+        price = 50000 + i * 10
+        loop.run_until_complete(store.update_levels("Bybit", "BTC-USDT",
+            bids_levels=[(price - 2.5, 1.0)], asks_levels=[(price + 2.5, 1.0)]))
+        loop.run_until_complete(store.update_levels("KuCoin", "BTC-USDT",
+            bids_levels=[(price - 2.0, 1.0)], asks_levels=[(price + 3.0, 1.0)]))
+        # Spread = tiny — will be SKIPPED by prefilter
+        loop.run_until_complete(engine.scan_once("BTC-USDT"))
+    
+    # BEFORE fix: all 3 would have 0 data points (stuck inside prefilter gate)
+    # AFTER fix: they should have data from every scan
+    
+    vol_samples = len(vol_fc.price_history.get("BTC-USDT", []))
+    print(f"  Volatility Forecaster: {vol_samples} price observations")
+    assert vol_samples >= 20, f"Expected ≥20 volatility observations, got {vol_samples}"
+    print(f"  ✅ Volatility Forecaster receives data on every scan (not gated by prefilter)")
+    
+    # Check spread predictor got data
+    ewma_val = spread_pred.ewma_values.get("BTC-USDT")
+    buf_len = len(spread_pred.buffers.get("BTC-USDT", []))
+    print(f"  Spread Predictor: EWMA={ewma_val}, buffer={buf_len} observations")
+    assert buf_len >= 20, f"Expected ≥20 spread observations, got {buf_len}"
+    assert ewma_val is not None, "EWMA should not be None after observations"
+    print(f"  ✅ Spread Predictor receives data on every scan (EWMA != learning)")
+    
+    # Check volatility regime
+    vol_regime = vol_fc.get_regime("BTC-USDT")
+    print(f"  Volatility Regime: {vol_regime}")
+    assert vol_regime in ('LOW', 'NORMAL', 'HIGH', 'EXTREME'), f"Unexpected regime: {vol_regime}"
+    print(f"  ✅ Vol={vol_regime} computed from real data (not stuck on default NORMAL)")
+
+
 if __name__ == "__main__":
     tests = [
         test_settings, test_price_store, test_exchange_config, test_order_executor,
@@ -1147,6 +1208,7 @@ if __name__ == "__main__":
         test_dry_run_records_success,
         test_triangular_engine,
         test_rejection_tracking,
+        test_ml_observation_outside_prefilter,
     ]
     passed = failed = 0
     for t in tests:

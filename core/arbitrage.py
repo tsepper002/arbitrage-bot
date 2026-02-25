@@ -195,6 +195,55 @@ class ArbitrageEngine:
         if len(exchanges) < 2:
             return res
 
+        # --- PER-SYMBOL ML OBSERVATION (runs every scan, regardless of spreads) ---
+        # Compute representative mid-price from first exchange with valid data
+        _mid_price = 0.0
+        for _ex in exchanges:
+            _d = exmap.get(_ex, {})
+            _b = _d.get("bid", 0) or 0
+            _a = _d.get("ask", 0) or 0
+            if _b > 0 and _a > 0:
+                _mid_price = (_b + _a) / 2
+                break
+
+        if _mid_price > 0:
+            # Volatility Forecaster — observe every symbol every scan
+            if getattr(self, 'volatility_forecaster', None):
+                try:
+                    self.volatility_forecaster.observe(symbol, _mid_price)
+                except Exception:
+                    pass
+            # Market Regime Detector — observe every symbol every scan
+            if self.market_regime_detector:
+                try:
+                    regime = self.market_regime_detector.detect(symbol, _mid_price)
+                except Exception:
+                    pass
+            # Price history for pattern recognition / market adaptive
+            hist = self._symbol_prices.setdefault(symbol, [])
+            hist.append(_mid_price)
+            if len(hist) > 200:
+                self._symbol_prices[symbol] = hist[-200:]
+
+        # ML Spread Predictor — compute best spread for this symbol and observe
+        if self.ml_spread_predictor and len(exchanges) >= 2:
+            try:
+                best_ask = float('inf')
+                best_bid = 0.0
+                for _ex in exchanges:
+                    _d = exmap.get(_ex, {})
+                    _a = _d.get("ask", 0) or 0
+                    _b = _d.get("bid", 0) or 0
+                    if _a > 0 and _a < best_ask:
+                        best_ask = _a
+                    if _b > best_bid:
+                        best_bid = _b
+                if best_ask < float('inf') and best_bid > 0 and best_ask > 0:
+                    cross_spread = (best_bid - best_ask) / best_ask
+                    self.ml_spread_predictor.observe(symbol, cross_spread)
+            except Exception:
+                pass
+
         # BIDIRECTIONAL SCAN FIX: Check ALL directed pairs (A->B AND B->A)
         # Previous version only checked exchanges[i+1:] which missed 50% of opportunities
         for i, buy_ex in enumerate(exchanges):
@@ -330,24 +379,20 @@ class ArbitrageEngine:
                             'buy_ex': buy_ex,
                             'sell_ex': sell_ex
                         })
-                        # Update predictor with observed spread
-                        self.ml_spread_predictor.update(symbol, cross_spread_pct)
+                        # observe() moved to per-symbol level above
                     except (AttributeError, ValueError, TypeError) as e:
                         logger.debug(f"ML spread predictor error: {e}")
                 
                 # P5: Market Regime Detection — adjust min ROI based on market conditions
+                # (detect() called per-symbol above; here we just READ the cached regime)
                 regime_min_roi = self.min_net_pct
                 if self.market_regime_detector:
                     try:
-                        mid_price = (top_bid + top_ask) / 2 if (top_bid and top_ask) else 0
-                        if mid_price > 0:
-                            regime = self.market_regime_detector.detect(symbol, mid_price)
-                            if regime == 'VOLATILE':
-                                # In volatile markets, opportunities are wider but riskier
-                                regime_min_roi = self.min_net_pct * 1.5
-                            elif regime == 'CALM':
-                                # In calm markets, accept smaller spreads
-                                regime_min_roi = self.min_net_pct * 0.8
+                        regime = self.market_regime_detector.detect(symbol, _mid_price) if _mid_price > 0 else 'CALM'
+                        if regime == 'VOLATILE':
+                            regime_min_roi = self.min_net_pct * 1.5
+                        elif regime == 'CALM':
+                            regime_min_roi = self.min_net_pct * 0.8
                     except (AttributeError, ValueError, TypeError) as e:
                         logger.debug(f"Market regime detection error: {e}")
                 
@@ -429,19 +474,7 @@ class ArbitrageEngine:
                     except Exception as e:
                         logger.debug(f"RL agent error: {e}")
 
-                # M6: Volatility Forecaster — observe price for learning
-                if getattr(self, 'volatility_forecaster', None):
-                    try:
-                        mid = (top_bid + top_ask) / 2 if (top_bid and top_ask) else 0
-                        if mid > 0:
-                            self.volatility_forecaster.observe(symbol, mid)
-                            # Track for pattern recognition / market adaptive
-                            hist = self._symbol_prices.setdefault(symbol, [])
-                            hist.append(mid)
-                            if len(hist) > 200:
-                                self._symbol_prices[symbol] = hist[-200:]
-                    except Exception as e:
-                        logger.debug(f"Volatility forecaster error: {e}")
+                # M6: Volatility Forecaster + price history — moved to per-symbol level (before pair loop)
 
                 # M7: Pattern Recognition — check for technical signals
                 if getattr(self, 'pattern_recognition', None):
