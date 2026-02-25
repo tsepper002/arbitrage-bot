@@ -133,6 +133,7 @@ class ArbitrageEngine:
                 w.writerow(["ts", "symbol", "buy_ex", "sell_ex", "qty", "buy_price", "sell_price", "net", "roi_pct"])
 
         self.recent_cache = {}
+        self._symbol_prices = {}  # Per-symbol price history for pattern recognition
         
         logger.info(f"ArbitrageEngine initialized: min_roi={self.min_net_pct}%, max_exposure=${self.max_exposure_usdt}, safety_factor={self.safety_factor}")
 
@@ -434,8 +435,36 @@ class ArbitrageEngine:
                         mid = (top_bid + top_ask) / 2 if (top_bid and top_ask) else 0
                         if mid > 0:
                             self.volatility_forecaster.observe(symbol, mid)
+                            # Track for pattern recognition / market adaptive
+                            hist = self._symbol_prices.setdefault(symbol, [])
+                            hist.append(mid)
+                            if len(hist) > 200:
+                                self._symbol_prices[symbol] = hist[-200:]
                     except Exception as e:
                         logger.debug(f"Volatility forecaster error: {e}")
+
+                # M7: Pattern Recognition — check for technical signals
+                if getattr(self, 'pattern_recognition', None):
+                    try:
+                        price_hist = getattr(self, '_symbol_prices', {}).get(symbol, [])
+                        if len(price_hist) >= 20:
+                            signals = self.pattern_recognition.get_trading_signals(price_hist)
+                            if signals.get('action') == 'SELL':
+                                logger.debug(f"Pattern recognition: SELL signal for {symbol}, cautious")
+                    except (AttributeError, ValueError, TypeError) as e:
+                        logger.debug(f"Pattern recognition error: {e}")
+
+                # M8: Market Adaptive Strategy — adjust based on market regime
+                if getattr(self, 'market_adaptive_strategy', None):
+                    try:
+                        price_hist = getattr(self, '_symbol_prices', {}).get(symbol, [])
+                        if len(price_hist) >= 20:
+                            regime = self.market_adaptive_strategy.detect_market_regime(price_hist)
+                            params = self.market_adaptive_strategy.adapt_parameters(regime)
+                            if params.get('confidence', 1.0) < 0.3:
+                                logger.debug(f"Market adaptive: low confidence regime={regime}")
+                    except (AttributeError, ValueError, TypeError) as e:
+                        logger.debug(f"Market adaptive error: {e}")
 
                 if ml_skip:
                     continue
@@ -662,6 +691,26 @@ class ArbitrageEngine:
                                 self.ml_spread_predictor.observe(o['symbol'], actual_spread)
                             except Exception as e:
                                 logger.debug(f"ML spread predictor post-trade error: {e}")
+
+                        # MT6: Auto Parameter Tuner — record performance
+                        if getattr(self, 'auto_parameter_tuner', None):
+                            try:
+                                params = {'min_roi': self.min_net_pct, 'max_exposure': self.max_exposure_usdt}
+                                profit = result.get('trade_info', {}).get('net_profit', 0)
+                                self.auto_parameter_tuner.record_performance(params, profit, 1)
+                            except (AttributeError, ValueError, TypeError) as e:
+                                logger.debug(f"Auto param tuner post-trade error: {e}")
+
+                        # MT7: ML Model Trainer — collect training data
+                        if getattr(self, 'ml_model_trainer', None):
+                            try:
+                                profit = result.get('trade_info', {}).get('net_profit', 0)
+                                self.ml_model_trainer.record_trade_data({
+                                    'symbol': o['symbol'], 'roi': o['roi_pct'],
+                                    'spread': o.get('gross', 0), 'profitable': profit > 0
+                                })
+                            except (AttributeError, ValueError, TypeError) as e:
+                                logger.debug(f"ML model trainer post-trade error: {e}")
                     
                     # Update risk manager after trade
                     if self.risk_manager and result.get('trade_info'):
