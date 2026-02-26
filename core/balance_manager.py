@@ -72,6 +72,9 @@ class BalanceManager:
         self.initialized = True
         return success_count > 0
     
+    # All 5 supported exchanges for virtual balance creation
+    ALL_EXCHANGES = ["Bybit", "KuCoin", "HTX", "MEXC", "Binance"]
+
     def _use_virtual_balances(self):
         """Use virtual balances for DRY_RUN mode. No real API calls needed."""
         capital = settings.VIRTUAL_CAPITAL_PER_EXCHANGE
@@ -85,14 +88,15 @@ class BalanceManager:
             'SOL': round(capital * 0.1 / 85, 2)
         }
         
-        for exchange_name in self.rest_clients.keys():
+        # In DRY RUN, create balances for ALL 5 exchanges (not just those with API keys)
+        for exchange_name in self.ALL_EXCHANGES:
             self.balances[exchange_name] = mock_balance.copy()
             self.last_sync[exchange_name] = time.time()
         
-        num_exchanges = len(self.rest_clients)
+        num_exchanges = len(self.ALL_EXCHANGES)
         total_virtual = capital * num_exchanges
         logger.info(f"🔵 DRY RUN: Virtual balances loaded — ${capital:.0f} USDT × {num_exchanges} exchanges = ${total_virtual:.0f} total")
-        for exchange_name in sorted(self.rest_clients.keys()):
+        for exchange_name in sorted(self.ALL_EXCHANGES):
             logger.info(f"   {exchange_name:12s} ✅ ${capital:.2f} USDT (virtual)")
         logger.info(f"✅ Virtual balances ready for simulation")
     

@@ -193,7 +193,7 @@ class StrategyDispatcher:
             for strat in expired:
                 del self._active_signals[symbol][strat]
             if attributed:
-                logger.info(f"📊 Trade {symbol} attributed to: CROSS_EXCHANGE + {', '.join(attributed)}")
+                logger.debug(f"📊 Trade {symbol} attributed to: {strategy_name} + {', '.join(attributed)}")
 
     async def scan_fast(self) -> List[Dict[str, Any]]:
         """
