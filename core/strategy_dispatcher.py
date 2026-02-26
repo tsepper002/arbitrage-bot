@@ -39,6 +39,11 @@ class StrategyDispatcher:
         self._price_history: Dict[str, deque] = {}
         self._max_history = 200  # Keep 200 data points per symbol
         
+        # Active signals: symbol → set of strategy names with recent signals
+        # Used to attribute engine trades to strategies that signaled the same symbol
+        self._active_signals: Dict[str, Dict[str, float]] = {}  # symbol → {strategy: timestamp}
+        self._signal_ttl = 30.0  # Signal expires after 30 seconds
+        
         # Strategy performance tracking
         self.strategy_stats = {
             'CROSS_EXCHANGE': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
@@ -155,10 +160,40 @@ class StrategyDispatcher:
         if count > 0:
             self.strategy_stats['CROSS_EXCHANGE']['signals'] += count
 
-    def record_engine_trade(self, strategy_name: str = 'CROSS_EXCHANGE'):
-        """Called by ArbitrageEngine when a trade is executed, to update dashboard Trds column."""
+    def record_signal(self, strategy_name: str, symbol: str):
+        """Record that a strategy generated a signal for a symbol.
+        
+        Used for trade attribution: when the engine trades a symbol that
+        a strategy recently signaled, the trade counts for that strategy too.
+        """
+        import time
+        if symbol not in self._active_signals:
+            self._active_signals[symbol] = {}
+        self._active_signals[symbol][strategy_name] = time.time()
+
+    def record_engine_trade(self, strategy_name: str = 'CROSS_EXCHANGE', symbol: str = ''):
+        """Called by ArbitrageEngine when a trade is executed.
+        
+        Updates dashboard Trds column for CROSS_EXCHANGE and also
+        attributes the trade to any strategy that recently signaled this symbol.
+        """
+        import time
         if strategy_name in self.strategy_stats:
             self.strategy_stats[strategy_name]['trades'] += 1
+        
+        # Attribute trade to strategies that signaled this symbol
+        if symbol and symbol in self._active_signals:
+            now = time.time()
+            attributed = []
+            for strat, ts in list(self._active_signals[symbol].items()):
+                if now - ts < self._signal_ttl and strat != strategy_name:
+                    if strat in self.strategy_stats:
+                        self.strategy_stats[strat]['trades'] += 1
+                        attributed.append(strat)
+                elif now - ts >= self._signal_ttl:
+                    del self._active_signals[symbol][strat]
+            if attributed:
+                logger.info(f"📊 Trade {symbol} attributed to: CROSS_EXCHANGE + {', '.join(attributed)}")
 
     async def scan_fast(self) -> List[Dict[str, Any]]:
         """
@@ -264,6 +299,9 @@ class StrategyDispatcher:
                             })
                             self.strategy_stats['TRIANGULAR']['opportunities'] += 1
                             self.strategy_stats['TRIANGULAR']['signals'] += 1
+                            # Record signal for both pairs (trade attribution)
+                            self.record_signal('TRIANGULAR', pair_a)
+                            self.record_signal('TRIANGULAR', pair_b)
                             logger.info(f"   🔺 TRI: {direction} net_roi={best_roi:.3f}%")
             
             # Track best triangular near-miss for dashboard visibility
@@ -293,6 +331,7 @@ class StrategyDispatcher:
                                 'data': {'spread_pct': spread_pct, 'ratio': spread_pct / fee_pct if fee_pct > 0 else spread_pct / 0.01}
                             })
                             self.strategy_stats['SMART_ORDER']['signals'] += 1
+                            self.record_signal('SMART_ORDER', symbol)
                             smart_order_signal_found = True
                             break  # one per symbol
             if smart_order_signal_found:
@@ -319,6 +358,7 @@ class StrategyDispatcher:
                         'data': {'volatility_pct': volatility}
                     })
                     self.strategy_stats['VOLATILITY']['signals'] += 1
+                    self.record_signal('VOLATILITY', symbol)
                     volatility_signal_found = True
             if volatility_signal_found:
                 self.strategy_stats['VOLATILITY']['opportunities'] += 1
@@ -357,6 +397,11 @@ class StrategyDispatcher:
                     if opps:
                         # Count signals for slow strategies (each opp = 1 signal)
                         self.strategy_stats[name]['signals'] += len(opps)
+                        # Record active signals for trade attribution
+                        for opp in opps:
+                            sym = opp.get('symbol', '')
+                            if sym:
+                                self.record_signal(name, sym)
                     opportunities.extend(opps)
                 except Exception as e:
                     logger.debug(f"{name} scan error: {e}")

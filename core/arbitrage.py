@@ -640,7 +640,7 @@ class ArbitrageEngine:
                     if result.get('trade_info'):
                         # Feed trade count to strategy dispatcher for dashboard Trds column
                         if self.strategy_dispatcher and result['status'] in ('success', 'simulated'):
-                            self.strategy_dispatcher.record_engine_trade('CROSS_EXCHANGE')
+                            self.strategy_dispatcher.record_engine_trade('CROSS_EXCHANGE', symbol=o.get('symbol', ''))
                         
                         if self.strategy_manager:
                             strategy = o.get('strategy', 'cross_exchange')
