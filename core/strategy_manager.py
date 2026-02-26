@@ -132,6 +132,16 @@ class StrategyManager:
             'triangular': StrategyStats(name='triangular'),
             'smart_order': StrategyStats(name='smart_order'),
             'volatility': StrategyStats(name='volatility'),
+            'grid_trading': StrategyStats(name='grid_trading'),
+            'dca': StrategyStats(name='dca'),
+            'market_making': StrategyStats(name='market_making'),
+            'pairs_trading': StrategyStats(name='pairs_trading'),
+            'funding_rate': StrategyStats(name='funding_rate'),
+            'volatility_arb': StrategyStats(name='volatility_arb'),
+            'index_arb': StrategyStats(name='index_arb'),
+            'spread_betting': StrategyStats(name='spread_betting'),
+            'momentum': StrategyStats(name='momentum'),
+            'breakout': StrategyStats(name='breakout'),
         }
         
         # Priority weights (updated based on performance)
@@ -140,6 +150,16 @@ class StrategyManager:
             'triangular': 0.5,
             'smart_order': 0.8,
             'volatility': 0.3,
+            'grid_trading': 0.4,
+            'dca': 0.3,
+            'market_making': 0.6,
+            'pairs_trading': 0.5,
+            'funding_rate': 0.7,
+            'volatility_arb': 0.6,
+            'index_arb': 0.5,
+            'spread_betting': 0.4,
+            'momentum': 0.5,
+            'breakout': 0.4,
         }
         
         logger.info(f"StrategyManager initialized with {len(self.strategies)} strategies")
@@ -162,6 +182,7 @@ class StrategyManager:
             execution_time: Time taken to execute in seconds
             details: Additional trade details
         """
+        strategy_name = strategy_name.lower()
         if strategy_name not in self.strategies:
             logger.warning(f"Unknown strategy: {strategy_name}")
             return
