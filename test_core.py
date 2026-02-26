@@ -1275,6 +1275,81 @@ def test_cross_exchange_and_triangular_signals():
     print(f"  ✅ All CROSS_EXCHANGE + TRIANGULAR + MEXC DNS + NN cache tests passed!")
 
 
+def test_scaling_and_e2e_pipeline():
+    """TEST 28: Capital Scaling ($10 to $1M) + Full E2E Pipeline"""
+    print("\n" + "=" * 60)
+    print("TEST 28: Capital Scaling + Full E2E Pipeline")
+    print("=" * 60)
+    import importlib
+
+    # Test 1: Scaling from $10 to $1M per exchange
+    for capital, expected_min, expected_max in [
+        (10, 5, 7),        # $10/ex → ~$6 exposure
+        (20, 11, 13),      # $20/ex → ~$12 exposure
+        (1000, 550, 650),   # $1K/ex → ~$600 exposure
+        (200000, 110000, 130000),  # $200K/ex → ~$120K exposure
+    ]:
+        os.environ['ARB_VIRTUAL_CAPITAL'] = str(capital)
+        importlib.reload(settings)
+        exp = settings.MAX_EXPOSURE_USDT
+        assert expected_min <= exp <= expected_max, \
+            f"${capital}/ex: exposure=${exp:.0f} not in [${expected_min}, ${expected_max}]"
+        print(f"  ✅ ${capital}/exchange → exposure=${exp:.0f}, daily_loss=${settings.MAX_DAILY_LOSS:.0f}, single_loss=${settings.MAX_SINGLE_TRADE_LOSS:.0f}")
+
+    # Reset to default
+    os.environ.pop('ARB_VIRTUAL_CAPITAL', None)
+    importlib.reload(settings)
+
+    # Test 2: Full E2E pipeline — scan → find → risk check → execute
+    from core.price_store import PriceStore
+    from core.arbitrage import ArbitrageEngine
+    from core.order_executor import OrderExecutor
+    from core.risk_manager import get_risk_manager
+
+    store = PriceStore()
+    executor = OrderExecutor(dry_run=True)
+    risk_mgr = get_risk_manager()
+    engine = ArbitrageEngine(store, executor=executor, risk_manager=risk_mgr)
+
+    async def run_pipeline():
+        # Setup 5 exchanges with APT-USDT (profitable spread like user saw)
+        await store.update_levels('MEXC', 'APT-USDT', [(8.20, 500)], [(8.21, 500)])
+        await store.update_levels('HTX', 'APT-USDT', [(8.24, 500)], [(8.25, 500)])
+        await store.update_levels('Bybit', 'APT-USDT', [(8.22, 500)], [(8.23, 500)])
+        await store.update_levels('Binance', 'APT-USDT', [(8.215, 500)], [(8.225, 500)])
+        await store.update_levels('KuCoin', 'APT-USDT', [(8.21, 500)], [(8.22, 500)])
+
+        opps = await engine.scan_once('APT-USDT')
+        assert len(opps) >= 1, f"Expected ≥1 opportunity, got {len(opps)}"
+        print(f"  ✅ Found {len(opps)} opportunities")
+
+        best = opps[0]
+        assert best['buy_ex'] == 'MEXC', f"Expected buy on MEXC (0% fee), got {best['buy_ex']}"
+        assert best['sell_ex'] == 'HTX', f"Expected sell on HTX (highest bid), got {best['sell_ex']}"
+        print(f"  ✅ Best: {best['buy_ex']}→{best['sell_ex']} roi={best['roi_pct']:.3f}%")
+
+        # Risk check
+        can_trade, reason = risk_mgr.check_can_trade(best)
+        assert can_trade, f"Risk blocked trade: {reason}"
+        print(f"  ✅ Risk manager: approved")
+
+        # Execute
+        result = await executor.execute_arbitrage(best)
+        assert result['status'] == 'simulated', f"Expected simulated, got {result['status']}"
+        assert result.get('trade_info'), "Missing trade_info in result"
+        profit = result['trade_info'].get('net_profit', 0)
+        assert profit > 0, f"Expected positive profit, got {profit}"
+        print(f"  ✅ Executed: profit=${profit:.6f}")
+
+        # Check executor stats
+        stats = executor.get_statistics()
+        assert stats['total_orders'] >= 1
+        print(f"  ✅ Executor stats: {stats['total_orders']} trade(s), ${stats['total_profit']:.6f} profit")
+
+    loop.run_until_complete(run_pipeline())
+    print(f"  ✅ Full E2E pipeline: scan → find → risk → execute → record ✅")
+
+
 if __name__ == "__main__":
     tests = [
         test_settings, test_price_store, test_exchange_config, test_order_executor,
@@ -1290,6 +1365,7 @@ if __name__ == "__main__":
         test_rejection_tracking,
         test_ml_observation_outside_prefilter,
         test_cross_exchange_and_triangular_signals,
+        test_scaling_and_e2e_pipeline,
     ]
     passed = failed = 0
     for t in tests:

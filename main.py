@@ -1350,8 +1350,8 @@ class IntegratedArbitrageBot:
         buy_fee = EXCHANGE_PARAMS.get(best_buy_ex, {}).get('taker', 0.001)
         sell_fee = EXCHANGE_PARAMS.get(best_sell_ex, {}).get('taker', 0.001)
         
-        # Calculate max trade size from exposure limit
-        qty = min(settings.MAX_EXPOSURE_USDT, 200.0) / best_buy_price if best_buy_price > 0 else 0
+        # Calculate max trade size from exposure limit (scales with capital)
+        qty = settings.MAX_EXPOSURE_USDT / best_buy_price if best_buy_price > 0 else 0
         if qty <= 0:
             return None
         
