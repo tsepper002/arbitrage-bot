@@ -120,12 +120,19 @@ MAX_CONCURRENT_OPPORTUNITIES = _get_env_int("ARB_MAX_CONCURRENT_OPPS", 3)
 
 # ============================================================================
 # MULTI-LAYER RISK LIMITS (Strategy A5)
-# Auto-scale risk limits based on total virtual capital in dry-run mode
-_total_capital = VIRTUAL_CAPITAL_PER_EXCHANGE * 5  # 5 exchanges
-MAX_DAILY_LOSS = _get_env_float("ARB_MAX_DAILY_LOSS", min(50.0, _total_capital * 0.10))  # 10% of total
-MAX_SINGLE_TRADE_LOSS = _get_env_float("ARB_MAX_SINGLE_TRADE_LOSS", min(15.0, _total_capital * 0.05))  # 5% of total
-MAX_HOURLY_LOSS = _get_env_float("ARB_MAX_HOURLY_LOSS", min(20.0, _total_capital * 0.05))  # 5% of total
-MAX_OPEN_EXPOSURE = _get_env_float("ARB_MAX_OPEN_EXPOSURE", min(500.0, _total_capital * 0.60))  # 60% of total
+# Auto-scale risk limits based on total capital (virtual or live)
+# ============================================================================
+NUM_EXCHANGES = 5
+DAILY_LOSS_PCT = 0.10        # Max daily loss = 10% of total capital
+SINGLE_TRADE_LOSS_PCT = 0.05 # Max loss per trade = 5% of total capital
+HOURLY_LOSS_PCT = 0.05       # Max hourly loss = 5% of total capital
+OPEN_EXPOSURE_PCT = 0.60     # Max open exposure = 60% of total capital
+
+_total_capital = VIRTUAL_CAPITAL_PER_EXCHANGE * NUM_EXCHANGES
+MAX_DAILY_LOSS = _get_env_float("ARB_MAX_DAILY_LOSS", _total_capital * DAILY_LOSS_PCT)
+MAX_SINGLE_TRADE_LOSS = _get_env_float("ARB_MAX_SINGLE_TRADE_LOSS", _total_capital * SINGLE_TRADE_LOSS_PCT)
+MAX_HOURLY_LOSS = _get_env_float("ARB_MAX_HOURLY_LOSS", _total_capital * HOURLY_LOSS_PCT)
+MAX_OPEN_EXPOSURE = _get_env_float("ARB_MAX_OPEN_EXPOSURE", _total_capital * OPEN_EXPOSURE_PCT)
 MAX_CONSECUTIVE_LOSSES = _get_env_int("ARB_MAX_CONSECUTIVE_LOSSES", 5)  # Pause after N losses
 ANOMALOUS_SPREAD_PCT = _get_env_float("ARB_ANOMALOUS_SPREAD_PCT", 5.0)  # Skip spreads above this
 MAX_DATA_AGE_SEC = _get_env_float("ARB_MAX_DATA_AGE_SEC", 0.5)  # Don't trade on stale data (OPTIMIZED: 3.0 -> 0.5s)
