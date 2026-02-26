@@ -166,7 +166,6 @@ class StrategyDispatcher:
         Used for trade attribution: when the engine trades a symbol that
         a strategy recently signaled, the trade counts for that strategy too.
         """
-        import time
         if symbol not in self._active_signals:
             self._active_signals[symbol] = {}
         self._active_signals[symbol][strategy_name] = time.time()
@@ -177,7 +176,6 @@ class StrategyDispatcher:
         Updates dashboard Trds column for CROSS_EXCHANGE and also
         attributes the trade to any strategy that recently signaled this symbol.
         """
-        import time
         if strategy_name in self.strategy_stats:
             self.strategy_stats[strategy_name]['trades'] += 1
         
@@ -185,13 +183,15 @@ class StrategyDispatcher:
         if symbol and symbol in self._active_signals:
             now = time.time()
             attributed = []
-            for strat, ts in list(self._active_signals[symbol].items()):
-                if now - ts < self._signal_ttl and strat != strategy_name:
-                    if strat in self.strategy_stats:
-                        self.strategy_stats[strat]['trades'] += 1
-                        attributed.append(strat)
-                elif now - ts >= self._signal_ttl:
-                    del self._active_signals[symbol][strat]
+            expired = []
+            for strat, ts in self._active_signals[symbol].items():
+                if now - ts >= self._signal_ttl:
+                    expired.append(strat)
+                elif strat != strategy_name and strat in self.strategy_stats:
+                    self.strategy_stats[strat]['trades'] += 1
+                    attributed.append(strat)
+            for strat in expired:
+                del self._active_signals[symbol][strat]
             if attributed:
                 logger.info(f"📊 Trade {symbol} attributed to: CROSS_EXCHANGE + {', '.join(attributed)}")
 
