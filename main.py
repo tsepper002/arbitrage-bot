@@ -1291,6 +1291,12 @@ class IntegratedArbitrageBot:
         # BREAKOUT detected
         if strategy == 'BREAKOUT' and opp.get('data', {}):
             return True
+        # VOLATILITY: high volatility = spread opportunities
+        if strategy == 'VOLATILITY' and opp.get('data', {}).get('volatility_pct', 0) > 0:
+            return True
+        # GRID_TRADING: price deviation from center
+        if strategy == 'GRID_TRADING' and opp.get('data', {}).get('deviation_pct', 0) > 0:
+            return True
         return False
     
     def _build_trade_from_signal(self, opp: dict) -> dict:
