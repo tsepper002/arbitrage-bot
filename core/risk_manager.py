@@ -182,9 +182,12 @@ class RiskManager:
         if not allowed:
             return False, reason
         
-        # Check single trade loss limit (conservative: assume worst case 100% loss)
-        if amount > settings.MAX_SINGLE_TRADE_LOSS:
-            return False, f"Trade amount (${amount:.2f}) exceeds max single trade limit"
+        # Check single trade loss limit
+        # In arbitrage, max loss = amount × max_spread (not 100% of amount)
+        # Conservative estimate: worst case loss = 5% of trade amount (anomalous spread)
+        max_possible_loss = amount * (settings.ANOMALOUS_SPREAD_PCT / 100.0)
+        if max_possible_loss > settings.MAX_SINGLE_TRADE_LOSS:
+            return False, f"Potential loss (${max_possible_loss:.2f}) exceeds max single trade limit (${settings.MAX_SINGLE_TRADE_LOSS:.2f})"
         
         # Check if would exceed open exposure
         if self.open_exposure + amount > settings.MAX_OPEN_EXPOSURE:

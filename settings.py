@@ -96,9 +96,11 @@ TELEGRAM_CHAT_ID = _get_env_str("ARB_TELEGRAM_CHAT_ID", "")
 # AGGRESSIVE: Lowered to 0.02% for maximum opportunities (+50% more trades)
 MIN_NET_ROI_PCT = _get_env_float("ARB_MIN_NET_ROI_PCT", 0.02)
 
-# Maximum exposure per trade in USDT (conservative default)
-# AGGRESSIVE: Set to 300 for optimal risk/reward balance
-MAX_EXPOSURE_USDT = _get_env_float("ARB_MAX_EXPOSURE_USDT", 300.0)
+# Maximum exposure per trade in USDT
+# Auto-scales to 60% of per-exchange virtual capital in dry-run mode
+# Override with ARB_MAX_EXPOSURE_USDT env var for custom value
+_default_exposure = min(300.0, VIRTUAL_CAPITAL_PER_EXCHANGE * 0.6) if DRY_RUN else 300.0
+MAX_EXPOSURE_USDT = _get_env_float("ARB_MAX_EXPOSURE_USDT", _default_exposure)
 
 # Safety factor for liquidity (use only this fraction of available liquidity)
 # 0.5 = use max 50% of available liquidity to avoid slippage
@@ -118,11 +120,12 @@ MAX_CONCURRENT_OPPORTUNITIES = _get_env_int("ARB_MAX_CONCURRENT_OPPS", 3)
 
 # ============================================================================
 # MULTI-LAYER RISK LIMITS (Strategy A5)
-# ============================================================================
-MAX_DAILY_LOSS = _get_env_float("ARB_MAX_DAILY_LOSS", 50.0)  # Stop trading if daily loss exceeds this
-MAX_SINGLE_TRADE_LOSS = _get_env_float("ARB_MAX_SINGLE_TRADE_LOSS", 15.0)  # Cancel trade if loss exceeds
-MAX_HOURLY_LOSS = _get_env_float("ARB_MAX_HOURLY_LOSS", 20.0)  # Pause if hourly loss exceeds
-MAX_OPEN_EXPOSURE = _get_env_float("ARB_MAX_OPEN_EXPOSURE", 500.0)  # Max total open position value
+# Auto-scale risk limits based on total virtual capital in dry-run mode
+_total_capital = VIRTUAL_CAPITAL_PER_EXCHANGE * 5  # 5 exchanges
+MAX_DAILY_LOSS = _get_env_float("ARB_MAX_DAILY_LOSS", min(50.0, _total_capital * 0.10))  # 10% of total
+MAX_SINGLE_TRADE_LOSS = _get_env_float("ARB_MAX_SINGLE_TRADE_LOSS", min(15.0, _total_capital * 0.05))  # 5% of total
+MAX_HOURLY_LOSS = _get_env_float("ARB_MAX_HOURLY_LOSS", min(20.0, _total_capital * 0.05))  # 5% of total
+MAX_OPEN_EXPOSURE = _get_env_float("ARB_MAX_OPEN_EXPOSURE", min(500.0, _total_capital * 0.60))  # 60% of total
 MAX_CONSECUTIVE_LOSSES = _get_env_int("ARB_MAX_CONSECUTIVE_LOSSES", 5)  # Pause after N losses
 ANOMALOUS_SPREAD_PCT = _get_env_float("ARB_ANOMALOUS_SPREAD_PCT", 5.0)  # Skip spreads above this
 MAX_DATA_AGE_SEC = _get_env_float("ARB_MAX_DATA_AGE_SEC", 0.5)  # Don't trade on stale data (OPTIMIZED: 3.0 -> 0.5s)
