@@ -1341,6 +1341,34 @@ class IntegratedArbitrageBot:
                 best_sell_price = bid
                 best_sell_ex = ex
         
+        # Use exchange hint from strategies like FUNDING_RATE and INDEX_ARB:
+        # If strategy says exchange X has a premium (high price), sell there.
+        # If exchange X has a discount (low price), buy there.
+        hint_ex = data.get('exchange', '')
+        hint_dev = data.get('deviation_pct', 0)
+        if hint_ex and hint_dev != 0 and hint_ex in exmap:
+            rec = exmap[hint_ex]
+            if hint_dev > 0 and rec.get('bid'):
+                # Premium on this exchange → sell here, buy elsewhere
+                best_sell_ex = hint_ex
+                best_sell_price = rec['bid']
+                # Find cheapest other exchange to buy
+                best_buy_ex, best_buy_price = None, float('inf')
+                for ex, r in exmap.items():
+                    if ex != hint_ex and r.get('ask') and r['ask'] < best_buy_price:
+                        best_buy_price = r['ask']
+                        best_buy_ex = ex
+            elif hint_dev < 0 and rec.get('ask'):
+                # Discount on this exchange → buy here, sell elsewhere
+                best_buy_ex = hint_ex
+                best_buy_price = rec['ask']
+                # Find most expensive other exchange to sell
+                best_sell_ex, best_sell_price = None, 0.0
+                for ex, r in exmap.items():
+                    if ex != hint_ex and r.get('bid') and r['bid'] > best_sell_price:
+                        best_sell_price = r['bid']
+                        best_sell_ex = ex
+        
         if not best_buy_ex or not best_sell_ex or best_buy_ex == best_sell_ex:
             self._track_rejection("same_exchange")
             return None

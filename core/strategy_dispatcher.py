@@ -420,7 +420,7 @@ class StrategyDispatcher:
     # --- Individual strategy scanners using PriceStore data ---
     
     async def _scan_grid_trading(self) -> List[Dict[str, Any]]:
-        """Grid Trading: check if current price is near grid levels."""
+        """Grid Trading: check if current price deviates from SMA across all symbols."""
         self.strategy_stats['GRID_TRADING']['calls'] += 1
         opportunities = []
         
@@ -428,35 +428,35 @@ class StrategyDispatcher:
         if not grid:
             return opportunities
         
-        symbol = getattr(grid, 'symbol', 'BTC-USDT')
-        mid = self._get_mid_price(symbol)
-        if not mid:
-            return opportunities
-        
-        # Analyze grid position: is price near the edges of the range?
         range_pct = getattr(grid, 'price_range_pct', 0.1)
-        prices = self._get_prices_list(symbol)
-        if len(prices) < 5:
-            return opportunities
+        symbols = getattr(settings, 'TRADING_SYMBOLS', ['BTC-USDT'])
         
-        avg = sum(prices) / len(prices)
-        deviation = abs(mid - avg) / avg if avg > 0 else 0
-        
-        # Signal when price is moving away from center (grid needs rebalancing)
-        if deviation > range_pct * 0.1:
-            opportunities.append({
-                'strategy': 'GRID_TRADING',
-                'type': 'rebalance',
-                'symbol': symbol,
-                'data': {'mid_price': mid, 'avg_price': avg, 'deviation_pct': deviation * 100}
-            })
-            self.strategy_stats['GRID_TRADING']['opportunities'] += 1
-            logger.info(f"   📊 GRID: {symbol} deviation {deviation*100:.2f}% from center")
+        for symbol in symbols:
+            mid = self._get_mid_price(symbol)
+            if not mid:
+                continue
+            
+            prices = self._get_prices_list(symbol)
+            if len(prices) < 5:
+                continue
+            
+            avg = sum(prices) / len(prices)
+            deviation = abs(mid - avg) / avg if avg > 0 else 0
+            
+            if deviation > range_pct * 0.1:
+                opportunities.append({
+                    'strategy': 'GRID_TRADING',
+                    'type': 'rebalance',
+                    'symbol': symbol,
+                    'data': {'mid_price': mid, 'avg_price': avg, 'deviation_pct': deviation * 100}
+                })
+                self.strategy_stats['GRID_TRADING']['opportunities'] += 1
+                logger.info(f"   📊 GRID: {symbol} deviation {deviation*100:.2f}% from center")
         
         return opportunities
     
     async def _scan_dca(self) -> List[Dict[str, Any]]:
-        """DCA: check if current price is below SMA (buy-the-dip signal)."""
+        """DCA: check if current price is below SMA across all symbols."""
         self.strategy_stats['DCA']['calls'] += 1
         opportunities = []
         
@@ -464,25 +464,26 @@ class StrategyDispatcher:
         if not dca:
             return opportunities
         
-        symbol = getattr(dca, 'symbol', 'BTC-USDT')
-        prices = self._get_prices_list(symbol)
-        if len(prices) < 20:
-            return opportunities
+        symbols = getattr(settings, 'TRADING_SYMBOLS', ['BTC-USDT'])
         
-        current = prices[-1]
-        sma20 = sum(prices[-20:]) / 20
-        
-        # DCA signal: price is below 20-period SMA (dip buying)
-        if current < sma20 * 0.99:  # 1% below SMA
-            dip_pct = ((sma20 - current) / sma20) * 100
-            opportunities.append({
-                'strategy': 'DCA',
-                'type': 'accumulation',
-                'symbol': symbol,
-                'data': {'price': current, 'sma20': sma20, 'dip_pct': dip_pct}
-            })
-            self.strategy_stats['DCA']['opportunities'] += 1
-            logger.info(f"   📊 DCA: {symbol} is {dip_pct:.2f}% below SMA20")
+        for symbol in symbols:
+            prices = self._get_prices_list(symbol)
+            if len(prices) < 20:
+                continue
+            
+            current = prices[-1]
+            sma20 = sum(prices[-20:]) / 20
+            
+            if current < sma20 * 0.99:  # 1% below SMA
+                dip_pct = ((sma20 - current) / sma20) * 100
+                opportunities.append({
+                    'strategy': 'DCA',
+                    'type': 'accumulation',
+                    'symbol': symbol,
+                    'data': {'price': current, 'sma20': sma20, 'dip_pct': dip_pct}
+                })
+                self.strategy_stats['DCA']['opportunities'] += 1
+                logger.info(f"   📊 DCA: {symbol} is {dip_pct:.2f}% below SMA20")
         
         return opportunities
     
@@ -668,44 +669,41 @@ class StrategyDispatcher:
         return opportunities
     
     async def _scan_index_arb(self) -> List[Dict[str, Any]]:
-        """Index Arb: compare BTC price to average of all tracked prices."""
+        """Index Arb: compare each symbol's exchange price to its composite average."""
         self.strategy_stats['INDEX_ARB']['calls'] += 1
         opportunities = []
-        
-        # Use BTC as index proxy, compare to avg mid across exchanges
-        mid = self._get_mid_price('BTC-USDT')
-        if not mid:
-            return opportunities
         
         store = self._get_price_store()
         if not store:
             return opportunities
         
         snap = store.snapshot()
-        btc_prices = {}
-        for ex, rec in snap.get('BTC-USDT', {}).items():
-            bid = rec.get("bid")
-            ask = rec.get("ask")
-            if bid and ask:
-                btc_prices[ex] = (bid + ask) / 2
         
-        if len(btc_prices) < 2:
-            return opportunities
-        
-        avg = sum(btc_prices.values()) / len(btc_prices)
-        
-        for ex, price in btc_prices.items():
-            dev = ((price - avg) / avg) * 100
-            if abs(dev) > 0.1:  # > 0.1% deviation from composite
-                opportunities.append({
-                    'strategy': 'INDEX_ARB',
-                    'type': 'index_deviation',
-                    'symbol': 'BTC-USDT',
-                    'data': {'exchange': ex, 'deviation_pct': dev, 'price': price, 'index_price': avg}
-                })
-                self.strategy_stats['INDEX_ARB']['opportunities'] += 1
-                logger.info(f"   📊 INDEX: BTC-USDT {ex} {dev:+.3f}% vs composite")
-                break
+        for symbol, exmap in snap.items():
+            prices = {}
+            for ex, rec in exmap.items():
+                bid = rec.get("bid")
+                ask = rec.get("ask")
+                if bid and ask:
+                    prices[ex] = (bid + ask) / 2
+            
+            if len(prices) < 2:
+                continue
+            
+            avg = sum(prices.values()) / len(prices)
+            
+            for ex, price in prices.items():
+                dev = ((price - avg) / avg) * 100
+                if abs(dev) > 0.1:  # > 0.1% deviation from composite
+                    opportunities.append({
+                        'strategy': 'INDEX_ARB',
+                        'type': 'index_deviation',
+                        'symbol': symbol,
+                        'data': {'exchange': ex, 'deviation_pct': dev, 'price': price, 'index_price': avg}
+                    })
+                    self.strategy_stats['INDEX_ARB']['opportunities'] += 1
+                    logger.info(f"   📊 INDEX: {symbol} {ex} {dev:+.3f}% vs composite")
+                    break  # One signal per symbol
         
         return opportunities
     
