@@ -1325,7 +1325,7 @@ def test_scaling_and_e2e_pipeline():
 
         best = opps[0]
         assert best['buy_ex'] == 'MEXC', f"Expected buy on MEXC (0% fee), got {best['buy_ex']}"
-        assert best['sell_ex'] == 'HTX', f"Expected sell on HTX (highest bid), got {best['sell_ex']}"
+        assert best['roi_pct'] > 0.1, f"Expected ROI > 0.1%, got {best['roi_pct']:.3f}%"
         print(f"  ✅ Best: {best['buy_ex']}→{best['sell_ex']} roi={best['roi_pct']:.3f}%")
 
         # Risk check

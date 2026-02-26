@@ -97,7 +97,7 @@ TELEGRAM_CHAT_ID = _get_env_str("ARB_TELEGRAM_CHAT_ID", "")
 MIN_NET_ROI_PCT = _get_env_float("ARB_MIN_NET_ROI_PCT", 0.02)
 
 # Maximum exposure per trade in USDT
-# Auto-scales to 60% of per-exchange capital (works from $10 to $1,000,000)
+# Auto-scales to 60% of per-exchange capital (works for any balance size)
 # Override with ARB_MAX_EXPOSURE_USDT env var for custom value
 _default_exposure = VIRTUAL_CAPITAL_PER_EXCHANGE * 0.6
 MAX_EXPOSURE_USDT = _get_env_float("ARB_MAX_EXPOSURE_USDT", _default_exposure)
