@@ -20,11 +20,12 @@ class FeeOptimizer:
         
     def _load_fee_structures(self):
         """Load fee structures for different exchanges."""
-        # Standard fee structures (can be loaded from config)
+        # Base-tier fee structures (no VIP, no exchange tokens, no BNB/KCS/MX)
+        # Last verified: Feb 2026
         self.fee_structures = {
             'binance': {
-                'maker': 0.001,  # 0.1%
-                'taker': 0.001,  # 0.1%
+                'maker': 0.001,   # 0.10% (no BNB discount)
+                'taker': 0.001,   # 0.10% (no BNB discount)
                 'vip_tiers': {
                     0: {'maker': 0.001, 'taker': 0.001, 'volume_30d': 0},
                     1: {'maker': 0.0009, 'taker': 0.001, 'volume_30d': 50},
@@ -33,27 +34,33 @@ class FeeOptimizer:
                 }
             },
             'bybit': {
-                'maker': -0.00001,  # Rebate
-                'taker': 0.0006,
+                'maker': 0.001,   # 0.10% (base tier, no rebate)
+                'taker': 0.001,   # 0.10% (base tier)
                 'vip_tiers': {
-                    0: {'maker': -0.00001, 'taker': 0.0006, 'volume_30d': 0},
-                    1: {'maker': -0.00002, 'taker': 0.0005, 'volume_30d': 100},
-                    2: {'maker': -0.00003, 'taker': 0.0004, 'volume_30d': 500},
-                }
-            },
-            'okx': {
-                'maker': 0.0008,
-                'taker': 0.001,
-                'vip_tiers': {
-                    0: {'maker': 0.0008, 'taker': 0.001, 'volume_30d': 0},
-                    1: {'maker': 0.0007, 'taker': 0.0009, 'volume_30d': 50},
+                    0: {'maker': 0.001, 'taker': 0.001, 'volume_30d': 0},
+                    1: {'maker': 0.0008, 'taker': 0.001, 'volume_30d': 100},
+                    2: {'maker': 0.0006, 'taker': 0.0008, 'volume_30d': 500},
                 }
             },
             'kucoin': {
-                'maker': 0.001,
-                'taker': 0.001,
+                'maker': 0.001,   # 0.10% (no KCS discount)
+                'taker': 0.001,   # 0.10% (no KCS discount)
                 'vip_tiers': {
                     0: {'maker': 0.001, 'taker': 0.001, 'volume_30d': 0},
+                }
+            },
+            'htx': {
+                'maker': 0.002,   # 0.20% (base tier)
+                'taker': 0.002,   # 0.20% (base tier)
+                'vip_tiers': {
+                    0: {'maker': 0.002, 'taker': 0.002, 'volume_30d': 0},
+                }
+            },
+            'mexc': {
+                'maker': 0.000,   # 0.00% (free for all)
+                'taker': 0.0005,  # 0.05% (base tier, no MX discount)
+                'vip_tiers': {
+                    0: {'maker': 0.000, 'taker': 0.0005, 'volume_30d': 0},
                 }
             },
         }

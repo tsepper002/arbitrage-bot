@@ -7,51 +7,59 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger("exchange_config")
 
-# Updated fee schedules for exchanges
-# These are standard spot trading fees (may vary by VIP level)
+# ============================================================
+# SPOT TRADING FEES — BASE TIER (no VIP, no exchange tokens)
+# Last verified: Feb 2026
+# User conditions: no BNB/KCS/MX holdings, no VIP status
+# ============================================================
 EXCHANGE_PARAMS: Dict[str, Dict[str, Any]] = {
     "Bybit": {
-        "maker": 0.001,  # 0.1% maker fee
-        "taker": 0.001,  # 0.1% taker fee
-        "withdraw_fee": 1.0,  # Approximate USDT withdrawal fee
+        "maker": 0.001,    # 0.10% maker fee (base tier, no VIP)
+        "taker": 0.001,    # 0.10% taker fee (base tier, no VIP)
+        "withdraw_fee": 1.6,  # USDT TRC20 withdrawal fee
         "withdraw_fee_currency": "USDT",
+        "withdraw_network": "TRC20",
         "min_notional": 1.0,
         "min_size": 0.0001,
         "supports_depth": True,
     },
     "KuCoin": {
-        "maker": 0.001,  # 0.1% maker fee
-        "taker": 0.001,  # 0.1% taker fee
-        "withdraw_fee": 1.0,  # Approximate USDT withdrawal fee
+        "maker": 0.001,    # 0.10% maker fee (base tier, no KCS discount)
+        "taker": 0.001,    # 0.10% taker fee (base tier, no KCS discount)
+        "withdraw_fee": 1.5,  # USDT TRC20 withdrawal fee
         "withdraw_fee_currency": "USDT",
+        "withdraw_network": "TRC20",
         "min_notional": 1.0,
         "min_size": 0.0001,
         "supports_depth": True,
     },
     "HTX": {
-        "maker": 0.002,  # 0.2% maker fee
-        "taker": 0.002,  # 0.2% taker fee
-        "withdraw_fee": 1.0,  # Approximate USDT withdrawal fee
+        "maker": 0.002,    # 0.20% maker fee (base tier)
+        "taker": 0.002,    # 0.20% taker fee (base tier)
+        "withdraw_fee": 1.25, # USDT TRC20 withdrawal fee
         "withdraw_fee_currency": "USDT",
+        "withdraw_network": "TRC20",
         "min_notional": 1.0,
         "min_size": 0.0001,
         "supports_depth": True,
     },
     "MEXC": {
-        "maker": 0.000,  # 0% maker fee — MEXC has ZERO spot trading fees
-        "taker": 0.000,  # 0% taker fee — confirmed for all users (no VIP required)
-        "withdraw_fee": 0.8,  # Approximate USDT withdrawal fee (slightly cheaper)
+        "maker": 0.000,    # 0.00% maker fee (free for all users)
+        "taker": 0.0005,   # 0.05% taker fee (base tier, no MX token discount)
+        "withdraw_fee": 1.0,  # USDT TRC20 withdrawal fee
         "withdraw_fee_currency": "USDT",
+        "withdraw_network": "TRC20",
         "min_notional": 1.0,
         "min_size": 0.0001,
         "supports_depth": True,
     },
     "Binance": {
-        "maker": 0.001,  # 0.1% maker fee
-        "taker": 0.001,  # 0.1% taker fee
-        "withdraw_fee": 1.0,  # Approximate USDT withdrawal fee
+        "maker": 0.001,    # 0.10% maker fee (base tier, no BNB discount)
+        "taker": 0.001,    # 0.10% taker fee (base tier, no BNB discount)
+        "withdraw_fee": 1.0,  # USDT TRC20 withdrawal fee
         "withdraw_fee_currency": "USDT",
-        "min_notional": 10.0,  # Binance typically has higher min notional
+        "withdraw_network": "TRC20",
+        "min_notional": 10.0,  # Binance has higher min notional
         "min_size": 0.0001,
         "supports_depth": True,
     },
