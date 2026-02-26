@@ -160,13 +160,14 @@ class TriangularArbitrageEngine:
         if self.order_executor:
             trade = {
                 'symbol': opportunity.get('pair_a', 'BTC-USDT'),
-                'buy_exchange': exchange,
-                'sell_exchange': exchange,
-                'buy_price': 0,
-                'sell_price': 0,
-                'amount': 0,
+                'buy_ex': exchange,
+                'sell_ex': exchange,
+                'qty': 0,
+                'buy_avg': 0,
+                'sell_avg': 0,
+                'net': 0,
+                'roi_pct': opportunity['profit_pct'],
                 'strategy': 'TRIANGULAR',
-                'net_profit_pct': opportunity['profit_pct'],
             }
             result = await self.order_executor.execute_arbitrage(trade)
             return result
