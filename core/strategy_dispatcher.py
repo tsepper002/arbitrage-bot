@@ -304,16 +304,14 @@ class StrategyDispatcher:
                             self.record_signal('TRIANGULAR', pair_b)
                             logger.info(f"   🔺 TRI: {direction} net_roi={best_roi:.3f}%")
             
-            # Track best triangular near-miss for dashboard visibility
-            if best_tri_roi > -999 and best_tri_roi <= settings.MIN_NET_ROI_PCT:
-                self.strategy_stats['TRIANGULAR']['signals'] += 1  # Count as signal (near-miss)
+            # Track best triangular near-miss for dashboard visibility (no signal counted for near-misses)
 
             # --- SMART_ORDER: detect when spread is wide enough for limit orders ---
             # These are market condition SIGNALS (wide spread on single exchange).
             # Count as signals, not opportunities — actual opportunities are only
             # counted when _build_trade_from_signal() finds a profitable cross-exchange pair.
             from core.exchange_config import EXCHANGE_PARAMS as EP
-            smart_order_signal_found = False
+            smart_order_signals_this_scan = 0
             for symbol, exmap in snap.items():
                 for ex, rec in exmap.items():
                     bid, ask = rec.get("bid"), rec.get("ask")
@@ -330,16 +328,16 @@ class StrategyDispatcher:
                                 'exchange': ex,
                                 'data': {'spread_pct': spread_pct, 'ratio': spread_pct / fee_pct if fee_pct > 0 else spread_pct / 0.01}
                             })
-                            self.strategy_stats['SMART_ORDER']['signals'] += 1
                             self.record_signal('SMART_ORDER', symbol)
-                            smart_order_signal_found = True
+                            smart_order_signals_this_scan += 1
                             break  # one per symbol
-            if smart_order_signal_found:
+            if smart_order_signals_this_scan > 0:
+                self.strategy_stats['SMART_ORDER']['signals'] += 1  # 1 per scan, not per symbol
                 self.strategy_stats['SMART_ORDER']['opportunities'] += 1
 
             # --- VOLATILITY: detect high short-term volatility ---
             # Market condition SIGNAL. Counts as 1 opportunity per scan if any symbol volatile.
-            volatility_signal_found = False
+            volatility_signals_this_scan = 0
             for symbol in list(self._price_history.keys()):
                 prices = self._get_prices_list(symbol)
                 if len(prices) < 10:
@@ -357,10 +355,10 @@ class StrategyDispatcher:
                         'symbol': symbol,
                         'data': {'volatility_pct': volatility}
                     })
-                    self.strategy_stats['VOLATILITY']['signals'] += 1
                     self.record_signal('VOLATILITY', symbol)
-                    volatility_signal_found = True
-            if volatility_signal_found:
+                    volatility_signals_this_scan += 1
+            if volatility_signals_this_scan > 0:
+                self.strategy_stats['VOLATILITY']['signals'] += 1  # 1 per scan, not per symbol
                 self.strategy_stats['VOLATILITY']['opportunities'] += 1
 
         except Exception as e:

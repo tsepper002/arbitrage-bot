@@ -54,7 +54,7 @@ DRY_RUN = _get_env_bool("ARB_DRY_RUN", True)
 
 # Virtual capital per exchange for dry-run mode (USDT)
 # In dry-run, the bot uses this virtual balance instead of querying real exchanges
-VIRTUAL_CAPITAL_PER_EXCHANGE = _get_env_float("ARB_VIRTUAL_CAPITAL", 1000.0)
+VIRTUAL_CAPITAL_PER_EXCHANGE = _get_env_float("ARB_VIRTUAL_CAPITAL", 20.0)
 
 # ============================================================================
 # EXCHANGE API CREDENTIALS
