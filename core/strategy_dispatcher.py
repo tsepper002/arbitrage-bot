@@ -155,6 +155,11 @@ class StrategyDispatcher:
         if count > 0:
             self.strategy_stats['CROSS_EXCHANGE']['signals'] += count
 
+    def record_engine_trade(self, strategy_name: str = 'CROSS_EXCHANGE'):
+        """Called by ArbitrageEngine when a trade is executed, to update dashboard Trds column."""
+        if strategy_name in self.strategy_stats:
+            self.strategy_stats[strategy_name]['trades'] += 1
+
     async def scan_fast(self) -> List[Dict[str, Any]]:
         """
         Scan fast strategies (arbitrage).
