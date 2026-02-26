@@ -1407,6 +1407,7 @@ class IntegratedArbitrageBot:
             extremity = min(abs(rsi - 50) / 50.0, 1.0)
             return extremity if extremity > 0.4 else 0.0
         elif strategy == 'FUNDING_RATE':
+            # Scanner sends 'deviation_pct'; accept both keys for robustness
             premium = abs(data.get('deviation_pct', data.get('premium_pct', 0)))
             return min(premium / 1.0, 1.0) if premium > 0.2 else 0.0
         elif strategy == 'INDEX_ARB':

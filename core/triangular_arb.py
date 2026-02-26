@@ -19,6 +19,7 @@ import time
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
+import settings
 from core.exchange_config import EXCHANGE_PARAMS
 
 logger = logging.getLogger(__name__)
@@ -170,9 +171,12 @@ class TriangularArbitrageEngine:
             profit_pct = opportunity['profit_pct']
 
             # Compute trade size: use pair_a as the traded symbol
-            # Max exposure in USDT, converted to pair_a quantity
-            max_usdt = 200.0  # from settings
+            max_usdt = getattr(settings, 'MAX_EXPOSURE_USDT', 200.0)
             qty = max_usdt / ask_a if ask_a > 0 else 0
+
+            if qty <= 0:
+                logger.warning(f"🔺 Triangular arb skipped: invalid qty (ask_a={ask_a})")
+                return {'status': 'error', 'message': 'Invalid quantity'}
 
             # Net profit in USDT for the full triangular cycle
             invested = qty * ask_a
