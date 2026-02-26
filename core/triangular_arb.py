@@ -142,6 +142,11 @@ class TriangularArbitrageEngine:
                     'pair_a': route.pair_a,
                     'pair_b': route.pair_b,
                     'profit_pct': profit_pct,
+                    'bid_a': bid_a,
+                    'ask_a': ask_a,
+                    'bid_b': bid_b,
+                    'ask_b': ask_b,
+                    'fee': fee,
                     'timestamp': time.time()
                 }
             return None
@@ -158,15 +163,30 @@ class TriangularArbitrageEngine:
         )
 
         if self.order_executor:
+            # Use real prices from the opportunity
+            ask_a = opportunity.get('ask_a', 0)
+            bid_a = opportunity.get('bid_a', 0)
+            fee = opportunity.get('fee', 0.001)
+            profit_pct = opportunity['profit_pct']
+
+            # Compute trade size: use pair_a as the traded symbol
+            # Max exposure in USDT, converted to pair_a quantity
+            max_usdt = 200.0  # from settings
+            qty = max_usdt / ask_a if ask_a > 0 else 0
+
+            # Net profit in USDT for the full triangular cycle
+            invested = qty * ask_a
+            net = invested * (profit_pct / 100.0)
+
             trade = {
                 'symbol': opportunity.get('pair_a', 'BTC-USDT'),
                 'buy_ex': exchange,
                 'sell_ex': exchange,
-                'qty': 0,
-                'buy_avg': 0,
-                'sell_avg': 0,
-                'net': 0,
-                'roi_pct': opportunity['profit_pct'],
+                'qty': qty,
+                'buy_avg': ask_a,
+                'sell_avg': bid_a,
+                'net': net,
+                'roi_pct': profit_pct,
                 'strategy': 'TRIANGULAR',
             }
             result = await self.order_executor.execute_arbitrage(trade)

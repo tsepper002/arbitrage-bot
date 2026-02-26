@@ -1363,9 +1363,9 @@ class IntegratedArbitrageBot:
         
         # Signal confidence reduces required ROI threshold:
         # High-confidence signals (z>2.0, RSI extreme) add statistical
-        # edge on top of the spread, so we lower the bar by up to 50%.
+        # edge on top of the spread, so we lower the bar by up to 80%.
         confidence = self._signal_confidence(strategy, data)
-        min_roi = settings.MIN_NET_ROI_PCT * (1.0 - 0.5 * confidence)
+        min_roi = settings.MIN_NET_ROI_PCT * (1.0 - 0.8 * confidence)
         
         # Only return if profitable after fees (with confidence-adjusted threshold)
         if net <= 0 or roi_pct < min_roi:
@@ -1407,7 +1407,7 @@ class IntegratedArbitrageBot:
             extremity = min(abs(rsi - 50) / 50.0, 1.0)
             return extremity if extremity > 0.4 else 0.0
         elif strategy == 'FUNDING_RATE':
-            premium = abs(data.get('premium_pct', 0))
+            premium = abs(data.get('deviation_pct', data.get('premium_pct', 0)))
             return min(premium / 1.0, 1.0) if premium > 0.2 else 0.0
         elif strategy == 'INDEX_ARB':
             deviation = abs(data.get('deviation_pct', 0))
@@ -1417,6 +1417,13 @@ class IntegratedArbitrageBot:
         elif strategy == 'DCA':
             dip = data.get('dip_pct', 0)
             return min(dip / 5.0, 1.0) if dip > 1.0 else 0.0
+        elif strategy == 'BREAKOUT':
+            return 0.5  # Breakout signals have moderate confidence
+        elif strategy == 'MARKET_MAKING':
+            spread = data.get('spread_pct', 0)
+            return min(spread / 1.0, 1.0) if spread > 0.1 else 0.0
+        elif strategy in ('SMART_ORDER', 'VOLATILITY', 'GRID_TRADING'):
+            return 0.3  # Moderate confidence for market condition signals
         # Pure spread strategies: no additional statistical edge
         return 0.0
     
