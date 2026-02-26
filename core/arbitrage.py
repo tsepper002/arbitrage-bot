@@ -167,15 +167,18 @@ class ArbitrageEngine:
         # limit by safety factor
         allowed_by_liquidity = total_avail * self.safety_factor
 
-        # limit by exposure in USDT
+        # Target exposure: use max_exposure_usdt to determine trade size
         if buy_price and buy_price > 0:
-            allowed_by_exposure = self.max_exposure_usdt / buy_price
+            target_qty = self.max_exposure_usdt / buy_price
         else:
-            allowed_by_exposure = self.default_qty  # fallback
+            target_qty = self.default_qty  # fallback
 
-        # final qty
-        qty = min(self.default_qty, allowed_by_liquidity if allowed_by_liquidity > 0 else self.default_qty, allowed_by_exposure)
-        # enforce small positive
+        # final qty: min of target and liquidity (don't exceed what's available)
+        if allowed_by_liquidity > 0:
+            qty = min(target_qty, allowed_by_liquidity)
+        else:
+            qty = target_qty
+
         return max(qty, 0.0)
 
     async def scan_once(self, symbol: str, prefunded: bool = True) -> List[Dict]:
@@ -609,6 +612,7 @@ class ArbitrageEngine:
                     nm = self._near_miss_count
                     if nm > 0:
                         self.strategy_dispatcher.record_engine_near_misses(nm)
+                        self._near_miss_count = 0  # Reset after feeding
                 for o in opps:
                     # Check risk manager before executing
                     if self.risk_manager:
@@ -632,19 +636,24 @@ class ArbitrageEngine:
                             logger.debug(f"TWAP execution error: {e}")
                     result = await self.executor.execute_arbitrage(o)
                     
-                    # Record trade to strategy manager
-                    if self.strategy_manager and result.get('trade_info'):
-                        strategy = o.get('strategy', 'cross_exchange')
-                        # Both 'simulated' (dry-run) and 'success' (live) count as successful trades
-                        success = result['status'] in ('success', 'simulated')
-                        profit = result['trade_info'].get('net_profit', 0)
-                        execution_time = result.get('execution_time', 0)
-                        self.strategy_manager.record_trade(
-                            strategy_name=strategy,
-                            success=success,
-                            profit=profit,
-                            execution_time=execution_time
-                        )
+                    # Record trade to strategy manager AND dispatcher stats
+                    if result.get('trade_info'):
+                        # Feed trade count to strategy dispatcher for dashboard Trds column
+                        if self.strategy_dispatcher and result['status'] in ('success', 'simulated'):
+                            self.strategy_dispatcher.strategy_stats['CROSS_EXCHANGE']['trades'] += 1
+                        
+                        if self.strategy_manager:
+                            strategy = o.get('strategy', 'cross_exchange')
+                            # Both 'simulated' (dry-run) and 'success' (live) count as successful trades
+                            success = result['status'] in ('success', 'simulated')
+                            profit = result['trade_info'].get('net_profit', 0)
+                            execution_time = result.get('execution_time', 0)
+                            self.strategy_manager.record_trade(
+                                strategy_name=strategy,
+                                success=success,
+                                profit=profit,
+                                execution_time=execution_time
+                            )
                     
                     # PROFESSIONAL ANALYTICS: Record trade details
                     if result.get('trade_info'):
