@@ -304,7 +304,8 @@ class StrategyDispatcher:
                             self.record_signal('TRIANGULAR', pair_b)
                             logger.info(f"   🔺 TRI: {direction} net_roi={best_roi:.3f}%")
             
-            # Track best triangular near-miss for dashboard visibility (no signal counted for near-misses)
+            # Triangular near-misses tracked via best_tri_roi but not counted as signals
+            # (only actual profitable routes increment signal counter)
 
             # --- SMART_ORDER: detect when spread is wide enough for limit orders ---
             # These are market condition SIGNALS (wide spread on single exchange).
