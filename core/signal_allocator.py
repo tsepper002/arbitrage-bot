@@ -339,11 +339,10 @@ class SignalAllocator:
                 base_coin = symbol.split('-')[0] if '-' in symbol else symbol.replace('USDT', '')
                 current_holding = self.balance_manager.get_balance(exchange, base_coin)
                 # Convert holding to USDT (get_balance returns base coin qty, not USDT)
-                price = 0.0
-                if price_store:
-                    price = self.balance_manager._get_price_from_store(price_store, symbol, exchange)
-                    if price <= 0:
-                        price = self.balance_manager._get_any_price(price_store, symbol)
+                price = self.balance_manager.get_symbol_price(price_store, symbol, exchange)
+                if price <= 0 and current_holding > 0:
+                    # Have holdings but no price data — skip to avoid incorrect allocation
+                    continue
                 current_holding_usdt = current_holding * price if price > 0 else 0
                 # Skip if already holding equivalent value
                 if current_holding_usdt > amount_usdt * 0.5:

@@ -354,6 +354,24 @@ class BalanceManager:
             pass
         return 0.0
 
+    def get_symbol_price(self, price_store, symbol: str, exchange: str = '') -> float:
+        """Public method: get price for a symbol, trying specific exchange first then any.
+        
+        Args:
+            price_store: PriceStore instance
+            symbol: e.g. 'BTC-USDT'
+            exchange: specific exchange to check first (optional)
+        
+        Returns:
+            Mid-price in USDT, or 0.0 if unavailable
+        """
+        if not price_store:
+            return 0.0
+        price = self._get_price_from_store(price_store, symbol, exchange) if exchange else 0.0
+        if price <= 0:
+            price = self._get_any_price(price_store, symbol)
+        return price
+
     def get_exchange_balance_usdt(self, exchange: str, price_store=None) -> float:
         """Get total portfolio value for one exchange in USDT equivalent."""
         currencies = self.balances.get(exchange, {})
