@@ -227,12 +227,15 @@ class ArbitrageEngine:
                 )
             
             # Try selling ANY other coin we have on this exchange
-            all_balances = bm.get_all_balances().get(missed_ex, {}) if hasattr(bm, 'get_all_balances') else {}
+            if hasattr(bm, 'get_all_balances'):
+                all_balances = bm.get_all_balances().get(missed_ex, {})
+            else:
+                all_balances = {}
             for coin, amount in all_balances.items():
                 if coin == 'USDT' or amount <= 0:
                     continue
                 coin_symbol = f"{coin}-USDT"
-                coin_price = self._get_coin_price(coin_symbol)
+                coin_price = self._get_coin_price(coin_symbol, missed_ex)
                 if coin_price <= 0 or amount * coin_price < 1.0:
                     continue
                 # Sell this coin to free up USDT
@@ -245,10 +248,16 @@ class ArbitrageEngine:
         
         return False
     
-    def _get_coin_price(self, symbol: str) -> float:
-        """Get current price for a symbol from PriceStore."""
+    def _get_coin_price(self, symbol: str, exchange: str = None) -> float:
+        """Get current price for a symbol from PriceStore, preferring specific exchange."""
         snap = self.store.snapshot()
         exmap = snap.get(symbol, {})
+        # Try specific exchange first
+        if exchange and exchange in exmap:
+            bid = exmap[exchange].get('bid', 0) or 0
+            if bid > 0:
+                return bid
+        # Fallback: any exchange with a valid price
         for ex in exmap.values():
             bid = ex.get('bid', 0) or 0
             if bid > 0:
@@ -278,6 +287,7 @@ class ArbitrageEngine:
                 if result:
                     logger.info(f"⚡ JIT BUY: {qty:.4f} {base_currency} on {exchange} (${cost:.2f})")
                     opportunity['qty'] = qty
+                    opportunity['net'] = qty * (opportunity.get('sell_avg', 0) - opportunity.get('buy_avg', 0))
                     await asyncio.sleep(self.JIT_BALANCE_SYNC_DELAY)
                     return True
             except Exception as e:
