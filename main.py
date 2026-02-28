@@ -830,6 +830,8 @@ class IntegratedArbitrageBot:
                 signal_allocator=getattr(self, 'signal_allocator', None),
                 state_manager=self.state_manager
             )
+            # Provide REST clients for JIT inventory acquisition in live mode
+            self.engine._rest_clients = self.rest_clients
             logger.info("✅ Main Arbitrage Engine initialized with professional components + ML")
             
         except Exception as e:
