@@ -80,6 +80,7 @@ class SignalAllocator:
     REBALANCE_THRESHOLD_PCT = 0.30  # Buy if holding < 30% of target
     MAX_SINGLE_BUY_PCT = 0.50  # Max 50% of available USDT per single buy
     LIQUIDATION_PCT = 0.80  # Sell 80% of non-allocated coins, keep 20% reserve
+    REBALANCE_COOLDOWN = 300  # 5 min: don't rebalance same coin on same exchange
 
     # Weight multiplier for executed trades vs raw signals
     EXECUTED_WEIGHT = 5.0
@@ -99,6 +100,8 @@ class SignalAllocator:
         self._misses: List[Dict] = []  # [{symbol, exchange, side, timestamp}]
         self._urgent_rebalance_needed = False
         self._urgent_symbols: Dict[str, float] = {}  # symbol → timestamp of last miss
+        self._rebalance_history: Dict[tuple, float] = {}  # (exchange, symbol) → last_rebalance_time
+        self._total_rebalance_fees = 0.0  # Track total fees spent on rebalancing
 
         logger.info("✅ SignalAllocator initialized (HFT-style inventory management)")
 
@@ -408,6 +411,12 @@ class SignalAllocator:
                 if target_usdt < self.MIN_PREPOSITION_USDT:
                     continue
                 
+                # Cooldown: don't re-buy same coin on same exchange within 5 min
+                rb_key = (exchange, symbol)
+                now = time.time()
+                if now - self._rebalance_history.get(rb_key, 0) < self.REBALANCE_COOLDOWN:
+                    continue
+                
                 # Get current holding value in USDT
                 base_coin = symbol.split('-')[0] if '-' in symbol else symbol.replace('USDT', '')
                 current_amount = self.balance_manager.get_balance(exchange, base_coin)
@@ -442,13 +451,19 @@ class SignalAllocator:
                     }
                     
                     if settings.DRY_RUN:
-                        # Virtual: update balances directly
+                        # Virtual: update balances — DEDUCT FEES from received qty
+                        from core.exchange_config import EXCHANGE_PARAMS
+                        fee_rate = EXCHANGE_PARAMS.get(exchange, {}).get('taker', 0.001)
+                        fee_cost = buy_usdt * fee_rate
+                        qty_after_fee = buy_qty * (1.0 - fee_rate)
                         self.balance_manager.update_balance_optimistic(exchange, 'USDT', -buy_usdt)
-                        self.balance_manager.update_balance_optimistic(exchange, base_coin, buy_qty)
+                        self.balance_manager.update_balance_optimistic(exchange, base_coin, qty_after_fee)
+                        self._total_rebalance_fees += fee_cost
+                        self._rebalance_history[rb_key] = time.time()
                         order['status'] = 'simulated'
                         logger.info(
-                            f"🔄 [DRY] {exchange}: Buy {buy_qty:.6g} {base_coin} "
-                            f"(${buy_usdt:.2f}) — pre-position"
+                            f"🔄 [DRY] {exchange}: Buy {qty_after_fee:.6g} {base_coin} "
+                            f"(${buy_usdt:.2f}, fee=${fee_cost:.4f}) — pre-position"
                         )
                     else:
                         # LIVE: place real market buy
@@ -463,6 +478,7 @@ class SignalAllocator:
                                 )
                                 order['status'] = 'executed'
                                 order['result'] = result
+                                self._rebalance_history[rb_key] = time.time()
                                 # Optimistic balance update
                                 self.balance_manager.update_balance_optimistic(exchange, 'USDT', -buy_usdt)
                                 self.balance_manager.update_balance_optimistic(exchange, base_coin, buy_qty)
@@ -482,15 +498,21 @@ class SignalAllocator:
                     if available_usdt < self.MIN_PREPOSITION_USDT:
                         break
             
-            # SELL phase: HFT-style rotation — sell coins that are no longer
-            # "hot" OR whose allocation decreased significantly in favor of
-            # hotter coins. This is how HFT traders manage inventory:
-            # always rotate capital toward the most profitable signals.
+            # SELL phase: Only sell coins that are NO LONGER in allocation at all.
+            # DO NOT rotate frequently — rotation costs fees that destroy small capital.
+            # Only sell when: (1) coin has 0% allocation AND (2) cooldown passed.
             for coin, amount in list(self.balance_manager.balances.get(exchange, {}).items()):
                 if coin == 'USDT' or amount <= 0:
                     continue
                 
                 symbol = f"{coin}-USDT"
+                
+                # Cooldown: don't sell same coin twice in 5 min
+                sell_key = (exchange, symbol)
+                now = time.time()
+                if now - self._rebalance_history.get(sell_key, 0) < self.REBALANCE_COOLDOWN:
+                    continue
+                
                 price = 0.0
                 if price_store:
                     price = self.balance_manager._get_price_from_store(price_store, symbol, exchange)
@@ -503,28 +525,13 @@ class SignalAllocator:
                 if current_value < self.MIN_PREPOSITION_USDT:
                     continue
                 
-                # Determine how much of this coin we SHOULD have
+                # ONLY sell if coin has ZERO allocation (no signals at all)
                 target_frac = allocation.get(symbol, 0.0)
-                total_portfolio = usdt_balance + sum(
-                    self.balance_manager.get_balance(exchange, c) *
-                    (self.balance_manager.get_symbol_price(price_store, f"{c}-USDT", exchange)
-                     if price_store else 0)
-                    for c, a in self.balance_manager.balances.get(exchange, {}).items()
-                    if c != 'USDT' and a > 0
-                )
-                target_value = max(total_portfolio, 0) * target_frac
+                if target_frac > 0:
+                    continue  # Still has signals — keep it, don't pay fees to rotate
                 
-                # Case 1: Coin no longer in allocation at all → sell 80%
-                # Case 2: Coin OVER-allocated (holding 2× target) → trim to target
-                if target_frac == 0:
-                    sell_qty = amount * self.LIQUIDATION_PCT
-                    reason = f'Rotate out {coin} (no signals → sell for hotter coins)'
-                elif current_value > target_value * 2.0 and target_value > 0:
-                    excess = current_value - target_value
-                    sell_qty = excess / price
-                    reason = f'Trim {coin} (have ${current_value:.2f}, target ${target_value:.2f})'
-                else:
-                    continue
+                sell_qty = amount * self.LIQUIDATION_PCT
+                reason = f'Rotate out {coin} (no signals)'
                 
                 sell_usdt = sell_qty * price
                 if sell_usdt < self.MIN_PREPOSITION_USDT:
@@ -541,12 +548,19 @@ class SignalAllocator:
                 }
                 
                 if settings.DRY_RUN:
+                    # Deduct fees from received USDT
+                    from core.exchange_config import EXCHANGE_PARAMS
+                    fee_rate = EXCHANGE_PARAMS.get(exchange, {}).get('taker', 0.001)
+                    fee_cost = sell_usdt * fee_rate
+                    usdt_after_fee = sell_usdt * (1.0 - fee_rate)
                     self.balance_manager.update_balance_optimistic(exchange, coin, -sell_qty)
-                    self.balance_manager.update_balance_optimistic(exchange, 'USDT', sell_usdt)
+                    self.balance_manager.update_balance_optimistic(exchange, 'USDT', usdt_after_fee)
+                    self._total_rebalance_fees += fee_cost
+                    self._rebalance_history[sell_key] = time.time()
                     order['status'] = 'simulated'
                     logger.info(
                         f"🔄 [DRY] {exchange}: Sell {sell_qty:.6g} {coin} "
-                        f"(${sell_usdt:.2f}) — {reason}"
+                        f"(${usdt_after_fee:.2f} after fee=${fee_cost:.4f}) — {reason}"
                     )
                 else:
                     client = (rest_clients or {}).get(exchange)
@@ -560,6 +574,7 @@ class SignalAllocator:
                             )
                             order['status'] = 'executed'
                             order['result'] = result
+                            self._rebalance_history[sell_key] = time.time()
                             self.balance_manager.update_balance_optimistic(exchange, coin, -sell_qty)
                             self.balance_manager.update_balance_optimistic(exchange, 'USDT', sell_usdt)
                             logger.info(

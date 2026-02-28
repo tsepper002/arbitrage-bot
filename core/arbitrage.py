@@ -138,6 +138,8 @@ class ArbitrageEngine:
 
         self.recent_cache = {}
         self._symbol_prices = {}  # Per-symbol price history for pattern recognition
+        self._jit_history = {}    # Track JIT ops: (exchange,symbol) → last_timestamp
+        self._jit_total_cost = 0.0  # Total USDT spent on JIT fees
         
         logger.info(f"ArbitrageEngine initialized: min_roi={self.min_net_pct}%, max_exposure=${self.max_exposure_usdt}, safety_factor={self.safety_factor}")
 
@@ -160,12 +162,15 @@ class ArbitrageEngine:
     JIT_FEE_SLIPPAGE_BUFFER = 1.003  # 0.3% buffer for fees + slippage on JIT buys
     JIT_USDT_SAFETY_MARGIN = 0.95    # Use 95% of USDT, keep 5% for fee rounding
     JIT_BALANCE_SYNC_DELAY = 0.5     # Seconds to wait for balance sync after live order
+    JIT_COOLDOWN_SECONDS = 300       # 5 min cooldown per exchange per symbol
+    JIT_MIN_PROFIT_RATIO = 3.0       # Arb profit must be ≥3× the JIT fee cost
 
     async def _jit_acquire(self, opportunity: Dict, blocked_result: Dict) -> bool:
         """
-        Just-In-Time inventory acquisition:
-        - SELL miss: need base coin on sell exchange → buy it with USDT
-        - BUY miss: need USDT on buy exchange → sell any existing base coin to get USDT
+        Just-In-Time inventory acquisition with FEE PROTECTION:
+        - Only executes if arb profit > JIT fee cost × 3
+        - 5-minute cooldown per exchange/symbol to prevent fee spiral
+        - Deducts exchange trading fees from virtual balances
         
         Returns True if acquisition succeeded and trade should be retried.
         """
@@ -176,14 +181,33 @@ class ArbitrageEngine:
         if not symbol or not missed_ex:
             return False
         
+        # SAFETY CHECK 1: Cooldown — max 1 JIT per exchange/symbol per 5 minutes
+        jit_key = (missed_ex, symbol)
+        now = time.time()
+        last_jit = self._jit_history.get(jit_key, 0)
+        if now - last_jit < self.JIT_COOLDOWN_SECONDS:
+            return False  # Too recent, skip to prevent fee spiral
+        
+        # SAFETY CHECK 2: Profit must exceed JIT fee cost
+        arb_net = opportunity.get('net', 0)
+        arb_qty = opportunity.get('qty', 0)
+        arb_price = opportunity.get('buy_avg', 0) or opportunity.get('sell_avg', 0)
+        from core.exchange_config import EXCHANGE_PARAMS
+        ex_fee = EXCHANGE_PARAMS.get(missed_ex, {}).get('taker', 0.001)
+        jit_fee_cost = arb_qty * arb_price * ex_fee  # Fee for the JIT buy/sell
+        
+        if arb_net <= 0 or arb_net < jit_fee_cost * self.JIT_MIN_PROFIT_RATIO:
+            # Arb profit doesn't justify the JIT fee cost
+            logger.debug(
+                f"JIT skipped {symbol} on {missed_ex}: arb profit ${arb_net:.4f} "
+                f"< {self.JIT_MIN_PROFIT_RATIO}× JIT fee ${jit_fee_cost:.4f}"
+            )
+            return False
+        
         base_currency = symbol.split('-')[0] if '-' in symbol else symbol.replace('USDT', '')
         bm = self.executor.balance_manager if self.executor else None
         if not bm:
             return False
-        
-        # Get exchange fee for accurate cost calculation
-        from core.exchange_config import EXCHANGE_PARAMS
-        ex_fee = EXCHANGE_PARAMS.get(missed_ex, {}).get('taker', 0.001)
         
         if missed_side == 'sell':
             # SELL-SIDE MISS: Need base coin on sell exchange → buy it with USDT
@@ -265,7 +289,7 @@ class ArbitrageEngine:
         return 0.0
     
     async def _jit_execute_buy(self, exchange, symbol, base_currency, qty, cost, opportunity) -> bool:
-        """Execute JIT buy (USDT → base coin) on an exchange."""
+        """Execute JIT buy (USDT → base coin) on an exchange. Records cooldown to prevent fee spiral."""
         bm = self.executor.balance_manager
         
         if settings.DRY_RUN:
@@ -273,7 +297,12 @@ class ArbitrageEngine:
             bm.update_balance_optimistic(exchange, base_currency, qty)
             opportunity['qty'] = qty
             opportunity['net'] = qty * (opportunity.get('sell_avg', 0) - opportunity.get('buy_avg', 0))
-            logger.info(f"⚡ JIT BUY: {qty:.4f} {base_currency} on {exchange} (${cost:.2f})")
+            # Record JIT operation for cooldown
+            self._jit_history[(exchange, symbol)] = time.time()
+            from core.exchange_config import EXCHANGE_PARAMS
+            fee = EXCHANGE_PARAMS.get(exchange, {}).get('taker', 0.001)
+            self._jit_total_cost += cost * fee
+            logger.info(f"⚡ JIT BUY: {qty:.4f} {base_currency} on {exchange} (${cost:.2f}, fee=${cost*fee:.4f})")
             return True
         else:
             rest_clients = getattr(self.executor, 'rest_clients', getattr(self, '_rest_clients', None))
@@ -285,6 +314,7 @@ class ArbitrageEngine:
                     quantity=qty, price=None
                 )
                 if result:
+                    self._jit_history[(exchange, symbol)] = time.time()
                     logger.info(f"⚡ JIT BUY: {qty:.4f} {base_currency} on {exchange} (${cost:.2f})")
                     opportunity['qty'] = qty
                     opportunity['net'] = qty * (opportunity.get('sell_avg', 0) - opportunity.get('buy_avg', 0))
@@ -301,6 +331,7 @@ class ArbitrageEngine:
         if settings.DRY_RUN:
             bm.update_balance_optimistic(exchange, base_currency, -qty)
             bm.update_balance_optimistic(exchange, 'USDT', usdt_received)
+            self._jit_history[(exchange, symbol)] = time.time()
             logger.info(f"⚡ JIT SELL: {qty:.4f} {base_currency} → ${usdt_received:.2f} USDT on {exchange}")
             return True
         else:
@@ -313,6 +344,7 @@ class ArbitrageEngine:
                     quantity=qty, price=None
                 )
                 if result:
+                    self._jit_history[(exchange, symbol)] = time.time()
                     logger.info(f"⚡ JIT SELL: {qty:.4f} {base_currency} → ${usdt_received:.2f} USDT on {exchange}")
                     await asyncio.sleep(self.JIT_BALANCE_SYNC_DELAY)
                     return True
