@@ -40,17 +40,20 @@ class BinanceRESTClient(BaseRESTClient):
         if self._session and not self._session.closed:
             await self._session.close()
 
-    def _generate_signature(self, params: Dict[str, Any]) -> str:
-        """Generate HMAC SHA256 signature for Binance API."""
-        # Binance requires sorted params for consistent signature
-        sorted_params = sorted(params.items())
-        param_str = "&".join([f"{k}={v}" for k, v in sorted_params])
+    def _build_signed_query(self, params: Dict[str, Any]) -> str:
+        """Build a signed query string for Binance API.
+
+        Binance verifies the signature against the exact query string sent.
+        We build the string ourselves (instead of letting aiohttp reorder the
+        dict) to guarantee the signed string and the sent string are identical.
+        """
+        query = "&".join(f"{k}={v}" for k, v in params.items())
         signature = hmac.new(
             self.api_secret.encode('utf-8'),
-            param_str.encode('utf-8'),
+            query.encode('utf-8'),
             hashlib.sha256
         ).hexdigest()
-        return signature
+        return f"{query}&signature={signature}"
 
     def _get_headers(self) -> Dict[str, str]:
         """Get common headers for API requests."""
@@ -87,11 +90,11 @@ class BinanceRESTClient(BaseRESTClient):
             params["price"] = f"{price:.8f}"
             params["timeInForce"] = time_in_force
 
-        params["signature"] = self._generate_signature(params)
+        query = self._build_signed_query(params)
         headers = self._get_headers()
         session = await self._get_session()
 
-        async with session.post(url, params=params, headers=headers) as resp:
+        async with session.post(f"{url}?{query}", headers=headers) as resp:
             data = await resp.json()
 
             if "code" in data and data.get("code", 0) < 0:
@@ -117,11 +120,11 @@ class BinanceRESTClient(BaseRESTClient):
             "timestamp": int(time.time() * 1000),
             "recvWindow": 5000
         }
-        params["signature"] = self._generate_signature(params)
+        query = self._build_signed_query(params)
         headers = self._get_headers()
         session = await self._get_session()
 
-        async with session.delete(url, params=params, headers=headers) as resp:
+        async with session.delete(f"{url}?{query}", headers=headers) as resp:
             data = await resp.json()
             if "code" in data and data.get("code", 0) < 0:
                 raise Exception(f"Binance cancel failed: {data}")
@@ -137,11 +140,11 @@ class BinanceRESTClient(BaseRESTClient):
             "timestamp": int(time.time() * 1000),
             "recvWindow": 5000
         }
-        params["signature"] = self._generate_signature(params)
+        query = self._build_signed_query(params)
         headers = self._get_headers()
         session = await self._get_session()
 
-        async with session.get(url, params=params, headers=headers) as resp:
+        async with session.get(f"{url}?{query}", headers=headers) as resp:
             data = await resp.json()
             return {
                 "order_id": str(data.get("orderId", "")),
@@ -159,11 +162,11 @@ class BinanceRESTClient(BaseRESTClient):
             "timestamp": int(time.time() * 1000),
             "recvWindow": 5000
         }
-        params["signature"] = self._generate_signature(params)
+        query = self._build_signed_query(params)
         headers = self._get_headers()
         session = await self._get_session()
 
-        async with session.get(url, params=params, headers=headers) as resp:
+        async with session.get(f"{url}?{query}", headers=headers) as resp:
             data = await resp.json()
 
             if "code" in data and data.get("code", 0) < 0:
@@ -225,11 +228,11 @@ class BinanceRESTClient(BaseRESTClient):
         if memo:
             params["addressTag"] = memo
 
-        params["signature"] = self._generate_signature(params)
+        query = self._build_signed_query(params)
         headers = self._get_headers()
         session = await self._get_session()
 
-        async with session.post(url, params=params, headers=headers) as resp:
+        async with session.post(f"{url}?{query}", headers=headers) as resp:
             data = await resp.json()
             if "code" in data and data.get("code", 0) < 0:
                 raise Exception(f"Binance withdraw failed: {data}")
@@ -247,11 +250,11 @@ class BinanceRESTClient(BaseRESTClient):
         if network:
             params["network"] = network
 
-        params["signature"] = self._generate_signature(params)
+        query = self._build_signed_query(params)
         headers = self._get_headers()
         session = await self._get_session()
 
-        async with session.get(url, params=params, headers=headers) as resp:
+        async with session.get(f"{url}?{query}", headers=headers) as resp:
             data = await resp.json()
             if "code" in data and data.get("code", 0) < 0:
                 raise Exception(f"Binance deposit address failed: {data}")
@@ -304,11 +307,11 @@ class BinanceRESTClient(BaseRESTClient):
                 "timestamp": int(time.time() * 1000),
                 "recvWindow": 5000
             }
-            params["signature"] = self._generate_signature(params)
+            query = self._build_signed_query(params)
             headers = self._get_headers()
             session = await self._get_session()
 
-            async with session.get(url, params=params, headers=headers) as resp:
+            async with session.get(f"{url}?{query}", headers=headers) as resp:
                 data = await resp.json()
                 if "code" in data and data.get("code", 0) < 0:
                     logger.error(f"Binance connectivity test failed: {data}")
