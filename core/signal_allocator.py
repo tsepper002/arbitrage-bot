@@ -171,10 +171,9 @@ class SignalAllocator:
                 f"🔥 URGENT: {symbol} missed {recent_for_symbol}× in {self.MISS_WINDOW:.0f}s "
                 f"(no {side}-side inventory on {exchange}) → triggering immediate rebalance"
             )
-            # Also boost the signal score for this symbol
-            self.record_signal(symbol, 'MISS_REACTIVE', exchange, roi_pct=0.5, executed=False)
-            self.record_signal(symbol, 'MISS_REACTIVE', exchange, roi_pct=0.5, executed=False)
-            self.record_signal(symbol, 'MISS_REACTIVE', exchange, roi_pct=0.5, executed=False)
+            # Boost the signal score for this symbol (3× miss signals)
+            for _ in range(3):
+                self.record_signal(symbol, 'MISS_REACTIVE', exchange, roi_pct=0.5, executed=False)
 
     def needs_urgent_rebalance(self) -> bool:
         """Check if reactive rebalance is needed (missed opportunities detected)."""
@@ -576,6 +575,10 @@ class SignalAllocator:
             ],
             'max_preposition_pct': self.MAX_PREPOSITION_PCT * 100,
         }
+
+    def has_sufficient_signals(self, min_count: int = 5) -> bool:
+        """Check if enough signals have been collected for allocation decisions."""
+        return len(self._signals) >= min_count
 
     def print_summary(self):
         """Print human-readable allocation summary."""

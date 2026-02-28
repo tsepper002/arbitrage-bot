@@ -151,7 +151,9 @@ class OrderExecutor:
         
         # Check virtual balances before executing (realistic simulation)
         if self.balance_manager:
-            buy_cost = qty * buy_price * 1.002  # 0.2% fee buffer
+            # Fee buffer: max taker fee is 0.2% (HTX), round up to 0.2% for safety
+            FEE_BUFFER = 1.002
+            buy_cost = qty * buy_price * FEE_BUFFER
             can_buy, buy_reason = self.balance_manager.has_sufficient_balance(
                 buy_ex, quote_currency, buy_cost
             )
