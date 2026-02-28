@@ -67,61 +67,61 @@ def test_factory_functions():
     try:
         from core.balance_manager import get_balance_manager
         tests.append(('✅', 'get_balance_manager'))
-    except:
+    except Exception:
         tests.append(('❌', 'get_balance_manager'))
     
     try:
         from core.risk_manager import get_risk_manager
         tests.append(('✅', 'get_risk_manager'))
-    except:
+    except Exception:
         tests.append(('❌', 'get_risk_manager'))
     
     try:
         from core.state_manager import get_state_manager
         tests.append(('✅', 'get_state_manager'))
-    except:
+    except Exception:
         tests.append(('❌', 'get_state_manager'))
     
     try:
         from core.telegram_bot import get_telegram_bot
         tests.append(('✅', 'get_telegram_bot'))
-    except:
+    except Exception:
         tests.append(('❌', 'get_telegram_bot'))
     
     try:
         from core.resource_monitor import get_resource_monitor
         tests.append(('✅', 'get_resource_monitor'))
-    except:
+    except Exception:
         tests.append(('❌', 'get_resource_monitor'))
     
     try:
         from core.strategy_manager import get_strategy_manager
         tests.append(('✅', 'get_strategy_manager'))
-    except:
+    except Exception:
         tests.append(('❌', 'get_strategy_manager'))
     
     try:
         from core.triangular_arb import get_triangular_engine
         tests.append(('✅', 'get_triangular_engine'))
-    except:
+    except Exception:
         tests.append(('❌', 'get_triangular_engine'))
     
     try:
         from core.rebalancer import get_auto_rebalancer
         tests.append(('✅', 'get_auto_rebalancer'))
-    except:
+    except Exception:
         tests.append(('❌', 'get_auto_rebalancer'))
     
     try:
         from core.startup_validator import get_startup_validator
         tests.append(('✅', 'get_startup_validator'))
-    except:
+    except Exception:
         tests.append(('❌', 'get_startup_validator'))
     
     try:
         from core.windows_optimizer import setup_windows_optimizations
         tests.append(('✅', 'setup_windows_optimizations'))
-    except:
+    except Exception:
         tests.append(('❌', 'setup_windows_optimizations'))
     
     passed = sum(1 for status, _ in tests if status == '✅')

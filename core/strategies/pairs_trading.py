@@ -68,7 +68,7 @@ class PairsTradingStrategy:
         try:
             ticker = await self.exchange.fetch_ticker(symbol)
             return (ticker['bid'] + ticker['ask']) / 2
-        except:
+        except (KeyError, TypeError, ValueError, Exception):
             return None
             
     def get_stats(self) -> Dict:

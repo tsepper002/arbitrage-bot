@@ -113,7 +113,8 @@ class SlippagePredictor:
             b = self._coeff[key]
             inv_depth = 1.0 / max(total_liq, 1.0)
             learned = b[0] * volume + b[1] * inv_depth + b[2]
-            slippage = 0.5 * slippage + 0.5 * max(learned, 0.0)
+            if not (math.isnan(learned) or math.isinf(learned)):
+                slippage = 0.5 * slippage + 0.5 * max(learned, 0.0)
 
         self.predictions_cache[cache_key] = (time.time(), slippage)
         return slippage

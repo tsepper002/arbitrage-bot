@@ -335,7 +335,7 @@ class StrategyDispatcher:
                                 'type': 'limit_opportunity',
                                 'symbol': symbol,
                                 'exchange': ex,
-                                'data': {'spread_pct': spread_pct, 'ratio': spread_pct / fee_pct if fee_pct > 0 else spread_pct / 0.01}
+                                'data': {'spread_pct': spread_pct, 'ratio': spread_pct / fee_pct if fee_pct > 0 else 1.0}
                             })
                             self.record_signal('SMART_ORDER', symbol)
                             smart_order_signals_this_scan += 1

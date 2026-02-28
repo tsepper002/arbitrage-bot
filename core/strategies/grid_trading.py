@@ -80,7 +80,7 @@ class GridTradingStrategy:
                         await self._place_sell(price + (self.price_range_pct * mid / self.grid_levels))
                     else:
                         await self._place_buy(price - (self.price_range_pct * mid / self.grid_levels))
-            except:
+            except Exception:
                 pass
                 
     def get_stats(self) -> Dict:

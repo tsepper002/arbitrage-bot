@@ -92,6 +92,8 @@ class FlashCrashProtector:
         
         # Проверка резкого падения
         recent_high = max(prices[-10:])
+        if recent_high <= 0:
+            return False, ""
         drop_pct = (recent_high - current_price) / recent_high
         
         if drop_pct > self.price_drop_threshold:
@@ -99,6 +101,8 @@ class FlashCrashProtector:
         
         # Проверка резкого роста (pump)
         recent_low = min(prices[-10:])
+        if recent_low <= 0:
+            return False, ""
         rise_pct = (current_price - recent_low) / recent_low
         
         if rise_pct > self.price_drop_threshold * 2:  # Двойной порог для pump

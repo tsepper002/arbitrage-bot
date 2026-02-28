@@ -309,8 +309,8 @@ class MLSpreadPredictor:
         while True:
             try:
                 # Update predictions for all symbols/pairs with sufficient data
-                for symbol in self.spread_history:
-                    for exchange_pair in self.spread_history[symbol]:
+                for symbol in list(self.spread_history.keys()):
+                    for exchange_pair in list(self.spread_history.get(symbol, {}).keys()):
                         if self._has_sufficient_data(symbol, exchange_pair):
                             self.get_prediction(
                                 symbol,

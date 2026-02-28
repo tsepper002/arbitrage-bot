@@ -59,8 +59,16 @@ class KucoinWS:
             r = requests.post("https://api.kucoin.com/api/v1/bullet-public", timeout=5)
             r.raise_for_status()
             data = r.json()
-            token = data["data"]["token"]
-            endpoint = data["data"]["instanceServers"][0]["endpoint"]
+            resp_data = data.get("data") or {}
+            token = resp_data.get("token")
+            servers = resp_data.get("instanceServers") or []
+            if not token or not servers:
+                logger.error("KuCoin token response missing data: %s", data)
+                return None
+            endpoint = servers[0].get("endpoint", "")
+            if not endpoint:
+                logger.error("KuCoin missing endpoint in response")
+                return None
             return f"{endpoint}?token={token}"
         except Exception:
             logger.exception("KuCoin token fetch error")
