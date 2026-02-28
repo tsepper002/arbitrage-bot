@@ -141,6 +141,17 @@ class ArbitrageEngine:
         self._jit_history = {}    # Track JIT ops: (exchange,symbol) → last_timestamp
         self._jit_total_cost = 0.0  # Total USDT spent on JIT fees
         
+        # Compound reinvestment: profits grow trade size (capped at 2× base)
+        self._total_profit = 0.0
+        self._base_exposure = self.max_exposure_usdt
+        COMPOUND_MAX_MULTIPLIER = 2.0  # Never grow beyond 2× base
+        self._compound_max = self._base_exposure * COMPOUND_MAX_MULTIPLIER
+        
+        # MEXC-first routing: prefer MEXC as buy-side (0.05% taker vs 0.10%+ others)
+        self._low_fee_exchanges = ['MEXC']  # Exchanges with lowest taker fees
+        LOW_FEE_PROXIMITY_PCT = 0.02  # If price within 0.02%, prefer low-fee exchange
+        self._low_fee_proximity = LOW_FEE_PROXIMITY_PCT / 100.0
+        
         logger.info(f"ArbitrageEngine initialized: min_roi={self.min_net_pct}%, max_exposure=${self.max_exposure_usdt}, safety_factor={self.safety_factor}")
 
     def _fee_rate(self, exchange: str, side: str = "taker") -> float:
@@ -355,9 +366,7 @@ class ArbitrageEngine:
     def _choose_qty(self, buy_levels, sell_levels, buy_price) -> float:
         """
         Choose qty based on available liquidity across topK levels, safety factor and exposure cap.
-        buy_levels: asks ascending list [(price,size),...]
-        sell_levels: bids descending list [(price,size),...]
-        buy_price: current buy price (best ask)
+        Includes compound reinvestment: profits grow trade size up to 2× base.
         """
         # total available at topK (base asset)
         avail_buy = sum(s for p, s in buy_levels[:self.topk]) if buy_levels else 0.0
@@ -367,9 +376,13 @@ class ArbitrageEngine:
         # limit by safety factor
         allowed_by_liquidity = total_avail * self.safety_factor
 
-        # Target exposure: use max_exposure_usdt to determine trade size
+        # Compound reinvestment: grow exposure with profits (cap at 2× base)
+        compound_exposure = min(self._base_exposure + self._total_profit, self._compound_max)
+        effective_exposure = max(compound_exposure, self._base_exposure)
+        
+        # Target exposure: use compound-adjusted exposure to determine trade size
         if buy_price and buy_price > 0:
-            target_qty = self.max_exposure_usdt / buy_price
+            target_qty = effective_exposure / buy_price
         else:
             target_qty = self.default_qty  # fallback
 
@@ -738,8 +751,13 @@ class ArbitrageEngine:
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(f"Near-miss: {symbol} {buy_ex}->{sell_ex} ROI={roi_pct:.3f}% (need {self.min_net_pct}%)")
         
-        # Sort by net profit
-        res.sort(key=lambda x: x["net"], reverse=True)
+        # Sort by net profit, with MEXC-first tiebreaker (lower fees = more profit)
+        def _sort_key(x):
+            # Primary: net profit (higher is better)
+            # Tiebreaker: prefer MEXC as buy-side (0.05% fee vs 0.10%+)
+            mexc_bonus = 0.001 if x.get('buy_ex') in self._low_fee_exchanges else 0.0
+            return x["net"] + mexc_bonus
+        res.sort(key=_sort_key, reverse=True)
         
         # Limit to max concurrent opportunities
         if len(res) > settings.MAX_CONCURRENT_OPPORTUNITIES:
@@ -917,6 +935,10 @@ class ArbitrageEngine:
                         # --- POST-TRADE ML UPDATES ---
                         trade_profit = trade_info.get('net_profit', 0)
                         trade_successful = result['status'] in ('success', 'simulated')
+                        
+                        # Compound reinvestment: accumulate profits for growing trade sizes
+                        if trade_successful and trade_profit > 0:
+                            self._total_profit += trade_profit
                         
                         # MT1: Order Flow Tracker — track executed order
                         if getattr(self, 'order_flow_tracker', None):

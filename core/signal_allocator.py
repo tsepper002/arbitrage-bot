@@ -132,6 +132,7 @@ class SignalAllocator:
         self._current_coin: Optional[str] = None  # e.g. 'NEAR-USDT'
         self._coin_positioned_at: float = 0.0  # timestamp when coin was positioned
         self._initial_setup_done: bool = False  # True after first pre-positioning
+        self._last_prices: Dict[str, float] = {}  # symbol → last known price
 
         logger.info("✅ SignalAllocator initialized (pre-funded inventory model)")
 
@@ -223,36 +224,55 @@ class SignalAllocator:
     def get_max_preposition_coins(self) -> int:
         """Calculate how many different coins to pre-position based on capital.
         
-        With small capital ($10/exchange): 1-2 coins
-        With medium capital ($100/exchange): 3-5 coins
-        With large capital ($1000+/exchange): 5-8 coins
+        Uses TOTAL portfolio value (USDT + coins in USDT equiv), not just USDT.
+        With small capital ($14/exchange): 1 coin (focus)
+        With medium capital ($25/exchange): 2 coins (more opportunities)
+        With larger capital: progressively more coins
         """
         if not self.balance_manager:
-            return 3
+            return 1
         
-        # Get average USDT per exchange
-        total_usdt = 0
+        # Get average TOTAL value per exchange (USDT + coin holdings)
+        total_value = 0
         num_exchanges = 0
         for exchange, balances in self.balance_manager.balances.items():
-            usdt = balances.get('USDT', 0)
-            total_usdt += usdt
+            for coin, amount in balances.items():
+                if coin == 'USDT':
+                    total_value += amount
+                else:
+                    # Estimate coin value using signal allocator's price knowledge
+                    price = self._get_coin_price(coin)
+                    if price > 0:
+                        total_value += amount * price
+                    # If no price, just count USDT portion (conservative)
             num_exchanges += 1
         
         if num_exchanges == 0:
-            return 3
+            return 1
         
-        avg_per_exchange = total_usdt / num_exchanges
+        avg_per_exchange = total_value / num_exchanges
         
-        if avg_per_exchange < 20:
-            return 1  # Very small: only 1 coin
+        # Capital growth milestones:
+        if avg_per_exchange < 25:
+            return 1  # $14: Focus on 1 coin for maximum liquidity
         elif avg_per_exchange < 50:
-            return 2  # Small: 2 coins
+            return 2  # $25-50: 2 coins = 2× more arb opportunities
         elif avg_per_exchange < 200:
-            return 4  # Medium: up to 4 coins
+            return 3  # $50-200: 3 coins
+        elif avg_per_exchange < 500:
+            return 4  # $200-500: 4 coins
         elif avg_per_exchange < 1000:
-            return 6  # Large: up to 6 coins
+            return 5  # $500-1000: 5 coins
         else:
-            return 8  # Very large: up to 8 coins
+            return 6  # $1000+: 6 coins max
+    
+    def _get_coin_price(self, coin: str) -> float:
+        """Get approximate price for a coin (for portfolio valuation)."""
+        # Try common USDT pairs
+        symbol = f"{coin}-USDT"
+        if hasattr(self, '_last_prices') and symbol in self._last_prices:
+            return self._last_prices[symbol]
+        return 0.0
 
     def _compute_scores(self) -> Dict[str, float]:
         """Compute weighted signal scores per symbol.
@@ -466,6 +486,8 @@ class SignalAllocator:
                     price = self.balance_manager._get_price_from_store(price_store, best_coin, exchange)
                     if price <= 0:
                         price = self.balance_manager._get_any_price(price_store, best_coin)
+                if price > 0:
+                    self._last_prices[best_coin] = price  # Cache for portfolio valuation
                 if price <= 0:
                     continue
                 

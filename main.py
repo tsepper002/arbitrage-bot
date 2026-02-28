@@ -1216,7 +1216,7 @@ class IntegratedArbitrageBot:
         In LIVE: places real market buy/sell orders.
         """
         REBALANCE_INTERVAL = 300  # Check every 5 min (pre-funded: arb naturally rebalances)
-        INITIAL_DELAY = 15  # Wait 15s for initial price data + signals before first pre-fund
+        INITIAL_DELAY = 60  # Wait 60s to collect enough signals for best initial coin choice
         
         try:
             await asyncio.sleep(INITIAL_DELAY)
