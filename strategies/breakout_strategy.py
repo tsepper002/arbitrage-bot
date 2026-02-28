@@ -171,10 +171,10 @@ class BreakoutStrategy:
                              volume: float, avg_volume: float) -> float:
         """Calculate breakout confidence score"""
         # Distance from level
-        distance_score = min(abs(price - level) / level / 0.05, 1.0)
+        distance_score = min(abs(price - level) / level / 0.05, 1.0) if level > 0 else 0.0
         
         # Volume score
-        volume_score = min(volume / avg_volume / 3.0, 1.0)
+        volume_score = min(volume / avg_volume / 3.0, 1.0) if avg_volume > 0 else 0.0
         
         # Combined confidence
         confidence = (distance_score * 0.4 + volume_score * 0.6)

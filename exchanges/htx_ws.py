@@ -210,12 +210,13 @@ class HtxWS:
                         self._apply_changes(sym, "bids", bids_changes)
                     if asks_changes:
                         self._apply_changes(sym, "asks", asks_changes)
-                    bids_out = self._book_to_levels(self._local_books[sym]["bids"], "bids")
-                    asks_out = self._book_to_levels(self._local_books[sym]["asks"], "asks")
-                    asyncio.run_coroutine_threadsafe(
-                        self.price_store.update_levels(self.exchange, sym, bids_out, asks_out, time.time()),
-                        self.loop
-                    )
+                    if sym and sym in self._local_books:
+                        bids_out = self._book_to_levels(self._local_books[sym]["bids"], "bids")
+                        asks_out = self._book_to_levels(self._local_books[sym]["asks"], "asks")
+                        asyncio.run_coroutine_threadsafe(
+                            self.price_store.update_levels(self.exchange, sym, bids_out, asks_out, time.time()),
+                            self.loop
+                        )
                     return
 
             # Fallback: sometimes messages are lists or other shapes — ignore safely

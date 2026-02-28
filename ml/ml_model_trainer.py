@@ -187,6 +187,7 @@ class MLModelTrainer:
             # Simple normalization
             mean = X_train.mean()
             std = X_train.std()
+            std[std == 0] = 1  # Prevent division by zero for constant features
             X_train_scaled = (X_train - mean) / std
             X_test_scaled = (X_test - mean) / std
             return X_train_scaled.values, X_test_scaled.values
