@@ -75,6 +75,11 @@ class SignalAllocator:
     # Minimum order size for pre-positioning (lower than trade minimum)
     MIN_PREPOSITION_USDT = 1.0  # $1 minimum for inventory orders
 
+    # Rebalance thresholds
+    REBALANCE_THRESHOLD_PCT = 0.30  # Buy if holding < 30% of target
+    MAX_SINGLE_BUY_PCT = 0.50  # Max 50% of available USDT per single buy
+    LIQUIDATION_PCT = 0.80  # Sell 80% of non-allocated coins, keep 20% reserve
+
     # Weight multiplier for executed trades vs raw signals
     EXECUTED_WEIGHT = 5.0
 
@@ -315,8 +320,8 @@ class SignalAllocator:
                 current_value = current_amount * price
                 
                 # Buy if we don't have enough of this coin
-                if current_value < target_usdt * 0.3:
-                    buy_usdt = min(target_usdt - current_value, available_usdt * 0.5)
+                if current_value < target_usdt * self.REBALANCE_THRESHOLD_PCT:
+                    buy_usdt = min(target_usdt - current_value, available_usdt * self.MAX_SINGLE_BUY_PCT)
                     if buy_usdt < self.MIN_PREPOSITION_USDT:
                         continue
                     
@@ -394,7 +399,7 @@ class SignalAllocator:
                         continue
                     
                     # Keep a tiny amount for potential arb sells
-                    sell_qty = amount * 0.8  # Sell 80%, keep 20% reserve
+                    sell_qty = amount * self.LIQUIDATION_PCT
                     sell_usdt = sell_qty * price
                     
                     if sell_usdt < self.MIN_PREPOSITION_USDT:

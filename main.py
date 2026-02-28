@@ -1249,6 +1249,8 @@ class IntegratedArbitrageBot:
                 
         except asyncio.CancelledError:
             return
+    
+    async def _triangular_scan_loop(self):
         """Background task for triangular arbitrage scanning."""
         try:
             await asyncio.sleep(5)  # Wait for price data
