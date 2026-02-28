@@ -104,9 +104,12 @@ class KuCoinRESTClient(BaseRESTClient):
         }
         
         if order_type == "market":
-            # Market orders use 'funds' for buy, 'size' for sell
+            # Market orders: buy uses 'funds' (quote USDT amount), sell uses 'size' (base qty)
             if side.lower() == "buy":
-                order_data["funds"] = str(quantity * price) if price else str(quantity)
+                # For market buy: funds = USDT to spend. quantity here is base units,
+                # so we need to convert to quote currency (USDT) using price
+                funds = quantity * price if price and price > 0 else quantity
+                order_data["funds"] = str(round(funds, 6))
             else:
                 order_data["size"] = str(quantity)
         else:

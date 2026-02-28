@@ -42,7 +42,9 @@ class BinanceRESTClient(BaseRESTClient):
 
     def _generate_signature(self, params: Dict[str, Any]) -> str:
         """Generate HMAC SHA256 signature for Binance API."""
-        param_str = "&".join([f"{k}={v}" for k, v in params.items()])
+        # Binance requires sorted params for consistent signature
+        sorted_params = sorted(params.items())
+        param_str = "&".join([f"{k}={v}" for k, v in sorted_params])
         signature = hmac.new(
             self.api_secret.encode('utf-8'),
             param_str.encode('utf-8'),
