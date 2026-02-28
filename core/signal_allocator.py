@@ -58,6 +58,21 @@ class SignalAllocator:
     - Higher ROI signals weighted proportionally
     """
 
+    # ========================
+    # PRE-FUNDED INVENTORY MODEL
+    # ========================
+    # How pro arb bots work:
+    #   1. Pick the #1 hottest coin (most arb signals)
+    #   2. Buy it ONCE on ALL exchanges (one-time setup cost)
+    #   3. Arb = just buy on cheap exchange, sell on expensive (2 fees)
+    #   4. Natural rebalancing: USDT accumulates on sell-side,
+    #      coin accumulates on buy-side — NO extra trades needed
+    #   5. Only rotate to a different coin if signals shift dramatically
+    #      AND USDT has accumulated enough on the buy-side naturally
+    #
+    # CRITICAL: With $14/exchange, every extra trade costs ~$0.01-0.03 in fees.
+    # JIT/rotation was executing 100+ extra trades → eating ALL profit.
+
     # Decay half-life in seconds (signals older than this count for less)
     DECAY_HALF_LIFE = 3600.0  # 1 hour
 
@@ -67,27 +82,32 @@ class SignalAllocator:
     # Minimum signals before a symbol gets allocation
     MIN_SIGNALS_FOR_ALLOCATION = 3
 
-    # Maximum fraction of idle capital to allocate to pre-positioning
-    MAX_PREPOSITION_PCT = 0.50  # Use max 50% of USDT for inventory
+    # Pre-fund: use 40% of USDT for ONE coin on each exchange
+    MAX_PREPOSITION_PCT = 0.40
 
     # Maximum allocation to any single symbol
-    MAX_SINGLE_SYMBOL_PCT = 0.25  # Max 25% of USDT in one coin
+    MAX_SINGLE_SYMBOL_PCT = 0.40  # At small capital, focus on 1 coin
 
-    # Minimum order size for pre-positioning (lower than trade minimum)
-    MIN_PREPOSITION_USDT = 1.0  # $1 minimum for inventory orders
+    # Minimum order size for pre-positioning
+    MIN_PREPOSITION_USDT = 1.0  # $1 minimum
 
-    # Rebalance thresholds
+    # CRITICAL: Long cooldowns prevent fee-churning
     REBALANCE_THRESHOLD_PCT = 0.30  # Buy if holding < 30% of target
     MAX_SINGLE_BUY_PCT = 0.50  # Max 50% of available USDT per single buy
-    LIQUIDATION_PCT = 0.80  # Sell 80% of non-allocated coins, keep 20% reserve
-    REBALANCE_COOLDOWN = 300  # 5 min: don't rebalance same coin on same exchange
+    LIQUIDATION_PCT = 0.80  # Sell 80% of non-allocated coins
+    REBALANCE_COOLDOWN = 600  # 10 min: prevent fee-churning rotation
 
     # Weight multiplier for executed trades vs raw signals
     EXECUTED_WEIGHT = 5.0
 
-    # Reactive rebalance: how many missed trades trigger immediate rebalance
-    MISS_THRESHOLD = 2  # 2 misses in MISS_WINDOW → urgent rebalance
-    MISS_WINDOW = 60.0  # seconds
+    # Reactive rebalance: disabled for small capital (causes fee spiral)
+    MISS_THRESHOLD = 50  # Effectively disabled: 50 misses before rebalance
+    MISS_WINDOW = 300.0  # 5 min window
+
+    # Coin rotation: minimum time before switching to a different coin
+    COIN_SWITCH_COOLDOWN = 1800  # 30 minutes before rotating coins
+    # Minimum score ratio for new coin to replace current: new must be 3× better
+    COIN_SWITCH_RATIO = 3.0
 
     def __init__(self, balance_manager=None):
         self.balance_manager = balance_manager
@@ -103,7 +123,13 @@ class SignalAllocator:
         self._rebalance_history: Dict[tuple, float] = {}  # (exchange, symbol) → last_rebalance_time
         self._total_rebalance_fees = 0.0  # Track total fees spent on rebalancing
 
-        logger.info("✅ SignalAllocator initialized (HFT-style inventory management)")
+        # PRE-FUNDED MODEL: Track the current positioned coin
+        # Once positioned, we HOLD it and let arb trades naturally rebalance
+        self._current_coin: Optional[str] = None  # e.g. 'NEAR-USDT'
+        self._coin_positioned_at: float = 0.0  # timestamp when coin was positioned
+        self._initial_setup_done: bool = False  # True after first pre-positioning
+
+        logger.info("✅ SignalAllocator initialized (pre-funded inventory model)")
 
     def record_signal(
         self,
@@ -370,19 +396,24 @@ class SignalAllocator:
         rest_clients: Optional[Dict] = None,
         price_store=None,
     ) -> List[Dict]:
-        """Execute inventory pre-positioning orders.
+        """PRE-FUNDED INVENTORY MODEL — How pro arb bots work.
         
-        Autonomously distributes USDT into base coins on each exchange
-        based on signal allocation scores. Also sells excess inventory
-        that is no longer "hot" back to USDT.
+        Phase 1 (INITIAL SETUP — runs once):
+          Pick the #1 hottest coin → buy it on ALL exchanges
+          Each exchange: 50% USDT + 50% hot coin
+          ONE-TIME setup fee: 5 × 0.1% ≈ $0.035
         
-        In DRY RUN mode: updates virtual balances only.
-        In LIVE mode: places real market orders via REST clients.
+        Phase 2 (HOLD — runs every cycle):
+          Do NOTHING. Arb trades naturally rebalance inventory:
+          - Buy side accumulates base coin, spends USDT
+          - Sell side accumulates USDT, spends base coin
+          This is FREE — no extra fees!
         
-        Args:
-            rest_clients: Dict of {exchange_name: REST_client} for placing orders
-            price_store: PriceStore for current prices
-            
+        Phase 3 (COIN SWITCH — rare, only when necessary):
+          If current coin has zero signals for 30+ minutes AND
+          a new coin has 3× more signals → sell old, buy new.
+          Max 1 switch per 30 minutes.
+        
         Returns:
             List of executed order dicts
         """
@@ -393,215 +424,309 @@ class SignalAllocator:
         if not allocation:
             return []
         
+        now = time.time()
         executed = []
         exchanges = list(self.balance_manager.balances.keys())
         
-        for exchange in exchanges:
-            usdt_balance = self.balance_manager.get_balance(exchange, 'USDT')
+        # Determine the #1 best coin from signals
+        best_coin = max(allocation, key=allocation.get) if allocation else None
+        if not best_coin:
+            return []
+        
+        # ========== PHASE 1: INITIAL SETUP (one-time) ==========
+        if not self._initial_setup_done:
+            self._current_coin = best_coin
+            self._coin_positioned_at = now
+            self._initial_setup_done = True
             
-            # Keep minimum reserve in USDT (for fees, emergencies)
-            reserve = getattr(settings, 'BALANCE_RESERVE_USDT', 2.0)
-            available_usdt = usdt_balance - reserve
-            if available_usdt < self.MIN_PREPOSITION_USDT:
-                continue
+            base_coin = best_coin.split('-')[0] if '-' in best_coin else best_coin.replace('USDT', '')
+            logger.info(
+                f"🏦 PRE-FUND SETUP: Positioning {base_coin} on {len(exchanges)} exchanges "
+                f"(one-time cost, then pure arb)"
+            )
             
-            # BUY phase: pre-position into "hot" coins
-            for symbol, frac in allocation.items():
-                target_usdt = available_usdt * frac
-                if target_usdt < self.MIN_PREPOSITION_USDT:
+            for exchange in exchanges:
+                usdt_balance = self.balance_manager.get_balance(exchange, 'USDT')
+                reserve = getattr(settings, 'BALANCE_RESERVE_USDT', 2.0)
+                available = usdt_balance - reserve
+                if available < self.MIN_PREPOSITION_USDT:
                     continue
                 
-                # Cooldown: don't re-buy same coin on same exchange within 5 min
-                rb_key = (exchange, symbol)
-                now = time.time()
-                if now - self._rebalance_history.get(rb_key, 0) < self.REBALANCE_COOLDOWN:
+                # Use MAX_PREPOSITION_PCT of available USDT for the coin
+                buy_usdt = available * self.MAX_PREPOSITION_PCT
+                if buy_usdt < self.MIN_PREPOSITION_USDT:
                     continue
                 
-                # Get current holding value in USDT
-                base_coin = symbol.split('-')[0] if '-' in symbol else symbol.replace('USDT', '')
-                current_amount = self.balance_manager.get_balance(exchange, base_coin)
-                
-                # Get current price
                 price = 0.0
                 if price_store:
-                    price = self.balance_manager._get_price_from_store(price_store, symbol, exchange)
+                    price = self.balance_manager._get_price_from_store(price_store, best_coin, exchange)
                     if price <= 0:
-                        price = self.balance_manager._get_any_price(price_store, symbol)
+                        price = self.balance_manager._get_any_price(price_store, best_coin)
                 if price <= 0:
                     continue
                 
-                current_value = current_amount * price
+                # Check if already positioned (from previous run)
+                current_amount = self.balance_manager.get_balance(exchange, base_coin)
+                if current_amount * price > buy_usdt * 0.5:
+                    logger.info(f"  ✅ {exchange}: Already has {current_amount:.6g} {base_coin}")
+                    continue
                 
-                # Buy if we don't have enough of this coin
-                if current_value < target_usdt * self.REBALANCE_THRESHOLD_PCT:
-                    buy_usdt = min(target_usdt - current_value, available_usdt * self.MAX_SINGLE_BUY_PCT)
+                buy_qty = buy_usdt / price
+                order = await self._execute_buy_order(
+                    exchange, best_coin, base_coin, buy_qty, buy_usdt, price,
+                    f'Initial pre-fund {base_coin}', rest_clients
+                )
+                if order:
+                    executed.append(order)
+            
+            if executed:
+                logger.info(
+                    f"🏦 Pre-fund complete: {base_coin} on {len(executed)}/{len(exchanges)} exchanges. "
+                    f"Now pure arb trades — NO more buy/sell overhead!"
+                )
+            return executed
+        
+        # ========== PHASE 2: CHECK IF COIN SWITCH NEEDED ==========
+        # Only switch if: (1) cooldown passed, (2) current coin has no signals, 
+        # (3) new coin is 3× better
+        time_since_position = now - self._coin_positioned_at
+        
+        if time_since_position > self.COIN_SWITCH_COOLDOWN and self._current_coin:
+            current_score = allocation.get(self._current_coin, 0.0)
+            best_score = allocation.get(best_coin, 0.0)
+            
+            should_switch = False
+            reason = ""
+            
+            if current_score == 0.0 and best_score > 0:
+                # Current coin has zero signals — dead
+                should_switch = True
+                reason = f"{self._current_coin} has 0 signals, {best_coin} is active"
+            elif best_score > current_score * self.COIN_SWITCH_RATIO and best_coin != self._current_coin:
+                # New coin is dramatically better
+                should_switch = True
+                reason = f"{best_coin} score {best_score:.2f} > {self.COIN_SWITCH_RATIO}× {self._current_coin} score {current_score:.2f}"
+            
+            if should_switch:
+                old_coin = self._current_coin
+                old_base = old_coin.split('-')[0] if '-' in old_coin else old_coin.replace('USDT', '')
+                new_base = best_coin.split('-')[0] if '-' in best_coin else best_coin.replace('USDT', '')
+                
+                logger.info(f"🔄 COIN SWITCH: {old_base} → {new_base} ({reason})")
+                
+                # Sell old coin on all exchanges
+                for exchange in exchanges:
+                    amount = self.balance_manager.get_balance(exchange, old_base)
+                    if amount <= 0:
+                        continue
+                    price = 0.0
+                    if price_store:
+                        price = self.balance_manager._get_price_from_store(price_store, old_coin, exchange)
+                        if price <= 0:
+                            price = self.balance_manager._get_any_price(price_store, old_coin)
+                    if price <= 0:
+                        continue
+                    
+                    sell_usdt = amount * price
+                    if sell_usdt < self.MIN_PREPOSITION_USDT:
+                        continue
+                    
+                    sell_qty = amount * self.LIQUIDATION_PCT
+                    order = await self._execute_sell_order(
+                        exchange, old_coin, old_base, sell_qty, sell_qty * price, price,
+                        f'Switch out {old_base}', rest_clients
+                    )
+                    if order:
+                        executed.append(order)
+                
+                # Buy new coin on all exchanges
+                for exchange in exchanges:
+                    usdt_balance = self.balance_manager.get_balance(exchange, 'USDT')
+                    reserve = getattr(settings, 'BALANCE_RESERVE_USDT', 2.0)
+                    available = usdt_balance - reserve
+                    if available < self.MIN_PREPOSITION_USDT:
+                        continue
+                    
+                    buy_usdt = available * self.MAX_PREPOSITION_PCT
+                    if buy_usdt < self.MIN_PREPOSITION_USDT:
+                        continue
+                    
+                    price = 0.0
+                    if price_store:
+                        price = self.balance_manager._get_price_from_store(price_store, best_coin, exchange)
+                        if price <= 0:
+                            price = self.balance_manager._get_any_price(price_store, best_coin)
+                    if price <= 0:
+                        continue
+                    
+                    buy_qty = buy_usdt / price
+                    order = await self._execute_buy_order(
+                        exchange, best_coin, new_base, buy_qty, buy_usdt, price,
+                        f'Switch in {new_base}', rest_clients
+                    )
+                    if order:
+                        executed.append(order)
+                
+                self._current_coin = best_coin
+                self._coin_positioned_at = now
+                
+                if executed:
+                    logger.info(f"🔄 Coin switch complete: {old_base} → {new_base} ({len(executed)} orders)")
+        
+        # ========== PHASE 3: TOP-UP depleted exchanges (rare) ==========
+        # If arb trades have depleted coin on one exchange (all sold → only USDT left)
+        # AND there's enough USDT accumulated → buy more of the CURRENT coin
+        if self._current_coin:
+            current_base = self._current_coin.split('-')[0] if '-' in self._current_coin else self._current_coin.replace('USDT', '')
+            
+            for exchange in exchanges:
+                # Cooldown: max 1 top-up per exchange per REBALANCE_COOLDOWN
+                rb_key = (exchange, self._current_coin)
+                if now - self._rebalance_history.get(rb_key, 0) < self.REBALANCE_COOLDOWN:
+                    continue
+                
+                coin_amount = self.balance_manager.get_balance(exchange, current_base)
+                usdt_balance = self.balance_manager.get_balance(exchange, 'USDT')
+                
+                price = 0.0
+                if price_store:
+                    price = self.balance_manager._get_price_from_store(price_store, self._current_coin, exchange)
+                    if price <= 0:
+                        price = self.balance_manager._get_any_price(price_store, self._current_coin)
+                if price <= 0:
+                    continue
+                
+                coin_value = coin_amount * price
+                total_value = coin_value + usdt_balance
+                
+                if total_value < self.MIN_PREPOSITION_USDT * 2:
+                    continue
+                
+                # Only top up if coin is nearly depleted (<10% of total) 
+                # AND USDT is plentiful (>80% of total)
+                coin_pct = coin_value / total_value if total_value > 0 else 0
+                if coin_pct < 0.10 and usdt_balance > total_value * 0.80:
+                    # Coin depleted — trades used it all up. Buy more from accumulated USDT
+                    reserve = getattr(settings, 'BALANCE_RESERVE_USDT', 2.0)
+                    buy_usdt = min(
+                        (usdt_balance - reserve) * self.MAX_PREPOSITION_PCT,
+                        usdt_balance * 0.40  # Max 40% of USDT
+                    )
                     if buy_usdt < self.MIN_PREPOSITION_USDT:
                         continue
                     
                     buy_qty = buy_usdt / price
-                    
-                    order = {
-                        'exchange': exchange,
-                        'symbol': symbol,
-                        'side': 'buy',
-                        'qty': buy_qty,
-                        'price': price,
-                        'amount_usdt': round(buy_usdt, 2),
-                        'reason': f'Pre-position {base_coin} (alloc: {frac*100:.1f}%)',
-                    }
-                    
-                    if settings.DRY_RUN:
-                        # Virtual: update balances — DEDUCT FEES from received qty
-                        from core.exchange_config import EXCHANGE_PARAMS
-                        fee_rate = EXCHANGE_PARAMS.get(exchange, {}).get('taker', 0.001)
-                        fee_cost = buy_usdt * fee_rate
-                        qty_after_fee = buy_qty * (1.0 - fee_rate)
-                        self.balance_manager.update_balance_optimistic(exchange, 'USDT', -buy_usdt)
-                        self.balance_manager.update_balance_optimistic(exchange, base_coin, qty_after_fee)
-                        self._total_rebalance_fees += fee_cost
-                        self._rebalance_history[rb_key] = time.time()
-                        order['status'] = 'simulated'
-                        logger.info(
-                            f"🔄 [DRY] {exchange}: Buy {qty_after_fee:.6g} {base_coin} "
-                            f"(${buy_usdt:.2f}, fee=${fee_cost:.4f}) — pre-position"
-                        )
-                    else:
-                        # LIVE: place real market buy
-                        client = (rest_clients or {}).get(exchange)
-                        if client and hasattr(client, 'place_order'):
-                            try:
-                                result = await client.place_order(
-                                    symbol=symbol,
-                                    side='buy',
-                                    order_type='market',
-                                    quantity=buy_qty,
-                                )
-                                order['status'] = 'executed'
-                                order['result'] = result
-                                self._rebalance_history[rb_key] = time.time()
-                                # Optimistic balance update
-                                self.balance_manager.update_balance_optimistic(exchange, 'USDT', -buy_usdt)
-                                self.balance_manager.update_balance_optimistic(exchange, base_coin, buy_qty)
-                                logger.info(
-                                    f"🔄 {exchange}: Bought {buy_qty:.6g} {base_coin} "
-                                    f"(${buy_usdt:.2f}) — pre-position"
-                                )
-                            except Exception as e:
-                                order['status'] = 'failed'
-                                order['error'] = str(e)
-                                logger.warning(f"⚠️ {exchange}: Pre-position buy failed: {e}")
-                        else:
-                            continue
-                    
-                    executed.append(order)
-                    available_usdt -= buy_usdt
-                    if available_usdt < self.MIN_PREPOSITION_USDT:
-                        break
-            
-            # SELL phase: Only sell coins that are NO LONGER in allocation at all.
-            # DO NOT rotate frequently — rotation costs fees that destroy small capital.
-            # Only sell when: (1) coin has 0% allocation AND (2) cooldown passed.
-            for coin, amount in list(self.balance_manager.balances.get(exchange, {}).items()):
-                if coin == 'USDT' or amount <= 0:
-                    continue
-                
-                symbol = f"{coin}-USDT"
-                
-                # Cooldown: don't sell same coin twice in 5 min
-                sell_key = (exchange, symbol)
-                now = time.time()
-                if now - self._rebalance_history.get(sell_key, 0) < self.REBALANCE_COOLDOWN:
-                    continue
-                
-                price = 0.0
-                if price_store:
-                    price = self.balance_manager._get_price_from_store(price_store, symbol, exchange)
-                    if price <= 0:
-                        price = self.balance_manager._get_any_price(price_store, symbol)
-                if price <= 0:
-                    continue
-                
-                current_value = amount * price
-                if current_value < self.MIN_PREPOSITION_USDT:
-                    continue
-                
-                # ONLY sell if coin has ZERO allocation (no signals at all)
-                target_frac = allocation.get(symbol, 0.0)
-                if target_frac > 0:
-                    continue  # Still has signals — keep it, don't pay fees to rotate
-                
-                sell_qty = amount * self.LIQUIDATION_PCT
-                reason = f'Rotate out {coin} (no signals)'
-                
-                sell_usdt = sell_qty * price
-                if sell_usdt < self.MIN_PREPOSITION_USDT:
-                    continue
-                
-                order = {
-                    'exchange': exchange,
-                    'symbol': symbol,
-                    'side': 'sell',
-                    'qty': sell_qty,
-                    'price': price,
-                    'amount_usdt': round(sell_usdt, 2),
-                    'reason': reason,
-                }
-                
-                if settings.DRY_RUN:
-                    # Deduct fees from received USDT
-                    from core.exchange_config import EXCHANGE_PARAMS
-                    fee_rate = EXCHANGE_PARAMS.get(exchange, {}).get('taker', 0.001)
-                    fee_cost = sell_usdt * fee_rate
-                    usdt_after_fee = sell_usdt * (1.0 - fee_rate)
-                    self.balance_manager.update_balance_optimistic(exchange, coin, -sell_qty)
-                    self.balance_manager.update_balance_optimistic(exchange, 'USDT', usdt_after_fee)
-                    self._total_rebalance_fees += fee_cost
-                    self._rebalance_history[sell_key] = time.time()
-                    order['status'] = 'simulated'
-                    logger.info(
-                        f"🔄 [DRY] {exchange}: Sell {sell_qty:.6g} {coin} "
-                        f"(${usdt_after_fee:.2f} after fee=${fee_cost:.4f}) — {reason}"
+                    order = await self._execute_buy_order(
+                        exchange, self._current_coin, current_base, buy_qty, buy_usdt, price,
+                        f'Top-up {current_base} (depleted by arb trades)', rest_clients
                     )
-                else:
-                    client = (rest_clients or {}).get(exchange)
-                    if client and hasattr(client, 'place_order'):
-                        try:
-                            result = await client.place_order(
-                                symbol=symbol,
-                                side='sell',
-                                order_type='market',
-                                quantity=sell_qty,
-                            )
-                            order['status'] = 'executed'
-                            order['result'] = result
-                            self._rebalance_history[sell_key] = time.time()
-                            self.balance_manager.update_balance_optimistic(exchange, coin, -sell_qty)
-                            self.balance_manager.update_balance_optimistic(exchange, 'USDT', sell_usdt)
-                            logger.info(
-                                f"🔄 {exchange}: Sold {sell_qty:.6g} {coin} "
-                                f"(${sell_usdt:.2f}) — {reason}"
-                            )
-                        except Exception as e:
-                            order['status'] = 'failed'
-                            order['error'] = str(e)
-                            logger.warning(f"⚠️ {exchange}: Liquidation sell failed: {e}")
-                    else:
-                        continue
-                
-                executed.append(order)
+                    if order:
+                        executed.append(order)
         
-        if executed:
-            logger.info(f"📊 Rebalance complete: {len(executed)} orders executed")
-            # In live mode, sync real balances after rebalance to confirm fills
-            if not settings.DRY_RUN and self.balance_manager and rest_clients:
-                await asyncio.sleep(1.0)  # Brief delay for exchange processing
-                for name, client in rest_clients.items():
-                    try:
-                        await self.balance_manager._fetch_balance(name, client)
-                    except Exception as e:
-                        logger.debug(f"Post-rebalance sync {name}: {e}")
+        # Sync real balances after rebalance
+        if executed and not settings.DRY_RUN and self.balance_manager and rest_clients:
+            await asyncio.sleep(1.0)
+            for name, client in rest_clients.items():
+                try:
+                    await self.balance_manager._fetch_balance(name, client)
+                except Exception as e:
+                    logger.debug(f"Post-rebalance sync {name}: {e}")
         
         return executed
+
+    async def _execute_buy_order(
+        self, exchange: str, symbol: str, base_coin: str,
+        qty: float, usdt_amount: float, price: float,
+        reason: str, rest_clients: Optional[Dict] = None
+    ) -> Optional[Dict]:
+        """Execute a buy order (used by pre-fund, top-up, and coin switch)."""
+        from core.exchange_config import EXCHANGE_PARAMS
+        fee_rate = EXCHANGE_PARAMS.get(exchange, {}).get('taker', 0.001)
+        
+        order = {
+            'exchange': exchange, 'symbol': symbol, 'side': 'buy',
+            'qty': qty, 'price': price, 'amount_usdt': round(usdt_amount, 2),
+            'reason': reason,
+        }
+        
+        if settings.DRY_RUN:
+            fee_cost = usdt_amount * fee_rate
+            qty_after_fee = qty * (1.0 - fee_rate)
+            self.balance_manager.update_balance_optimistic(exchange, 'USDT', -usdt_amount)
+            self.balance_manager.update_balance_optimistic(exchange, base_coin, qty_after_fee)
+            self._total_rebalance_fees += fee_cost
+            self._rebalance_history[(exchange, symbol)] = time.time()
+            order['status'] = 'simulated'
+            logger.info(
+                f"  🏦 [DRY] {exchange}: Buy {qty_after_fee:.6g} {base_coin} "
+                f"(${usdt_amount:.2f}, fee=${fee_cost:.4f}) — {reason}"
+            )
+            return order
+        else:
+            client = (rest_clients or {}).get(exchange)
+            if not client or not hasattr(client, 'place_order'):
+                return None
+            try:
+                result = await client.place_order(
+                    symbol=symbol, side='buy', order_type='market', quantity=qty,
+                )
+                self._rebalance_history[(exchange, symbol)] = time.time()
+                self.balance_manager.update_balance_optimistic(exchange, 'USDT', -usdt_amount)
+                self.balance_manager.update_balance_optimistic(exchange, base_coin, qty)
+                order['status'] = 'executed'
+                order['result'] = result
+                logger.info(f"  🏦 {exchange}: Bought {qty:.6g} {base_coin} (${usdt_amount:.2f}) — {reason}")
+                return order
+            except Exception as e:
+                logger.warning(f"⚠️ {exchange}: Buy failed: {e}")
+                return None
+
+    async def _execute_sell_order(
+        self, exchange: str, symbol: str, base_coin: str,
+        qty: float, usdt_amount: float, price: float,
+        reason: str, rest_clients: Optional[Dict] = None
+    ) -> Optional[Dict]:
+        """Execute a sell order (used by coin switch only)."""
+        from core.exchange_config import EXCHANGE_PARAMS
+        fee_rate = EXCHANGE_PARAMS.get(exchange, {}).get('taker', 0.001)
+        
+        order = {
+            'exchange': exchange, 'symbol': symbol, 'side': 'sell',
+            'qty': qty, 'price': price, 'amount_usdt': round(usdt_amount, 2),
+            'reason': reason,
+        }
+        
+        if settings.DRY_RUN:
+            fee_cost = usdt_amount * fee_rate
+            usdt_after_fee = usdt_amount * (1.0 - fee_rate)
+            self.balance_manager.update_balance_optimistic(exchange, base_coin, -qty)
+            self.balance_manager.update_balance_optimistic(exchange, 'USDT', usdt_after_fee)
+            self._total_rebalance_fees += fee_cost
+            self._rebalance_history[(exchange, symbol)] = time.time()
+            order['status'] = 'simulated'
+            logger.info(
+                f"  🔄 [DRY] {exchange}: Sell {qty:.6g} {base_coin} "
+                f"(${usdt_after_fee:.2f} after fee=${fee_cost:.4f}) — {reason}"
+            )
+            return order
+        else:
+            client = (rest_clients or {}).get(exchange)
+            if not client or not hasattr(client, 'place_order'):
+                return None
+            try:
+                result = await client.place_order(
+                    symbol=symbol, side='sell', order_type='market', quantity=qty,
+                )
+                self._rebalance_history[(exchange, symbol)] = time.time()
+                self.balance_manager.update_balance_optimistic(exchange, base_coin, -qty)
+                self.balance_manager.update_balance_optimistic(exchange, 'USDT', usdt_amount)
+                order['status'] = 'executed'
+                order['result'] = result
+                logger.info(f"  🔄 {exchange}: Sold {qty:.6g} {base_coin} (${usdt_amount:.2f}) — {reason}")
+                return order
+            except Exception as e:
+                logger.warning(f"⚠️ {exchange}: Sell failed: {e}")
+                return None
 
     def get_top_symbols(self, n: int = 5) -> List[Tuple[str, float, int]]:
         """Get top N symbols by signal quality.

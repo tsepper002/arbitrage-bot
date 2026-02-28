@@ -1415,13 +1415,15 @@ def test_dry_run_balance_tracking():
     assert 'missed_symbol' in result2, "Should include missed_symbol"
     print(f"  ✅ Trade correctly blocked: {result2.get('reason', '')[:60]}")
 
-    # Test reactive rebalance
+    # Test reactive rebalance (now uses high threshold for small capital — 50 misses)
     sa = SignalAllocator(balance_manager=bm)
     sa.record_miss('APT-USDT', 'KuCoin', 'sell')
     assert not sa.needs_urgent_rebalance(), "1 miss shouldn't trigger urgent"
-    sa.record_miss('APT-USDT', 'KuCoin', 'sell')
-    assert sa.needs_urgent_rebalance(), "2 misses should trigger urgent"
-    print("  ✅ Reactive rebalance triggered after 2 misses")
+    # Pre-funded model: urgent rebalance threshold is high (50) to prevent fee spiral
+    for _ in range(49):
+        sa.record_miss('APT-USDT', 'KuCoin', 'sell')
+    assert sa.needs_urgent_rebalance(), "50 misses should trigger urgent"
+    print("  ✅ Reactive rebalance: high threshold (50 misses) prevents fee spiral")
 
     # Test capital-based coin count scaling
     sa2 = SignalAllocator(balance_manager=bm)

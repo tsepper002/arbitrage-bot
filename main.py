@@ -1215,8 +1215,8 @@ class IntegratedArbitrageBot:
         In DRY RUN: updates virtual balances.
         In LIVE: places real market buy/sell orders.
         """
-        REBALANCE_INTERVAL = 60  # Check every 60 seconds
-        INITIAL_DELAY = 30  # Wait 30s for initial signals
+        REBALANCE_INTERVAL = 300  # Check every 5 min (pre-funded: arb naturally rebalances)
+        INITIAL_DELAY = 45  # Wait 45s for initial signals before first pre-fund
         
         try:
             await asyncio.sleep(INITIAL_DELAY)

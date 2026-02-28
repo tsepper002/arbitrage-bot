@@ -834,13 +834,9 @@ class ArbitrageEngine:
                             logger.debug(f"TWAP execution error: {e}")
                     result = await self.executor.execute_arbitrage(o)
                     
-                    # JIT inventory: if blocked, acquire missing asset inline and retry
-                    if result.get('status') == 'blocked' and result.get('missed_side') in ('sell', 'buy'):
-                        jit_ok = await self._jit_acquire(o, result)
-                        if jit_ok:
-                            result = await self.executor.execute_arbitrage(o)
-                    
-                    # Record MISSED opportunity if still blocked
+                    # PRE-FUNDED MODEL: No JIT — too expensive.
+                    # Instead, record the miss so rebalancer can top up if needed.
+                    # With pre-funded inventory, most trades should have both sides ready.
                     if result.get('status') == 'blocked' and self.signal_allocator:
                         missed_symbol = result.get('missed_symbol', o.get('symbol', ''))
                         missed_exchange = result.get('missed_exchange', '')
