@@ -76,16 +76,16 @@ class BalanceManager:
     ALL_EXCHANGES = ["Bybit", "KuCoin", "HTX", "MEXC", "Binance"]
 
     def _use_virtual_balances(self):
-        """Use virtual balances for DRY_RUN mode. No real API calls needed."""
+        """Use virtual balances for DRY_RUN mode. No real API calls needed.
+        
+        Starts with USDT-only balances (realistic simulation).
+        The SignalAllocator will buy base coins based on signal activity.
+        """
         capital = settings.VIRTUAL_CAPITAL_PER_EXCHANGE
-        # Virtual balances: USDT is the main trading currency
-        # Crypto amounts are approximate percentages for simulation only
+        # Start with USDT only — just like a real account after deposit
+        # SignalAllocator will distribute into base coins after signal collection
         mock_balance = {
             'USDT': capital,
-            'BTC': round(capital * 0.3 / 68500, 6),
-            'ETH': round(capital * 0.2 / 2000, 4),
-            'BNB': round(capital * 0.1 / 630, 4),
-            'SOL': round(capital * 0.1 / 85, 2)
         }
         
         # In DRY RUN, create balances for ALL 5 exchanges (not just those with API keys)

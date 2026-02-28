@@ -153,33 +153,40 @@ class OrderExecutor:
         if self.balance_manager:
             # Fee buffer: max taker fee is 0.2% (HTX), round up to 0.2% for safety
             FEE_BUFFER = 1.002
-            buy_cost = qty * buy_price * FEE_BUFFER
-            can_buy, buy_reason = self.balance_manager.has_sufficient_balance(
-                buy_ex, quote_currency, buy_cost
-            )
-            can_sell, sell_reason = self.balance_manager.has_sufficient_balance(
-                sell_ex, base_currency, qty
-            )
             
-            if not can_buy:
-                logger.debug(f"[DRY] Trade blocked: {buy_reason}")
-                return {
-                    'status': 'blocked',
-                    'reason': f'Insufficient USDT on {buy_ex}: {buy_reason}',
-                    'missed_symbol': symbol,
-                    'missed_exchange': buy_ex,
-                    'missed_side': 'buy',
-                }
+            # Auto-adjust qty to available balance (prevents precision rounding issues)
+            available_sell = self.balance_manager.get_balance(sell_ex, base_currency)
+            available_buy_usdt = self.balance_manager.get_balance(buy_ex, quote_currency)
+            max_qty_from_usdt = available_buy_usdt / (buy_price * FEE_BUFFER) if buy_price > 0 else 0
             
-            if not can_sell:
-                logger.debug(f"[DRY] Trade blocked: {sell_reason}")
-                return {
-                    'status': 'blocked',
-                    'reason': f'No {base_currency} on {sell_ex}: {sell_reason}',
-                    'missed_symbol': symbol,
-                    'missed_exchange': sell_ex,
-                    'missed_side': 'sell',
-                }
+            # Use the minimum of requested qty, available to sell, and available to buy
+            adjusted_qty = min(qty, available_sell, max_qty_from_usdt)
+            
+            if adjusted_qty <= 0 or (adjusted_qty * buy_price) < 0.50:
+                # Not enough balance for any meaningful trade
+                if available_sell <= 0:
+                    return {
+                        'status': 'blocked',
+                        'reason': f'No {base_currency} on {sell_ex}: have {available_sell:.6f}',
+                        'missed_symbol': symbol,
+                        'missed_exchange': sell_ex,
+                        'missed_side': 'sell',
+                    }
+                else:
+                    return {
+                        'status': 'blocked',
+                        'reason': f'Insufficient USDT on {buy_ex}: have ${available_buy_usdt:.2f}',
+                        'missed_symbol': symbol,
+                        'missed_exchange': buy_ex,
+                        'missed_side': 'buy',
+                    }
+            
+            # Update qty and recalculate profit if adjusted
+            if adjusted_qty < qty * 0.99:  # More than 1% reduction
+                ratio = adjusted_qty / qty
+                qty = adjusted_qty
+                net_profit = net_profit * ratio
+                logger.debug(f"[DRY] Adjusted qty to {qty:.6f} ({ratio:.1%} of requested) based on balance")
         
         logger.info(
             f"💰 [DRY RUN] ARBITRAGE OPPORTUNITY DETECTED\n"
