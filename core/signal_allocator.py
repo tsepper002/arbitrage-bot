@@ -110,6 +110,7 @@ class SignalAllocator:
     MIN_ALT_TRACK_RECORD = 900  # Each alternative must have 15 min of signal history
     MAX_SELL_LOSS_PCT = 0.5     # Don't sell if price dropped >0.5% from entry
     COIN_SWITCH_COOLDOWN = 600  # 10 min cooldown between switches
+    MAX_SIGNAL_STALENESS = 120  # 2 min: alternative is stale if no recent signals
     # Signal scoring window
     INITIAL_SIGNAL_WINDOW = 30  # Use last 30 signals for initial coin selection
     # Emergency exit: if coin drops >3% in 5 minutes → immediate sell and switch
@@ -302,7 +303,7 @@ class SignalAllocator:
             return 0.0
         
         count = len(symbol_signals)
-        avg_roi = sum(max(s.roi_pct, 0) for s in symbol_signals) / count if count > 0 else 0.0
+        avg_roi = sum(max(s.roi_pct, 0) for s in symbol_signals) / count
         
         return count * avg_roi
 
@@ -330,7 +331,7 @@ class SignalAllocator:
             
             # Must have recent signals (not just old ones)
             last_signal = self._last_signal_time.get(symbol, 0)
-            if now - last_signal > 120:  # No signal in last 2 min = stale
+            if now - last_signal > self.MAX_SIGNAL_STALENESS:
                 continue
             
             alternatives.append((symbol, score))
@@ -636,9 +637,9 @@ class SignalAllocator:
         if time_since_position > self.COIN_SWITCH_COOLDOWN and self._current_coin:
             # Check condition 1: silence timeout for current coin
             last_signal = self._last_signal_time.get(self._current_coin, 0)
-            silence_duration = now - last_signal if last_signal > 0 else time_since_position
-            
-            if silence_duration >= self.SILENCE_TIMEOUT:
+            if last_signal == 0:
+                pass  # No signals ever recorded — skip switch, coin just started
+            elif (now - last_signal) >= self.SILENCE_TIMEOUT:
                 # Check condition 2 & 3: at least MIN_ALTERNATIVES with track record
                 alternatives = self._get_hot_alternatives(
                     self._current_coin, 
@@ -737,11 +738,11 @@ class SignalAllocator:
                                 f"({len(executed)} orders) @ ${self._coin_entry_price:.4f}"
                             )
                 else:
-                    if silence_duration > self.SILENCE_TIMEOUT:
-                        logger.debug(
-                            f"⏸️ {self._current_coin} silent {silence_duration:.0f}s but only "
-                            f"{len(alternatives)} alternatives (need {self.MIN_ALTERNATIVES})"
-                        )
+                    silence_duration = now - last_signal
+                    logger.debug(
+                        f"⏸️ {self._current_coin} silent {silence_duration:.0f}s but only "
+                        f"{len(alternatives)} alternatives (need {self.MIN_ALTERNATIVES})"
+                    )
         
         # ========== PHASE 3: TOP-UP depleted exchanges (rare) ==========
         # If arb trades have depleted coin on one exchange (all sold → only USDT left)
