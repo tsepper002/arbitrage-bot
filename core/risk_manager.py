@@ -161,8 +161,10 @@ class RiskManager:
             return False, f"Anomalous spread: {roi_pct:.2f}% (max: {settings.ANOMALOUS_SPREAD_PCT}%)"
         
         # Check trade amount
-        buy_price = opportunity.get('buy_avg', 0)
+        buy_price = opportunity.get('buy_avg', opportunity.get('buy_price', 0))
         qty = opportunity.get('qty', 0)
+        if buy_price <= 0 or qty <= 0:
+            return False, f"Invalid trade: buy_price={buy_price}, qty={qty}"
         amount = buy_price * qty
         
         return self.can_trade_amount(amount)

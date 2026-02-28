@@ -222,9 +222,9 @@ class StateManager:
                     trade.get('buy_ex', ''),
                     trade.get('sell_ex', ''),
                     f"{trade.get('qty', 0):.8f}",
-                    f"{trade.get('buy_avg', 0):.6f}",
-                    f"{trade.get('sell_avg', 0):.6f}",
-                    f"{trade.get('net', 0):.6f}",
+                    f"{trade.get('buy_avg', trade.get('buy_price', 0)):.6f}",
+                    f"{trade.get('sell_avg', trade.get('sell_price', 0)):.6f}",
+                    f"{trade.get('net', trade.get('net_profit', 0)):.6f}",
                     f"{trade.get('roi_pct', 0):.4f}",
                     'dry-run' if self._is_dry_run else 'live'
                 ])

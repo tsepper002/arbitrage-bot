@@ -145,7 +145,7 @@ class ArbitrageEngine:
         p = self.params.get(exchange, {})
         if side == "maker":
             return p.get("maker", 0.0)
-        return p.get("taker", p.get("taker", 0.002))
+        return p.get("taker", 0.002)
 
     def _persist_opportunity(self, info: Dict):
         try:
@@ -329,8 +329,6 @@ class ArbitrageEngine:
                 if filled <= 0:
                     continue
 
-                buy_fee = self._fee_rate(buy_ex, "taker")
-                sell_fee = self._fee_rate(sell_ex, "taker")
                 fees = (buy_avg * filled) * buy_fee + (sell_avg * filled) * sell_fee
 
                 gross = (sell_avg - buy_avg) * filled
