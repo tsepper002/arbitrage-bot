@@ -65,6 +65,9 @@ class MarketMakingStrategy:
         # Get current market price
         ticker = await self.exchange.fetch_ticker(self.symbol)
         mid_price = (ticker['bid'] + ticker['ask']) / 2
+        if mid_price <= 0:
+            logger.warning(f"MM: invalid mid_price for {self.symbol}")
+            return
         
         # Calculate inventory skew
         inventory_skew = self._calculate_inventory_skew()

@@ -42,6 +42,9 @@ class DCAStrategy:
         try:
             ticker = await self.exchange.fetch_ticker(self.symbol)
             price = (ticker['bid'] + ticker['ask']) / 2
+            if price <= 0:
+                logger.warning(f"DCA: invalid price {price} for {self.symbol}")
+                return
             amount = min(self.amount_per_buy, self.max_position - self.total_invested) / price
             
             order = await self.exchange.create_market_buy_order(self.symbol, amount)

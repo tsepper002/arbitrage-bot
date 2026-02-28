@@ -111,7 +111,7 @@ class MEXCRESTClient(BaseRESTClient):
             
             return data
     
-    async def cancel_order(self, order_id: str, symbol: str) -> Dict[str, Any]:
+    async def cancel_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
         """
         Cancel an order on MEXC.
         Note: MEXC requires symbol for cancellation.
@@ -136,7 +136,7 @@ class MEXCRESTClient(BaseRESTClient):
                 raise Exception(f"MEXC cancel failed: {data}")
             return data
     
-    async def get_order_status(self, order_id: str, symbol: str) -> Dict[str, Any]:
+    async def get_order_status(self, symbol: str, order_id: str) -> Dict[str, Any]:
         """
         Get order status from MEXC.
         Note: MEXC requires symbol for order lookup.

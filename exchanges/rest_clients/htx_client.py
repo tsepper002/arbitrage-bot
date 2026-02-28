@@ -159,8 +159,8 @@ class HTXRESTClient(BaseRESTClient):
                 raise Exception(f"HTX order failed: {data}")
             return {"orderId": data.get("data")}
     
-    async def cancel_order(self, order_id: str) -> Dict[str, Any]:
-        """Cancel an order on HTX."""
+    async def cancel_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
+        """Cancel an order on HTX. Symbol accepted for interface compatibility but not used (order_id is sufficient)."""
         path = f"/v1/order/orders/{order_id}/submitcancel"
         
         params = self._get_common_params()
@@ -175,8 +175,8 @@ class HTXRESTClient(BaseRESTClient):
                 raise Exception(f"HTX cancel failed: {data}")
             return data.get("data", {})
     
-    async def get_order_status(self, order_id: str) -> Dict[str, Any]:
-        """Get order status from HTX."""
+    async def get_order_status(self, symbol: str, order_id: str) -> Dict[str, Any]:
+        """Get order status from HTX. Symbol accepted for interface compatibility but not used."""
         path = f"/v1/order/orders/{order_id}"
         
         params = self._get_common_params()

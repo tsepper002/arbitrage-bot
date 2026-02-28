@@ -101,7 +101,11 @@ class MarketAdaptiveStrategy:
         if len(prices) < 2:
             return 0.0
         
-        returns = np.diff(prices) / prices[:-1]
+        prices_arr = np.array(prices[:-1])
+        if np.any(prices_arr == 0):
+            return 0.0
+        
+        returns = np.diff(prices) / prices_arr
         volatility = np.std(returns)
         
         # Normalize by average price
@@ -305,6 +309,9 @@ class MarketAdaptiveStrategy:
                 avg = np.mean(prices[-50:])
                 signal_direction = "long" if prices[-1] < avg else "short"
         
+        # Cache trend calculation (avoid duplicate compute)
+        trend_strength, trend_direction = self.calculate_trend_strength(prices_to_use)
+        
         return {
             'regime': regime.value,
             'direction': signal_direction,
@@ -319,8 +326,8 @@ class MarketAdaptiveStrategy:
             },
             'indicators': {
                 'volatility': self.calculate_volatility(prices_to_use),
-                'trend_strength': self.calculate_trend_strength(prices_to_use)[0],
-                'trend_direction': self.calculate_trend_strength(prices_to_use)[1]
+                'trend_strength': trend_strength,
+                'trend_direction': trend_direction
             }
         }
     

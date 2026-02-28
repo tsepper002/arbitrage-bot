@@ -200,7 +200,10 @@ class FundingRateEnhancedStrategy:
     async def _get_price(self) -> float:
         """Get current price"""
         ticker = await self.exchange.fetch_ticker(self.symbol)
-        return (ticker['bid'] + ticker['ask']) / 2
+        price = (ticker['bid'] + ticker['ask']) / 2
+        if price <= 0:
+            raise ValueError(f"Invalid price for {self.symbol}")
+        return price
     
     def get_stats(self) -> Dict:
         """Get strategy statistics"""

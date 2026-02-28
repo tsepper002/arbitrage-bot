@@ -127,8 +127,8 @@ class KuCoinRESTClient(BaseRESTClient):
                 raise Exception(f"KuCoin order failed: {data}")
             return data.get("data", {})
     
-    async def cancel_order(self, order_id: str) -> Dict[str, Any]:
-        """Cancel an order on KuCoin."""
+    async def cancel_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
+        """Cancel an order on KuCoin. Symbol accepted for interface compatibility but not used."""
         endpoint = f"/api/v1/orders/{order_id}"
         url = f"{self.BASE_URL}{endpoint}"
         
@@ -141,8 +141,8 @@ class KuCoinRESTClient(BaseRESTClient):
                 raise Exception(f"KuCoin cancel failed: {data}")
             return data.get("data", {})
     
-    async def get_order_status(self, order_id: str) -> Dict[str, Any]:
-        """Get order status from KuCoin."""
+    async def get_order_status(self, symbol: str, order_id: str) -> Dict[str, Any]:
+        """Get order status from KuCoin. Symbol accepted for interface compatibility but not used."""
         endpoint = f"/api/v1/orders/{order_id}"
         url = f"{self.BASE_URL}{endpoint}"
         
