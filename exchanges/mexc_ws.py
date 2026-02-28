@@ -154,7 +154,7 @@ class MexcWS:
                 resp = {"method": "pong"}
                 if ws is not None:
                     await self._send(ws, resp)
-                logger.info("MEXC: replied pong")
+                    logger.info("MEXC: replied pong")
             except Exception as e:
                 logger.warning(f"MEXC: failed to send pong: {e}")
             return
