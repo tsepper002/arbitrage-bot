@@ -1793,8 +1793,6 @@ async def main():
                     except Exception:
                         pass
                 return 1
-    
-    return 1
 
 
 if __name__ == "__main__":

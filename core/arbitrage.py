@@ -794,7 +794,7 @@ class ArbitrageEngine:
                         ti['strategy'] = 'CROSS_EXCHANGE'
                         if hasattr(self, 'state_manager') and self.state_manager:
                             self.state_manager.record_trade_detail(ti)
-                            self.state_manager.add_to_daily_pnl(ti.get('net_profit', 0))
+                            self.state_manager.add_to_daily_pnl(ti.get('net', ti.get('net_profit', 0)))
                             self.state_manager.increment_trades()
                     
                     if result['status'] == 'simulated':

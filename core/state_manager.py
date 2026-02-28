@@ -40,6 +40,7 @@ class StateManager:
         self.save_interval = 30.0  # Save every 30 seconds
         self.auto_save_enabled = True
         self._save_lock = asyncio.Lock()  # Prevent concurrent saves
+        self._is_dry_run = getattr(settings, 'DRY_RUN', True)
         
         logger.info(f"StateManager initialized with file: {self.state_file}")
     
@@ -134,13 +135,14 @@ class StateManager:
             return False
     
     async def auto_save_loop(self):
-        """Automatically save state every N seconds."""
+        """Automatically save state every N seconds (with async lock)."""
         logger.info(f"Auto-save loop started (interval: {self.save_interval}s)")
         
         while self.auto_save_enabled:
             await asyncio.sleep(self.save_interval)
             if self.auto_save_enabled:
-                self.save_state()
+                async with self._save_lock:
+                    self.save_state()
     
     def get(self, key: str, default: Any = None) -> Any:
         """Get a value from state."""
@@ -224,7 +226,7 @@ class StateManager:
                     f"{trade.get('sell_avg', 0):.6f}",
                     f"{trade.get('net', 0):.6f}",
                     f"{trade.get('roi_pct', 0):.4f}",
-                    'dry-run' if getattr(settings, 'DRY_RUN', True) else 'live'
+                    'dry-run' if self._is_dry_run else 'live'
                 ])
         except Exception as e:
             logger.debug(f"Error writing trade CSV: {e}")
