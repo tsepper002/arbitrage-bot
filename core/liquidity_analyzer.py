@@ -13,7 +13,7 @@ class LiquidityAnalyzer:
         
         bid_depth = sum(b[1] for b in bids[:10])
         ask_depth = sum(a[1] for a in asks[:10])
-        spread = asks[0][0] - bids[0][0] if bids and asks else 0
+        spread = asks[0][0] - bids[0][0] if len(bids) > 0 and len(asks) > 0 else 0
         
         return {
             'bid_depth': bid_depth,

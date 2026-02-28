@@ -144,7 +144,7 @@ class AutoRebalancer:
         
         for exchange, exch_balances in balances.items():
             usdt_balance = exch_balances.get('USDT', 0.0)
-            pct = (usdt_balance / total_usdt) * 100
+            pct = (usdt_balance / total_usdt) * 100 if total_usdt > 0 else 0
             
             if pct < self.min_balance_pct:
                 low_exchanges.append((exchange, pct))
@@ -174,7 +174,7 @@ class AutoRebalancer:
         receivers = []
         for exchange, exch_balances in balances.items():
             usdt_balance = exch_balances.get('USDT', 0.0)
-            pct = (usdt_balance / total_usdt) * 100
+            pct = (usdt_balance / total_usdt) * 100 if total_usdt > 0 else 0
             
             if pct < self.min_balance_pct:
                 # Calculate how much needed to reach 20% (target)
@@ -186,7 +186,7 @@ class AutoRebalancer:
         senders = []
         for exchange, exch_balances in balances.items():
             usdt_balance = exch_balances.get('USDT', 0.0)
-            pct = (usdt_balance / total_usdt) * 100
+            pct = (usdt_balance / total_usdt) * 100 if total_usdt > 0 else 0
             
             if pct > 30.0:
                 # Calculate how much can send (keep 25% as buffer)

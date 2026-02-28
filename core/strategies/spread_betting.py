@@ -170,7 +170,7 @@ class SpreadBettingStrategy:
     
     def _calculate_profit(self, current_spread: float) -> float:
         """Calculate profit from spread movement"""
-        if not self.entry_spread:
+        if not self.entry_spread or self.entry_spread == 0:
             return 0.0
         
         spread_change = (current_spread - self.entry_spread) / self.entry_spread

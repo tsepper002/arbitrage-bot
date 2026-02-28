@@ -37,7 +37,7 @@ class PairsTradingStrategy:
     async def _analyze_and_trade(self):
         price1 = await self._get_price(self.pair1)
         price2 = await self._get_price(self.pair2)
-        if not price1 or not price2:
+        if not price1 or not price2 or price2 <= 0:
             return
             
         ratio = price1 / price2

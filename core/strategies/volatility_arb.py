@@ -78,6 +78,8 @@ class VolatilityArbitrageStrategy:
             logger.warning("Cannot get implied volatility")
             return
         
+        if realized_vol <= 0:
+            return
         vol_diff = (implied_vol - realized_vol) / realized_vol
         
         logger.info(f"Realized vol: {realized_vol:.2%}, Implied vol: {implied_vol:.2%}, Diff: {vol_diff:.2%}")

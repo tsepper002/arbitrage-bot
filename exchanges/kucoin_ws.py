@@ -205,12 +205,13 @@ class KucoinWS:
                         self._apply_changes(sym, "bids", ch["bids"])
                     if "asks" in ch:
                         self._apply_changes(sym, "asks", ch["asks"])
-                    bids_levels = self._book_to_levels(self._local_books[sym]["bids"], "bids")
-                    asks_levels = self._book_to_levels(self._local_books[sym]["asks"], "asks")
-                    asyncio.run_coroutine_threadsafe(
-                        self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
-                        self.loop
-                    )
+                    if sym and sym in self._local_books:
+                        bids_levels = self._book_to_levels(self._local_books[sym]["bids"], "bids")
+                        asks_levels = self._book_to_levels(self._local_books[sym]["asks"], "asks")
+                        asyncio.run_coroutine_threadsafe(
+                            self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
+                            self.loop
+                        )
                     return
 
                 # some updates may come with 'bids'/'asks' fields directly (treat as changes)
@@ -219,12 +220,13 @@ class KucoinWS:
                         self._apply_changes(sym, "bids", payload.get("bids", []))
                     if "asks" in payload:
                         self._apply_changes(sym, "asks", payload.get("asks", []))
-                    bids_levels = self._book_to_levels(self._local_books[sym]["bids"], "bids")
-                    asks_levels = self._book_to_levels(self._local_books[sym]["asks"], "asks")
-                    asyncio.run_coroutine_threadsafe(
-                        self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
-                        self.loop
-                    )
+                    if sym and sym in self._local_books:
+                        bids_levels = self._book_to_levels(self._local_books[sym]["bids"], "bids")
+                        asks_levels = self._book_to_levels(self._local_books[sym]["asks"], "asks")
+                        asyncio.run_coroutine_threadsafe(
+                            self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
+                            self.loop
+                        )
                     return
 
                 # ticker fallback: update top-of-book

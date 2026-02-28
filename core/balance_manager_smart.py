@@ -42,7 +42,7 @@ class BalanceManagerSmart:
                 if time_since < self.min_rebalance_interval:
                     continue
                     
-            current_pct = balance / total
+            current_pct = balance / total if total > 0 else 0
             target_pct = self.target_allocation.get(exchange, 1.0 / len(balances))
             diff = abs(current_pct - target_pct)
             
