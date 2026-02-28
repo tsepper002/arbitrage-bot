@@ -1011,6 +1011,13 @@ class IntegratedArbitrageBot:
                 print(f"{'─'*70}")
                 print(f" 💰 Trades: {total_trades} | Profit: ${total_profit:.4f} | Avg ROI: {avg_roi:.3f}%")
                 
+                # Profit reserve display
+                if self.engine:
+                    reserved = getattr(self.engine, '_reserved_profit', 0.0)
+                    reinvested = getattr(self.engine, '_reinvested_profit', 0.0)
+                    if total_profit > 0:
+                        print(f" 💎 Reserve: ${reserved:.4f} (30% locked) | Reinvested: ${reinvested:.4f} (70%)")
+                
                 # Balance info — total portfolio value in USDT (all coins)
                 if self.balance_manager:
                     total_bal = self.balance_manager.get_total_balance_usdt(self.engine.store if self.engine else None)
@@ -1216,7 +1223,7 @@ class IntegratedArbitrageBot:
         In LIVE: places real market buy/sell orders.
         """
         REBALANCE_INTERVAL = 300  # Check every 5 min (pre-funded: arb naturally rebalances)
-        INITIAL_DELAY = 60  # Wait 60s to collect enough signals for best initial coin choice
+        INITIAL_DELAY = 90  # Wait 90s to collect enough signals for best initial coin choice
         
         try:
             await asyncio.sleep(INITIAL_DELAY)

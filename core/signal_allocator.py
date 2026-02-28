@@ -108,6 +108,9 @@ class SignalAllocator:
     COIN_SWITCH_COOLDOWN = 1800  # 30 minutes before rotating coins
     # Minimum score ratio for new coin to replace current: new must be 3× better
     COIN_SWITCH_RATIO = 3.0
+    # Emergency exit: if coin drops >3% in 5 minutes → immediate sell and switch
+    EMERGENCY_DROP_PCT = 3.0   # percentage drop threshold
+    EMERGENCY_WINDOW = 300     # seconds to measure drop over
 
     # Top-up thresholds: when to buy more of current coin on a depleted exchange
     MIN_COIN_PCT_FOR_TOPUP = 0.10  # Coin is <10% of total → depleted
@@ -133,6 +136,7 @@ class SignalAllocator:
         self._coin_positioned_at: float = 0.0  # timestamp when coin was positioned
         self._initial_setup_done: bool = False  # True after first pre-positioning
         self._last_prices: Dict[str, float] = {}  # symbol → last known price
+        self._coin_entry_price: float = 0.0  # price when coin was first positioned
 
         logger.info("✅ SignalAllocator initialized (pre-funded inventory model)")
 
@@ -504,13 +508,49 @@ class SignalAllocator:
                     executed.append(order)
             
             if executed:
+                self._coin_entry_price = self._last_prices.get(best_coin, 0.0)
                 logger.info(
-                    f"🏦 Pre-fund complete: {base_coin} on {len(executed)}/{len(exchanges)} exchanges. "
-                    f"Now pure arb trades — NO more buy/sell overhead!"
+                    f"🏦 Pre-fund complete: {base_coin} on {len(executed)}/{len(exchanges)} exchanges "
+                    f"@ ${self._coin_entry_price:.4f}. Now pure arb trades — NO more buy/sell overhead!"
                 )
             return executed
         
-        # ========== PHASE 2: CHECK IF COIN SWITCH NEEDED ==========
+        # ========== PHASE 2A: EMERGENCY EXIT on price crash ==========
+        # If coin dropped >3% from entry → sell immediately, don't wait 30 min
+        if self._current_coin and self._coin_entry_price > 0 and price_store:
+            current_price = self.balance_manager._get_any_price(price_store, self._current_coin)
+            if current_price > 0:
+                self._last_prices[self._current_coin] = current_price
+                drop_pct = ((self._coin_entry_price - current_price) / self._coin_entry_price) * 100
+                if drop_pct >= self.EMERGENCY_DROP_PCT:
+                    old_base = self._current_coin.split('-')[0] if '-' in self._current_coin else self._current_coin.replace('USDT', '')
+                    logger.warning(
+                        f"🚨 EMERGENCY EXIT: {old_base} dropped {drop_pct:.1f}% "
+                        f"(${self._coin_entry_price:.4f} → ${current_price:.4f}). Selling all!"
+                    )
+                    for exchange in exchanges:
+                        amount = self.balance_manager.get_balance(exchange, old_base)
+                        if amount <= 0:
+                            continue
+                        sell_usdt = amount * current_price
+                        if sell_usdt < self.MIN_PREPOSITION_USDT:
+                            continue
+                        order = await self._execute_sell_order(
+                            exchange, self._current_coin, old_base, amount,
+                            sell_usdt, current_price, f'EMERGENCY exit {old_base}', rest_clients
+                        )
+                        if order:
+                            executed.append(order)
+                    
+                    # Reset: pick new coin next cycle
+                    self._current_coin = None
+                    self._initial_setup_done = False
+                    self._coin_entry_price = 0.0
+                    if executed:
+                        logger.warning(f"🚨 Emergency exit complete: sold {old_base} on {len(executed)} exchanges. Will pick new coin next cycle.")
+                    return executed
+        
+        # ========== PHASE 2B: CHECK IF COIN SWITCH NEEDED ==========
         # Only switch if: (1) cooldown passed, (2) current coin has no signals, 
         # (3) new coin is 3× better
         time_since_position = now - self._coin_positioned_at
@@ -593,9 +633,10 @@ class SignalAllocator:
                 
                 self._current_coin = best_coin
                 self._coin_positioned_at = now
+                self._coin_entry_price = self._last_prices.get(best_coin, 0.0)
                 
                 if executed:
-                    logger.info(f"🔄 Coin switch complete: {old_base} → {new_base} ({len(executed)} orders)")
+                    logger.info(f"🔄 Coin switch complete: {old_base} → {new_base} ({len(executed)} orders) @ ${self._coin_entry_price:.4f}")
         
         # ========== PHASE 3: TOP-UP depleted exchanges (rare) ==========
         # If arb trades have depleted coin on one exchange (all sold → only USDT left)

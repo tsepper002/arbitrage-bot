@@ -34,6 +34,9 @@ class ArbitrageEngine:
     COMPOUND_MAX_MULTIPLIER = 2.0
     # MEXC-first routing: prefer low-fee exchange if price within this % proximity
     LOW_FEE_PROXIMITY_PCT = 0.02
+    # Profit reserve: 30% of profits are locked (untouchable), 70% reinvested
+    PROFIT_REINVEST_PCT = 0.70
+    PROFIT_RESERVE_PCT = 0.30
     
     def __init__(self, store, *,
                  default_qty: Optional[float] = None,
@@ -148,6 +151,8 @@ class ArbitrageEngine:
         
         # Compound reinvestment: profits grow trade size (capped at 2× base)
         self._total_profit = 0.0
+        self._reinvested_profit = 0.0   # 70% of profits → grows trade size
+        self._reserved_profit = 0.0     # 30% of profits → untouchable reserve
         self._base_exposure = self.max_exposure_usdt
         self._compound_max = self._base_exposure * self.COMPOUND_MAX_MULTIPLIER
         
@@ -379,8 +384,8 @@ class ArbitrageEngine:
         # limit by safety factor
         allowed_by_liquidity = total_avail * self.safety_factor
 
-        # Compound reinvestment: grow exposure with profits (cap at 2× base)
-        compound_exposure = min(self._base_exposure + self._total_profit, self._compound_max)
+        # Compound reinvestment: only reinvested portion (70%) grows exposure
+        compound_exposure = min(self._base_exposure + self._reinvested_profit, self._compound_max)
         effective_exposure = max(compound_exposure, self._base_exposure)
         
         # Target exposure: use compound-adjusted exposure to determine trade size
@@ -939,9 +944,11 @@ class ArbitrageEngine:
                         trade_profit = trade_info.get('net_profit', 0)
                         trade_successful = result['status'] in ('success', 'simulated')
                         
-                        # Compound reinvestment: accumulate profits for growing trade sizes
+                        # Compound reinvestment: split profits 70% reinvest / 30% reserve
                         if trade_successful and trade_profit > 0:
                             self._total_profit += trade_profit
+                            self._reinvested_profit += trade_profit * self.PROFIT_REINVEST_PCT
+                            self._reserved_profit += trade_profit * self.PROFIT_RESERVE_PCT
                         
                         # MT1: Order Flow Tracker — track executed order
                         if getattr(self, 'order_flow_tracker', None):
