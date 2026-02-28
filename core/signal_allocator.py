@@ -109,6 +109,10 @@ class SignalAllocator:
     # Minimum score ratio for new coin to replace current: new must be 3× better
     COIN_SWITCH_RATIO = 3.0
 
+    # Top-up thresholds: when to buy more of current coin on a depleted exchange
+    MIN_COIN_PCT_FOR_TOPUP = 0.10  # Coin is <10% of total → depleted
+    MIN_USDT_PCT_FOR_TOPUP = 0.80  # USDT is >80% of total → can afford top-up
+
     def __init__(self, balance_manager=None):
         self.balance_manager = balance_manager
         self._signals: List[SignalRecord] = []
@@ -502,7 +506,7 @@ class SignalAllocator:
                 # Current coin has zero signals — dead
                 should_switch = True
                 reason = f"{self._current_coin} has 0 signals, {best_coin} is active"
-            elif best_score > current_score * self.COIN_SWITCH_RATIO and best_coin != self._current_coin:
+            elif current_score > 0 and best_score > current_score * self.COIN_SWITCH_RATIO and best_coin != self._current_coin:
                 # New coin is dramatically better
                 should_switch = True
                 reason = f"{best_coin} score {best_score:.2f} > {self.COIN_SWITCH_RATIO}× {self._current_coin} score {current_score:.2f}"
@@ -605,12 +609,12 @@ class SignalAllocator:
                 # Only top up if coin is nearly depleted (<10% of total) 
                 # AND USDT is plentiful (>80% of total)
                 coin_pct = coin_value / total_value if total_value > 0 else 0
-                if coin_pct < 0.10 and usdt_balance > total_value * 0.80:
+                if coin_pct < self.MIN_COIN_PCT_FOR_TOPUP and usdt_balance > total_value * self.MIN_USDT_PCT_FOR_TOPUP:
                     # Coin depleted — trades used it all up. Buy more from accumulated USDT
                     reserve = getattr(settings, 'BALANCE_RESERVE_USDT', 2.0)
                     buy_usdt = min(
                         (usdt_balance - reserve) * self.MAX_PREPOSITION_PCT,
-                        usdt_balance * 0.40  # Max 40% of USDT
+                        usdt_balance * self.MAX_PREPOSITION_PCT
                     )
                     if buy_usdt < self.MIN_PREPOSITION_USDT:
                         continue
