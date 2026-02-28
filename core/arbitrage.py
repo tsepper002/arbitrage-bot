@@ -196,7 +196,7 @@ class ArbitrageEngine:
         ex_fee = EXCHANGE_PARAMS.get(missed_ex, {}).get('taker', 0.001)
         jit_fee_cost = arb_qty * arb_price * ex_fee  # Fee for the JIT buy/sell
         
-        if arb_net <= 0 or arb_net < jit_fee_cost * self.JIT_MIN_PROFIT_RATIO:
+        if arb_net < jit_fee_cost * self.JIT_MIN_PROFIT_RATIO:
             # Arb profit doesn't justify the JIT fee cost
             logger.debug(
                 f"JIT skipped {symbol} on {missed_ex}: arb profit ${arb_net:.4f} "
