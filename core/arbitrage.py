@@ -163,18 +163,17 @@ class ArbitrageEngine:
 
     async def _jit_acquire(self, opportunity: Dict, blocked_result: Dict) -> bool:
         """
-        Just-In-Time inventory acquisition: when a trade is blocked because
-        we don't have the base coin on the sell-side exchange, buy it immediately
-        using USDT so the arb can execute without waiting for the rebalance cycle.
+        Just-In-Time inventory acquisition:
+        - SELL miss: need base coin on sell exchange → buy it with USDT
+        - BUY miss: need USDT on buy exchange → sell any existing base coin to get USDT
         
         Returns True if acquisition succeeded and trade should be retried.
         """
         symbol = opportunity.get('symbol', '')
-        sell_ex = blocked_result.get('missed_exchange', '')
-        acquisition_price = opportunity.get('sell_avg', 0)  # price on the sell-side exchange
-        qty = opportunity.get('qty', 0)
+        missed_ex = blocked_result.get('missed_exchange', '')
+        missed_side = blocked_result.get('missed_side', 'sell')
         
-        if not symbol or not sell_ex or acquisition_price <= 0 or qty <= 0:
+        if not symbol or not missed_ex:
             return False
         
         base_currency = symbol.split('-')[0] if '-' in symbol else symbol.replace('USDT', '')
@@ -182,55 +181,133 @@ class ArbitrageEngine:
         if not bm:
             return False
         
-        # Check USDT available on sell-side exchange
-        usdt_available = bm.get_balance(sell_ex, 'USDT')
-        cost = qty * acquisition_price * self.JIT_FEE_SLIPPAGE_BUFFER
+        # Get exchange fee for accurate cost calculation
+        from core.exchange_config import EXCHANGE_PARAMS
+        ex_fee = EXCHANGE_PARAMS.get(missed_ex, {}).get('taker', 0.001)
         
-        if usdt_available < max(cost, 1.0):
-            # Not enough USDT — try with whatever we have (minimum $1)
-            if usdt_available < 1.0:
+        if missed_side == 'sell':
+            # SELL-SIDE MISS: Need base coin on sell exchange → buy it with USDT
+            acquisition_price = opportunity.get('sell_avg', 0)
+            qty = opportunity.get('qty', 0)
+            if acquisition_price <= 0 or qty <= 0:
                 return False
-            qty = (usdt_available * self.JIT_USDT_SAFETY_MARGIN) / (acquisition_price * self.JIT_FEE_SLIPPAGE_BUFFER)
+            
+            usdt_available = bm.get_balance(missed_ex, 'USDT')
             cost = qty * acquisition_price * self.JIT_FEE_SLIPPAGE_BUFFER
+            
+            if usdt_available < max(cost, 1.0):
+                if usdt_available < 1.0:
+                    return False
+                qty = (usdt_available * self.JIT_USDT_SAFETY_MARGIN) / (acquisition_price * self.JIT_FEE_SLIPPAGE_BUFFER)
+                cost = qty * acquisition_price * self.JIT_FEE_SLIPPAGE_BUFFER
+            
+            # Deduct exchange trading fee from received quantity
+            qty_after_fee = qty * (1.0 - ex_fee)
+            
+            return await self._jit_execute_buy(
+                missed_ex, symbol, base_currency, qty_after_fee, cost, opportunity
+            )
+        
+        elif missed_side == 'buy':
+            # BUY-SIDE MISS: Need USDT on buy exchange → sell any held base coin
+            acquisition_price = opportunity.get('buy_avg', 0)
+            qty = opportunity.get('qty', 0)
+            if acquisition_price <= 0 or qty <= 0:
+                return False
+            
+            # Check if we have ANY base coin on buy exchange we can sell to free USDT
+            base_held = bm.get_balance(missed_ex, base_currency)
+            if base_held > 0 and base_held * acquisition_price >= 1.0:
+                # We already have some of this coin — sell it for USDT  
+                sell_qty = min(base_held, qty)
+                usdt_received = sell_qty * acquisition_price * (1.0 - ex_fee)
+                
+                return await self._jit_execute_sell(
+                    missed_ex, symbol, base_currency, sell_qty, usdt_received, opportunity
+                )
+            
+            # Try selling ANY other coin we have on this exchange
+            all_balances = bm.get_all_balances().get(missed_ex, {}) if hasattr(bm, 'get_all_balances') else {}
+            for coin, amount in all_balances.items():
+                if coin == 'USDT' or amount <= 0:
+                    continue
+                coin_symbol = f"{coin}-USDT"
+                coin_price = self._get_coin_price(coin_symbol)
+                if coin_price <= 0 or amount * coin_price < 1.0:
+                    continue
+                # Sell this coin to free up USDT
+                usdt_received = amount * coin_price * (1.0 - ex_fee)
+                return await self._jit_execute_sell(
+                    missed_ex, coin_symbol, coin, amount, usdt_received, opportunity
+                )
+            
+            return False
+        
+        return False
+    
+    def _get_coin_price(self, symbol: str) -> float:
+        """Get current price for a symbol from PriceStore."""
+        snap = self.store.snapshot()
+        exmap = snap.get(symbol, {})
+        for ex in exmap.values():
+            bid = ex.get('bid', 0) or 0
+            if bid > 0:
+                return bid
+        return 0.0
+    
+    async def _jit_execute_buy(self, exchange, symbol, base_currency, qty, cost, opportunity) -> bool:
+        """Execute JIT buy (USDT → base coin) on an exchange."""
+        bm = self.executor.balance_manager
         
         if settings.DRY_RUN:
-            # Virtual: update balances directly
-            bm.update_balance_optimistic(sell_ex, 'USDT', -cost)
-            bm.update_balance_optimistic(sell_ex, base_currency, qty)
-            # Update opportunity qty to match what we acquired
+            bm.update_balance_optimistic(exchange, 'USDT', -cost)
+            bm.update_balance_optimistic(exchange, base_currency, qty)
             opportunity['qty'] = qty
             opportunity['net'] = qty * (opportunity.get('sell_avg', 0) - opportunity.get('buy_avg', 0))
-            logger.info(
-                f"⚡ JIT: Bought {qty:.4f} {base_currency} on {sell_ex} "
-                f"(${cost:.2f}) for upcoming arb"
-            )
+            logger.info(f"⚡ JIT BUY: {qty:.4f} {base_currency} on {exchange} (${cost:.2f})")
             return True
         else:
-            # Live: place real market buy order
-            rest_clients = getattr(self, '_rest_clients', None)
-            if not rest_clients:
-                rest_clients = getattr(self.executor, 'rest_clients', None)
-            if not rest_clients or sell_ex not in rest_clients:
-                logger.warning(f"JIT: No REST client for {sell_ex}")
+            rest_clients = getattr(self.executor, 'rest_clients', getattr(self, '_rest_clients', None))
+            if not rest_clients or exchange not in rest_clients:
                 return False
             try:
-                client = rest_clients[sell_ex]
-                norm_symbol = symbol.replace('-', '')
-                result = await client.place_order(
-                    symbol=norm_symbol, side='buy', order_type='market',
+                result = await rest_clients[exchange].place_order(
+                    symbol=symbol.replace('-', ''), side='buy', order_type='market',
                     quantity=qty, price=None
                 )
                 if result:
-                    logger.info(
-                        f"⚡ JIT: Bought {qty:.4f} {base_currency} on {sell_ex} "
-                        f"(${cost:.2f}) for upcoming arb"
-                    )
+                    logger.info(f"⚡ JIT BUY: {qty:.4f} {base_currency} on {exchange} (${cost:.2f})")
                     opportunity['qty'] = qty
-                    opportunity['net'] = qty * (opportunity.get('sell_avg', 0) - opportunity.get('buy_avg', 0))
                     await asyncio.sleep(self.JIT_BALANCE_SYNC_DELAY)
                     return True
             except Exception as e:
-                logger.warning(f"JIT acquisition failed on {sell_ex}: {e}")
+                logger.warning(f"JIT buy failed on {exchange}: {e}")
+            return False
+    
+    async def _jit_execute_sell(self, exchange, symbol, base_currency, qty, usdt_received, opportunity) -> bool:
+        """Execute JIT sell (base coin → USDT) on an exchange to free up capital."""
+        bm = self.executor.balance_manager
+        
+        if settings.DRY_RUN:
+            bm.update_balance_optimistic(exchange, base_currency, -qty)
+            bm.update_balance_optimistic(exchange, 'USDT', usdt_received)
+            logger.info(f"⚡ JIT SELL: {qty:.4f} {base_currency} → ${usdt_received:.2f} USDT on {exchange}")
+            return True
+        else:
+            rest_clients = getattr(self.executor, 'rest_clients', getattr(self, '_rest_clients', None))
+            if not rest_clients or exchange not in rest_clients:
+                return False
+            try:
+                result = await rest_clients[exchange].place_order(
+                    symbol=symbol.replace('-', ''), side='sell', order_type='market',
+                    quantity=qty, price=None
+                )
+                if result:
+                    logger.info(f"⚡ JIT SELL: {qty:.4f} {base_currency} → ${usdt_received:.2f} USDT on {exchange}")
+                    await asyncio.sleep(self.JIT_BALANCE_SYNC_DELAY)
+                    return True
+            except Exception as e:
+                logger.warning(f"JIT sell failed on {exchange}: {e}")
             return False
 
     def _choose_qty(self, buy_levels, sell_levels, buy_price) -> float:
@@ -715,8 +792,8 @@ class ArbitrageEngine:
                             logger.debug(f"TWAP execution error: {e}")
                     result = await self.executor.execute_arbitrage(o)
                     
-                    # JIT inventory: if blocked, buy coin inline and retry
-                    if result.get('status') == 'blocked' and result.get('missed_side') == 'sell':
+                    # JIT inventory: if blocked, acquire missing asset inline and retry
+                    if result.get('status') == 'blocked' and result.get('missed_side') in ('sell', 'buy'):
                         jit_ok = await self._jit_acquire(o, result)
                         if jit_ok:
                             result = await self.executor.execute_arbitrage(o)

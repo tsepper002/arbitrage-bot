@@ -68,7 +68,9 @@ class RiskManager:
         """Reset daily counters if needed."""
         now = time.time()
         if now >= self.daily_reset_time:
-            logger.info(f"Daily reset: PnL was ${self.daily_pnl:.2f}, trades: {self.daily_trades}")
+            # Only log once per actual reset (not per call)
+            if self.daily_pnl != 0.0 or self.daily_trades > 0:
+                logger.info(f"Daily reset: PnL was ${self.daily_pnl:.2f}, trades: {self.daily_trades}")
             self.daily_pnl = 0.0
             self.daily_trades = 0
             self.daily_reset_time = self._get_next_reset_time()

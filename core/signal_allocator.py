@@ -166,6 +166,10 @@ class SignalAllocator:
         )
         
         if recent_for_symbol >= self.MISS_THRESHOLD:
+            # Cooldown: max 1 urgent rebalance per 30 seconds per symbol
+            last_urgent = self._urgent_symbols.get(symbol, 0)
+            if now - last_urgent < 30:
+                return  # Already triggered recently, skip spam
             self._urgent_rebalance_needed = True
             self._urgent_symbols[symbol] = now
             logger.info(
