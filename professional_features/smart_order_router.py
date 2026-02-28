@@ -193,8 +193,12 @@ class SmartOrderRouter:
             self.venue_avg_latency[exchange].pop(0)
         
         # Вычислить reliability score
-        success_rate = sum(self.venue_success_rate[exchange]) / len(self.venue_success_rate[exchange]) if self.venue_success_rate[exchange] else 0.9
-        self.venue_reliability[exchange] = success_rate
+        self.venue_reliability[exchange] = self._calculate_success_rate(exchange)
+    
+    def _calculate_success_rate(self, exchange: str) -> float:
+        """Calculate success rate for an exchange, defaults to 0.9 if no data."""
+        rates = self.venue_success_rate.get(exchange, [])
+        return sum(rates) / len(rates) if rates else 0.9
     
     def get_venue_statistics(self, exchange: str) -> Dict:
         """Получить статистику по бирже"""
@@ -205,7 +209,7 @@ class SmartOrderRouter:
                 'total_orders': 0
             }
         
-        success_rate = sum(self.venue_success_rate[exchange]) / len(self.venue_success_rate[exchange]) if self.venue_success_rate[exchange] else 0.9
+        success_rate = self._calculate_success_rate(exchange)
         avg_latency = statistics.mean(self.venue_avg_latency[exchange]) if self.venue_avg_latency[exchange] else 0.0
         
         return {
