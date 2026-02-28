@@ -225,9 +225,7 @@ class SignalAllocator:
         """Calculate how many different coins to pre-position based on capital.
         
         Uses TOTAL portfolio value (USDT + coins in USDT equiv), not just USDT.
-        With small capital ($14/exchange): 1 coin (focus)
-        With medium capital ($25/exchange): 2 coins (more opportunities)
-        With larger capital: progressively more coins
+        Growth milestones: $25 → 2 coins, $50 → 3, $200 → 4, $500 → 5, $1000+ → 6
         """
         if not self.balance_manager:
             return 1
@@ -254,7 +252,7 @@ class SignalAllocator:
         
         # Capital growth milestones:
         if avg_per_exchange < 25:
-            return 1  # $14: Focus on 1 coin for maximum liquidity
+            return 1  # Under $25: Focus on 1 coin for maximum liquidity
         elif avg_per_exchange < 50:
             return 2  # $25-50: 2 coins = 2× more arb opportunities
         elif avg_per_exchange < 200:

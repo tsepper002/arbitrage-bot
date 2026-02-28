@@ -30,6 +30,11 @@ def simulate_execution_from_book(levels: List[Tuple[float, float]], qty: float) 
     return avg, filled
 
 class ArbitrageEngine:
+    # Compound reinvestment: max growth factor for trade size
+    COMPOUND_MAX_MULTIPLIER = 2.0
+    # MEXC-first routing: prefer low-fee exchange if price within this % proximity
+    LOW_FEE_PROXIMITY_PCT = 0.02
+    
     def __init__(self, store, *,
                  default_qty: Optional[float] = None,
                  min_net_pct: Optional[float] = None,
@@ -144,13 +149,11 @@ class ArbitrageEngine:
         # Compound reinvestment: profits grow trade size (capped at 2× base)
         self._total_profit = 0.0
         self._base_exposure = self.max_exposure_usdt
-        COMPOUND_MAX_MULTIPLIER = 2.0  # Never grow beyond 2× base
-        self._compound_max = self._base_exposure * COMPOUND_MAX_MULTIPLIER
+        self._compound_max = self._base_exposure * self.COMPOUND_MAX_MULTIPLIER
         
         # MEXC-first routing: prefer MEXC as buy-side (0.05% taker vs 0.10%+ others)
         self._low_fee_exchanges = ['MEXC']  # Exchanges with lowest taker fees
-        LOW_FEE_PROXIMITY_PCT = 0.02  # If price within 0.02%, prefer low-fee exchange
-        self._low_fee_proximity = LOW_FEE_PROXIMITY_PCT / 100.0
+        self._low_fee_proximity = self.LOW_FEE_PROXIMITY_PCT / 100.0
         
         logger.info(f"ArbitrageEngine initialized: min_roi={self.min_net_pct}%, max_exposure=${self.max_exposure_usdt}, safety_factor={self.safety_factor}")
 
