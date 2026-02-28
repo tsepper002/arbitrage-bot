@@ -389,7 +389,7 @@ async def check_database():
         # Check database connection
         await db.ping()
         return True
-    except:
+    except Exception:
         return False
 
 async def check_exchange_api():
@@ -397,7 +397,7 @@ async def check_exchange_api():
         # Check exchange API
         await exchange.get_ticker('BTC/USDT')
         return True
-    except:
+    except Exception:
         return False
 
 await health_monitor.register_component('database', check_database, interval_seconds=60)

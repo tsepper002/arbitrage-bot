@@ -5,6 +5,7 @@ Trades based on real-time news events and sentiment analysis.
 
 import asyncio
 import logging
+import os
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -64,7 +65,7 @@ class NewsTrading:
             sentiment_threshold: Minimum sentiment for trading signals
             impact_threshold: Minimum impact score for signals
         """
-        self.api_key = api_key
+        self.api_key = api_key or os.environ.get('NEWS_API_KEY')
         self.sentiment_threshold = sentiment_threshold
         self.impact_threshold = impact_threshold
         

@@ -417,8 +417,13 @@ class MLModelTrainer:
         Args:
             filepath: Path to saved model file
         """
-        with open(filepath, 'rb') as f:
-            model_data = pickle.load(f)
+        # WARNING: pickle.load can execute arbitrary code — only load trusted files
+        try:
+            with open(filepath, 'rb') as f:
+                model_data = pickle.load(f)
+        except (pickle.UnpicklingError, EOFError, ValueError) as e:
+            logger.error(f"Failed to load model from {filepath}: {e}")
+            raise
         
         if 'model' in model_data and isinstance(model_data['model'], dict):
             self.models.update(model_data['model'])
