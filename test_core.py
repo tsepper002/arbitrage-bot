@@ -147,7 +147,8 @@ def test_balance_manager_price_lookup():
     print(f"  ✅ get_total_balance_usdt: ${total:.2f}")
 
 
-
+def test_all_symbols():
+    """TEST 6: All 10 Symbols × 4 Exchanges"""
     print("\n" + "=" * 60)
     print("TEST 6: All 10 Symbols × 4 Exchanges")
     print("=" * 60)
