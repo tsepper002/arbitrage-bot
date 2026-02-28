@@ -64,7 +64,7 @@ class IndexArbitrageStrategy:
         try:
             ticker = await self.exchange.fetch_ticker(symbol)
             return (ticker['bid'] + ticker['ask']) / 2
-        except (KeyError, TypeError, ValueError, Exception):
+        except Exception:
             return None
             
     async def _sell_index_buy_basket(self):
