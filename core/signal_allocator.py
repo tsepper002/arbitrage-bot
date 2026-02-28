@@ -136,7 +136,8 @@ class SignalAllocator:
             weight = self.EXECUTED_WEIGHT if sig.executed else 1.0
 
             # ROI bonus: higher ROI signals get proportionally more weight
-            roi_bonus = 1.0 + max(sig.roi_pct, 0) * 10.0  # 0.1% ROI = 2× weight
+            # 0.1% ROI → 2× weight, 1.0% ROI → 11× weight
+            roi_bonus = 1.0 + max(sig.roi_pct, 0) * 10.0
 
             scores[sig.symbol] += weight * decay * roi_bonus
 
@@ -232,7 +233,8 @@ class SignalAllocator:
                     continue
 
                 # Check if we already have enough of this coin
-                base_coin = symbol.split('-')[0]
+                # Handle both 'BTC-USDT' and 'BTCUSDT' formats
+                base_coin = symbol.split('-')[0] if '-' in symbol else symbol.replace('USDT', '')
                 current_holding_usdt = self.balance_manager.get_balance(exchange, base_coin)
                 # Skip if already holding equivalent value
                 if current_holding_usdt > amount_usdt * 0.5:

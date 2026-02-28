@@ -172,9 +172,11 @@ class BybitRESTClient(BaseRESTClient):
                         coin_name = coin.get("coin")
                         # Try multiple balance fields — Bybit uses different field names
                         # for UNIFIED vs SPOT accounts
-                        available = float(coin.get("availableToWithdraw", 0) or
-                                         coin.get("free", 0) or
-                                         coin.get("walletBalance", 0) or 0)
+                        available = float(
+                            coin.get("availableToWithdraw") or
+                            coin.get("free") or
+                            coin.get("walletBalance") or 0
+                        )
                         if available > 0:
                             balances[coin_name] = available
                 
