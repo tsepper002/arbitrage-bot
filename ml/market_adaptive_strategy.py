@@ -103,6 +103,7 @@ class MarketAdaptiveStrategy:
         
         prices_arr = np.array(prices[:-1])
         if np.any(prices_arr == 0):
+            logger.warning("Zero price detected in volatility calculation — data quality issue")
             return 0.0
         
         returns = np.diff(prices) / prices_arr

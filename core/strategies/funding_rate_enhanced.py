@@ -125,6 +125,8 @@ class FundingRateEnhancedStrategy:
         try:
             # Get current price
             price = await self._get_price()
+            if price <= 0:
+                return
             amount = self.position_size / price
             
             # Buy perpetual (with leverage if available)
@@ -143,9 +145,9 @@ class FundingRateEnhancedStrategy:
         """Enter short perpetual + long spot"""
         try:
             price = await self._get_price()
+            if price <= 0:
+                return
             amount = self.position_size / price
-            
-            # Sell perpetual (with leverage if available)
             await self.exchange.create_market_sell_order(
                 f"{self.symbol}/USDT:USDT",  # Perpetual
                 amount
@@ -202,7 +204,8 @@ class FundingRateEnhancedStrategy:
         ticker = await self.exchange.fetch_ticker(self.symbol)
         price = (ticker['bid'] + ticker['ask']) / 2
         if price <= 0:
-            raise ValueError(f"Invalid price for {self.symbol}")
+            logger.warning(f"Funding: invalid price for {self.symbol}")
+            return 0.0
         return price
     
     def get_stats(self) -> Dict:
