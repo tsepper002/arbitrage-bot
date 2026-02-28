@@ -157,6 +157,8 @@ class CrossChainArbitrage:
         bridge = self.bridges[bridge_key]
         
         # Calculate profit
+        if source_price <= 0:
+            return
         gross_profit_percent = ((dest_price - source_price) / source_price) * 100
         
         # Estimate costs

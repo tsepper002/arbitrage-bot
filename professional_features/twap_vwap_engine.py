@@ -270,6 +270,8 @@ class TWAPVWAPEngine:
         volume_profile: List[float]
     ) -> List[ExecutionSlice]:
         """Create VWAP slices based on volume profile"""
+        if not volume_profile:
+            return []
         total_volume = sum(volume_profile)
         slices = []
         interval = config.duration_seconds / len(volume_profile)
