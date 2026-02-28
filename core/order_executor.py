@@ -162,7 +162,7 @@ class OrderExecutor:
             # Use the minimum of requested qty, available to sell, and available to buy
             adjusted_qty = min(qty, available_sell, max_qty_from_usdt)
             
-            if adjusted_qty <= 0 or (adjusted_qty * buy_price) < 0.50:
+            if adjusted_qty <= 0 or (adjusted_qty * buy_price) < self.MIN_ORDER_USDT:
                 # Not enough balance for any meaningful trade
                 if available_sell <= 0:
                     return {
@@ -182,7 +182,7 @@ class OrderExecutor:
                     }
             
             # Update qty and recalculate profit if adjusted
-            if adjusted_qty < qty * 0.99:  # More than 1% reduction
+            if adjusted_qty < qty * self.QTY_ADJUST_THRESHOLD:
                 ratio = adjusted_qty / qty
                 qty = adjusted_qty
                 net_profit = net_profit * ratio
@@ -236,6 +236,8 @@ class OrderExecutor:
     MAX_SLIPPAGE_PCT = 1.0  # 1% max deviation from expected fill price
     # Minimum order size in USDT to avoid exchange rejections
     MIN_ORDER_USDT = 1.0
+    # Minimum ratio of adjusted qty vs requested qty to proceed
+    QTY_ADJUST_THRESHOLD = 0.95  # Proceed if ≥95% of requested qty available
 
     async def _execute_live(self, opp: Dict) -> Dict:
         """
@@ -292,7 +294,7 @@ class OrderExecutor:
                         'missed_side': 'sell' if available_base < adjusted_qty else 'buy',
                     }
                 
-                if adjusted_qty < qty * 0.95:
+                if adjusted_qty < qty * self.QTY_ADJUST_THRESHOLD:
                     logger.info(f"📏 Adjusted qty: {qty:.6f} → {adjusted_qty:.6f} (balance limited)")
                     qty = adjusted_qty
             
@@ -330,8 +332,8 @@ class OrderExecutor:
             logger.info(f"📋 Orders placed in {placement_time:.3f}s: buy={buy_order_id}, sell={sell_order_id}")
             
             # Verify fills (poll order status)
-            buy_fill = await self._verify_fill(buy_client, symbol, buy_order_id, 'buy', buy_price)
-            sell_fill = await self._verify_fill(sell_client, symbol, sell_order_id, 'sell', sell_price)
+            buy_fill = await self._verify_fill(buy_client, symbol, buy_order_id, 'buy', buy_price, qty)
+            sell_fill = await self._verify_fill(sell_client, symbol, sell_order_id, 'sell', sell_price, qty)
             
             execution_time = time.time() - start_time
             
@@ -376,8 +378,9 @@ class OrderExecutor:
                     buy_ex, sell_ex, base_currency, quote_currency,
                     actual_qty, actual_qty * actual_buy_price, actual_qty * actual_sell_price
                 )
-                # Force immediate balance sync after trade
-                asyncio.ensure_future(self._sync_balances_after_trade(buy_client, sell_client, buy_ex, sell_ex))
+                # Force immediate balance sync after trade (fire-and-forget with error handling)
+                task = asyncio.create_task(self._sync_balances_after_trade(buy_client, sell_client, buy_ex, sell_ex))
+                task.add_done_callback(lambda t: t.exception() if not t.cancelled() and t.exception() else None)
             
             # Step 10: Record trade with ACTUAL values
             trade_info = {
@@ -436,11 +439,11 @@ class OrderExecutor:
                     return str(val)
         return ""
     
-    async def _verify_fill(self, client, symbol: str, order_id: str, side: str, expected_price: float) -> Dict:
+    async def _verify_fill(self, client, symbol: str, order_id: str, side: str, expected_price: float, expected_qty: float = 0) -> Dict:
         """Poll order status until filled or timeout."""
         if not order_id or not hasattr(client, 'get_order_status'):
-            # Can't verify — assume filled (optimistic)
-            return {'filled': True, 'avg_price': expected_price, 'filled_qty': 0}
+            # Can't verify — assume filled at expected values
+            return {'filled': True, 'avg_price': expected_price, 'filled_qty': expected_qty}
         
         deadline = time.time() + self.FILL_TIMEOUT_SEC
         while time.time() < deadline:
@@ -450,9 +453,9 @@ class OrderExecutor:
                     state = str(status.get('status', status.get('state', status.get('orderStatus', '')))).lower()
                     if state in ('filled', 'closed', 'done', 'full_fill', 'completed'):
                         avg_price = float(status.get('avgPrice', status.get('avg_price',
-                                         status.get('price', status.get('dealFunds', expected_price)))))
+                                         status.get('price', expected_price))))
                         filled_qty = float(status.get('filledQty', status.get('filled_qty',
-                                          status.get('executedQty', status.get('dealSize', 0)))))
+                                          status.get('executedQty', status.get('dealSize', expected_qty)))))
                         if avg_price <= 0:
                             avg_price = expected_price
                         return {'filled': True, 'avg_price': avg_price, 'filled_qty': filled_qty}
