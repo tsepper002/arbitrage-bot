@@ -19,6 +19,7 @@ without waiting for settlement.
 """
 
 import time
+import asyncio
 import logging
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
@@ -543,6 +544,14 @@ class SignalAllocator:
         
         if executed:
             logger.info(f"📊 Rebalance complete: {len(executed)} orders executed")
+            # In live mode, sync real balances after rebalance to confirm fills
+            if not settings.DRY_RUN and self.balance_manager and rest_clients:
+                await asyncio.sleep(1.0)  # Brief delay for exchange processing
+                for name, client in rest_clients.items():
+                    try:
+                        await self.balance_manager._fetch_balance(name, client)
+                    except Exception as e:
+                        logger.debug(f"Post-rebalance sync {name}: {e}")
         
         return executed
 

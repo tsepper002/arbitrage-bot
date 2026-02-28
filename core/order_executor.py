@@ -228,22 +228,26 @@ class OrderExecutor:
             'message': 'Orders simulated successfully (dry run mode)'
         }
     
+    # Maximum time to wait for order fill confirmation
+    FILL_TIMEOUT_SEC = 10.0
+    # Poll interval for checking order status
+    FILL_POLL_INTERVAL = 0.5
+    # Maximum allowed slippage vs expected price
+    MAX_SLIPPAGE_PCT = 1.0  # 1% max deviation from expected fill price
+    # Minimum order size in USDT to avoid exchange rejections
+    MIN_ORDER_USDT = 1.0
+
     async def _execute_live(self, opp: Dict) -> Dict:
         """
-        Execute live arbitrage with PARALLEL order placement.
+        Execute live arbitrage with PARALLEL order placement and fill verification.
         
         Strategy:
-        1. Check balances via BalanceManager
-        2. Place buy and sell orders SIMULTANEOUSLY (asyncio.gather)
-        3. Wait for both fills with timeout
-        4. If one fails, emergency close the other
-        5. Update balances optimistically
-        
-        Args:
-            opp: Opportunity dict with symbol, buy_ex, sell_ex, qty, prices
-            
-        Returns:
-            Dict with status, order details, and profit
+        1. Check balances and auto-adjust qty to available
+        2. Place buy and sell orders SIMULTANEOUSLY
+        3. VERIFY both orders filled (poll order status)
+        4. Check slippage vs expected price
+        5. If one fails, emergency close the other
+        6. Sync real balances from exchange
         """
         symbol = opp['symbol']
         buy_ex = opp['buy_ex']
@@ -252,9 +256,8 @@ class OrderExecutor:
         buy_price = opp.get('buy_avg', opp.get('buy_price'))
         sell_price = opp.get('sell_avg', opp.get('sell_price'))
         
-        # Parse symbol for balance checking
-        base_currency = symbol.split('-')[0]  # BTC from BTC-USDT
-        quote_currency = symbol.split('-')[1]  # USDT from BTC-USDT
+        base_currency = symbol.split('-')[0]
+        quote_currency = symbol.split('-')[1] if '-' in symbol else 'USDT'
         
         logger.info(
             f"🔴 LIVE EXECUTION: {symbol} | "
@@ -263,21 +266,7 @@ class OrderExecutor:
         )
         
         try:
-            # Step 1: Check balances
-            if self.balance_manager:
-                buy_cost = qty * buy_price * 1.002  # Add 0.2% buffer for fees
-                can_buy, buy_reason = self.balance_manager.has_sufficient_balance(buy_ex, quote_currency, buy_cost)
-                can_sell, sell_reason = self.balance_manager.has_sufficient_balance(sell_ex, base_currency, qty)
-                
-                if not can_buy:
-                    logger.warning(f"⚠️  Cannot buy on {buy_ex}: {buy_reason}")
-                    return {'status': 'blocked', 'reason': buy_reason}
-                
-                if not can_sell:
-                    logger.warning(f"⚠️  Cannot sell on {sell_ex}: {sell_reason}")
-                    return {'status': 'blocked', 'reason': sell_reason}
-            
-            # Step 2: Get REST clients
+            # Step 1: Get REST clients
             buy_client = self.rest_clients.get(buy_ex)
             sell_client = self.rest_clients.get(sell_ex)
             
@@ -286,84 +275,219 @@ class OrderExecutor:
                 logger.error(f"❌ {error_msg}")
                 return {'status': 'error', 'reason': error_msg}
             
+            # Step 2: Auto-adjust qty to available balance
+            if self.balance_manager:
+                available_usdt = self.balance_manager.get_balance(buy_ex, quote_currency)
+                available_base = self.balance_manager.get_balance(sell_ex, base_currency)
+                max_qty_buy = available_usdt / (buy_price * 1.003) if buy_price > 0 else 0
+                adjusted_qty = min(qty, available_base, max_qty_buy)
+                
+                if adjusted_qty <= 0 or adjusted_qty * buy_price < self.MIN_ORDER_USDT:
+                    reason = (f"Insufficient balance: {buy_ex} USDT=${available_usdt:.2f}, "
+                              f"{sell_ex} {base_currency}={available_base:.6f}")
+                    logger.warning(f"⚠️  {reason}")
+                    return {
+                        'status': 'blocked', 'reason': reason,
+                        'missed_symbol': symbol, 'missed_exchange': sell_ex,
+                        'missed_side': 'sell' if available_base < adjusted_qty else 'buy',
+                    }
+                
+                if adjusted_qty < qty * 0.95:
+                    logger.info(f"📏 Adjusted qty: {qty:.6f} → {adjusted_qty:.6f} (balance limited)")
+                    qty = adjusted_qty
+            
             # Step 3: Place both orders SIMULTANEOUSLY
-            logger.info("⚡ Placing PARALLEL orders...")
+            logger.info(f"⚡ Placing PARALLEL orders: Buy {qty:.6f} on {buy_ex}, Sell on {sell_ex}")
             start_time = time.time()
             
-            # Use market orders for speed (can be optimized to use limit orders)
             buy_task = buy_client.place_order(symbol, 'buy', 'market', qty, buy_price)
             sell_task = sell_client.place_order(symbol, 'sell', 'market', qty, sell_price)
             
-            # Execute in parallel
             results = await asyncio.gather(buy_task, sell_task, return_exceptions=True)
             buy_result, sell_result = results
+            placement_time = time.time() - start_time
             
-            execution_time = time.time() - start_time
-            
-            # Check for errors
+            # Step 4: Handle placement failures
             if isinstance(buy_result, Exception):
                 logger.error(f"❌ Buy order failed: {buy_result}")
-                # Sell order might have succeeded - need to reverse!
                 if not isinstance(sell_result, Exception):
-                    logger.warning("⚠️  EMERGENCY: Sell succeeded but buy failed - reversing sell...")
+                    sell_oid = self._extract_order_id(sell_result)
+                    logger.warning(f"⚠️  EMERGENCY: Sell placed (id={sell_oid}) but buy failed — reversing...")
                     await self._emergency_close(sell_ex, symbol, 'buy', qty, buy_price, sell_client)
-                return {'status': 'error', 'reason': f'Buy failed: {str(buy_result)}'}
+                return {'status': 'error', 'reason': f'Buy placement failed: {buy_result}'}
             
             if isinstance(sell_result, Exception):
                 logger.error(f"❌ Sell order failed: {sell_result}")
-                # Buy order succeeded - need to reverse!
-                logger.warning("⚠️  EMERGENCY: Buy succeeded but sell failed - reversing buy...")
+                buy_oid = self._extract_order_id(buy_result)
+                logger.warning(f"⚠️  EMERGENCY: Buy placed (id={buy_oid}) but sell failed — reversing...")
                 await self._emergency_close(buy_ex, symbol, 'sell', qty, sell_price, buy_client)
-                return {'status': 'error', 'reason': f'Sell failed: {str(sell_result)}'}
+                return {'status': 'error', 'reason': f'Sell placement failed: {sell_result}'}
             
-            # Both orders succeeded!
-            logger.info(f"✅ BOTH ORDERS FILLED in {execution_time:.3f}s")
+            # Step 5: Extract order IDs and verify fills
+            buy_order_id = self._extract_order_id(buy_result)
+            sell_order_id = self._extract_order_id(sell_result)
             
-            # Step 4: Update balances optimistically
-            if self.balance_manager:
-                buy_cost_actual = qty * buy_price
-                sell_proceeds = qty * sell_price
-                self.balance_manager.record_trade(
-                    buy_ex, sell_ex, base_currency, quote_currency,
-                    qty, buy_cost_actual, sell_proceeds
+            logger.info(f"📋 Orders placed in {placement_time:.3f}s: buy={buy_order_id}, sell={sell_order_id}")
+            
+            # Verify fills (poll order status)
+            buy_fill = await self._verify_fill(buy_client, symbol, buy_order_id, 'buy', buy_price)
+            sell_fill = await self._verify_fill(sell_client, symbol, sell_order_id, 'sell', sell_price)
+            
+            execution_time = time.time() - start_time
+            
+            # Step 6: Check fill results
+            if not buy_fill['filled'] or not sell_fill['filled']:
+                unfilled = 'buy' if not buy_fill['filled'] else 'sell'
+                logger.error(f"❌ {unfilled} order NOT FILLED after {self.FILL_TIMEOUT_SEC}s")
+                # Try to cancel unfilled order
+                if not buy_fill['filled'] and buy_order_id:
+                    await self._safe_cancel(buy_client, symbol, buy_order_id, 'buy')
+                if not sell_fill['filled'] and sell_order_id:
+                    await self._safe_cancel(sell_client, symbol, sell_order_id, 'sell')
+                # If one side filled, emergency reverse
+                if buy_fill['filled'] and not sell_fill['filled']:
+                    await self._emergency_close(buy_ex, symbol, 'sell', qty, sell_price, buy_client)
+                elif sell_fill['filled'] and not buy_fill['filled']:
+                    await self._emergency_close(sell_ex, symbol, 'buy', qty, buy_price, sell_client)
+                return {'status': 'error', 'reason': f'{unfilled} not filled in {self.FILL_TIMEOUT_SEC}s'}
+            
+            # Step 7: Check slippage
+            actual_buy_price = buy_fill.get('avg_price', buy_price)
+            actual_sell_price = sell_fill.get('avg_price', sell_price)
+            buy_slippage = abs(actual_buy_price - buy_price) / buy_price * 100 if buy_price > 0 else 0
+            sell_slippage = abs(actual_sell_price - sell_price) / sell_price * 100 if sell_price > 0 else 0
+            
+            if buy_slippage > self.MAX_SLIPPAGE_PCT or sell_slippage > self.MAX_SLIPPAGE_PCT:
+                logger.warning(
+                    f"⚠️  Slippage: buy {buy_slippage:.2f}% (${buy_price:.4f}→${actual_buy_price:.4f}), "
+                    f"sell {sell_slippage:.2f}% (${sell_price:.4f}→${actual_sell_price:.4f})"
                 )
             
-            # Step 5: Record trade
+            # Step 8: Calculate real profit (from actual fill prices)
+            actual_qty = min(buy_fill.get('filled_qty', qty), sell_fill.get('filled_qty', qty))
+            actual_profit = (actual_sell_price - actual_buy_price) * actual_qty
+            actual_roi = (actual_sell_price / actual_buy_price - 1) * 100 if actual_buy_price > 0 else 0
+            
+            logger.info(f"✅ BOTH FILLED in {execution_time:.3f}s | Profit: ${actual_profit:.4f} ({actual_roi:.3f}%)")
+            
+            # Step 9: Update balances from actual fills (not estimates)
+            if self.balance_manager:
+                self.balance_manager.record_trade(
+                    buy_ex, sell_ex, base_currency, quote_currency,
+                    actual_qty, actual_qty * actual_buy_price, actual_qty * actual_sell_price
+                )
+                # Force immediate balance sync after trade
+                asyncio.ensure_future(self._sync_balances_after_trade(buy_client, sell_client, buy_ex, sell_ex))
+            
+            # Step 10: Record trade with ACTUAL values
             trade_info = {
                 'symbol': symbol,
                 'buy_ex': buy_ex,
                 'sell_ex': sell_ex,
-                'qty': qty,
-                'buy_price': buy_price,
-                'sell_price': sell_price,
-                'buy_order_id': buy_result.get('orderId') or buy_result.get('order_id'),
-                'sell_order_id': sell_result.get('orderId') or sell_result.get('order_id'),
-                'gross_profit': opp.get('gross', 0),
-                'net_profit': opp.get('net', 0),
-                'roi_pct': opp.get('roi_pct', 0),
+                'qty': actual_qty,
+                'buy_price': actual_buy_price,
+                'sell_price': actual_sell_price,
+                'buy_order_id': buy_order_id,
+                'sell_order_id': sell_order_id,
+                'net_profit': actual_profit,
+                'roi_pct': actual_roi,
                 'execution_time_sec': execution_time,
+                'buy_slippage_pct': buy_slippage,
+                'sell_slippage_pct': sell_slippage,
                 'mode': 'LIVE'
             }
             
             self._record_trade(symbol, trade_info)
             
             logger.info(
-                f"💰 LIVE TRADE COMPLETED: "
-                f"${trade_info['net_profit']:.4f} profit ({trade_info['roi_pct']:.3f}% ROI) "
+                f"💰 LIVE TRADE COMPLETED: {symbol} "
+                f"${actual_profit:.4f} profit ({actual_roi:.3f}% ROI) "
                 f"in {execution_time:.3f}s"
             )
             
-            return {
-                'status': 'success',
-                'trade_info': trade_info
-            }
+            return {'status': 'success', 'trade_info': trade_info}
             
         except Exception as e:
             logger.exception(f"❌ Live execution failed: {e}")
-            return {
-                'status': 'error',
-                'reason': str(e)
-            }
+            return {'status': 'error', 'reason': str(e)}
+    
+    def _extract_order_id(self, result: Dict) -> str:
+        """Extract order ID from any exchange's response format."""
+        if not isinstance(result, dict):
+            return str(result)
+        # Try all known field names across exchanges
+        for key in ('orderId', 'order_id', 'orderLinkId', 'id', 'clientOid'):
+            val = result.get(key)
+            if val:
+                return str(val)
+        # Nested: Bybit puts it in result.result.orderId
+        nested = result.get('result', {})
+        if isinstance(nested, dict):
+            for key in ('orderId', 'order_id'):
+                val = nested.get(key)
+                if val:
+                    return str(val)
+        # KuCoin: data.orderId
+        data = result.get('data', {})
+        if isinstance(data, dict):
+            for key in ('orderId', 'order_id'):
+                val = data.get(key)
+                if val:
+                    return str(val)
+        return ""
+    
+    async def _verify_fill(self, client, symbol: str, order_id: str, side: str, expected_price: float) -> Dict:
+        """Poll order status until filled or timeout."""
+        if not order_id or not hasattr(client, 'get_order_status'):
+            # Can't verify — assume filled (optimistic)
+            return {'filled': True, 'avg_price': expected_price, 'filled_qty': 0}
+        
+        deadline = time.time() + self.FILL_TIMEOUT_SEC
+        while time.time() < deadline:
+            try:
+                status = await client.get_order_status(symbol, order_id)
+                if isinstance(status, dict):
+                    state = str(status.get('status', status.get('state', status.get('orderStatus', '')))).lower()
+                    if state in ('filled', 'closed', 'done', 'full_fill', 'completed'):
+                        avg_price = float(status.get('avgPrice', status.get('avg_price',
+                                         status.get('price', status.get('dealFunds', expected_price)))))
+                        filled_qty = float(status.get('filledQty', status.get('filled_qty',
+                                          status.get('executedQty', status.get('dealSize', 0)))))
+                        if avg_price <= 0:
+                            avg_price = expected_price
+                        return {'filled': True, 'avg_price': avg_price, 'filled_qty': filled_qty}
+                    elif state in ('cancelled', 'canceled', 'expired', 'rejected'):
+                        logger.warning(f"⚠️  {side} order {order_id} was {state}")
+                        return {'filled': False, 'avg_price': 0, 'filled_qty': 0}
+                    # Still pending — wait and retry
+            except Exception as e:
+                logger.debug(f"Fill check error for {order_id}: {e}")
+            
+            await asyncio.sleep(self.FILL_POLL_INTERVAL)
+        
+        logger.warning(f"⏰ {side} order {order_id} fill timeout after {self.FILL_TIMEOUT_SEC}s")
+        return {'filled': False, 'avg_price': 0, 'filled_qty': 0}
+    
+    async def _safe_cancel(self, client, symbol: str, order_id: str, side: str):
+        """Try to cancel an unfilled order."""
+        try:
+            if hasattr(client, 'cancel_order'):
+                await client.cancel_order(symbol, order_id)
+                logger.info(f"✅ Cancelled {side} order {order_id}")
+        except Exception as e:
+            logger.warning(f"⚠️  Cancel {side} order {order_id} failed: {e}")
+    
+    async def _sync_balances_after_trade(self, buy_client, sell_client, buy_ex: str, sell_ex: str):
+        """Force immediate balance sync after trade to get accurate balances."""
+        await asyncio.sleep(1.0)  # Brief delay for exchange to process
+        try:
+            if self.balance_manager:
+                for name, client in [(buy_ex, buy_client), (sell_ex, sell_client)]:
+                    bal = await self.balance_manager._fetch_balance(name, client)
+                    if bal:
+                        logger.debug(f"📊 Post-trade balance sync: {name} OK")
+        except Exception as e:
+            logger.debug(f"Post-trade balance sync error: {e}")
     
     async def _emergency_close(self, exchange: str, symbol: str, side: str, qty: float, price: float, client):
         """
