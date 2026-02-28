@@ -159,9 +159,13 @@ class FundingRatePredictor:
         self.actual_rates[symbol].append(actual_rate)
         
         # Считаем точным, если ошибка < 20%
+        if actual_rate == 0:
+            return
         if error / abs(actual_rate) < 0.2:
             self.stats['accurate_predictions'] += 1
         
+        if self.stats['total_predictions'] == 0:
+            return
         accuracy = self.stats['accurate_predictions'] / self.stats['total_predictions']
         
         logger.info(f"Prediction accuracy for {symbol}: {accuracy:.2%}, error: {error:.4f}%")

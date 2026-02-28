@@ -88,6 +88,8 @@ class FlashCrashProtector:
             return False, ""
         
         prices = [p for _, p in list(self.price_history.get(symbol, []))]
+        if not prices:
+            return False, ""
         current_price = prices[-1]
         
         # Проверка резкого падения

@@ -165,6 +165,9 @@ class AutoRebalancer:
         
         # Get current balances
         balances = self.balance_manager.balances
+        if not balances:
+            logger.info("No balances available for rebalancing")
+            return
         total_usdt = sum(
             exch_balances.get('USDT', 0.0)
             for exch_balances in balances.values()

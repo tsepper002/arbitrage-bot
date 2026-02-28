@@ -121,6 +121,9 @@ class SmartOrderRouter:
         # Сортировать по score
         venue_scores.sort(key=lambda x: x[1], reverse=True)
         
+        if not venue_scores:
+            raise ValueError("No valid venue scores")
+        
         best_quote, best_score = venue_scores[0]
         
         # Вычислить price improvement relative to worst venue

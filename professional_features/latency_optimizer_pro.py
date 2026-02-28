@@ -154,6 +154,9 @@ class LatencyOptimizerPro:
             # Sort by latency
             route_tests.sort(key=lambda x: x['latency_ms'])
             
+            if not route_tests:
+                return {}
+            
             optimal = route_tests[0]
             self.optimal_routes[exchange] = optimal['endpoint']
             

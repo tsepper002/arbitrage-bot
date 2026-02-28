@@ -192,6 +192,8 @@ class OrderBookImbalanceDetector:
         
         # Calculate confidence based on consistency
         consistency = 1.0 - abs(imbalance_ratio - depth_imbalance)
+        if mid_price <= 0:
+            return 'NEUTRAL', 0.0
         spread_factor = 1.0 / (1 + spread / mid_price * 100)  # Lower spread = higher confidence
         confidence = min(consistency * spread_factor, 1.0)
         

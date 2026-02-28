@@ -70,6 +70,8 @@ class ReinforcementLearningAgent:
         return self.q_table.get((state, action), 0.0)
 
     def _best_action(self, state: tuple) -> str:
+        if not self.actions:
+            return 'hold'
         best_a, best_q = self.actions[0], self._q(state, self.actions[0])
         for a in self.actions[1:]:
             qv = self._q(state, a)

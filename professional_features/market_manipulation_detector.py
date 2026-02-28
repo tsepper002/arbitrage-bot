@@ -52,6 +52,9 @@ class MarketManipulationDetector:
             bids = orderbook.get('bids', [])
             asks = orderbook.get('asks', [])
             
+            if not bids or not asks:
+                return None
+            
             # Look for unusually large orders far from mid price
             if len(bids) > 5:
                 large_bid = max([float(b[1]) for b in bids[:5]])
