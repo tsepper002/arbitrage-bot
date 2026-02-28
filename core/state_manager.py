@@ -6,7 +6,9 @@ Saves and loads bot state to survive restarts.
 import json
 import logging
 import time
-from typing import Dict, Any, Optional
+import csv
+import os
+from typing import Dict, Any, Optional, List
 import asyncio
 import settings
 
@@ -32,10 +34,12 @@ class StateManager:
             state_file: Path to state file (default from settings)
         """
         self.state_file = state_file or settings.STATE_FILE_PATH
+        self.trades_csv = getattr(settings, 'TRADES_CSV_PATH', 'trades.csv')
         self.state: Dict[str, Any] = self._get_default_state()
         self.last_save_time = 0.0
         self.save_interval = 30.0  # Save every 30 seconds
         self.auto_save_enabled = True
+        self._save_lock = asyncio.Lock()  # Prevent concurrent saves
         
         logger.info(f"StateManager initialized with file: {self.state_file}")
     
@@ -60,6 +64,10 @@ class StateManager:
             "open_exposure": 0.0,
             "total_lifetime_pnl": 0.0,
             "total_lifetime_trades": 0,
+            "symbol_pnl": {},  # symbol -> {pnl, trades, wins}
+            "strategy_pnl": {},  # strategy -> {pnl, trades, wins}
+            "last_crash_time": 0.0,
+            "crash_count": 0,
         }
     
     def load_state(self) -> bool:
@@ -97,7 +105,7 @@ class StateManager:
     
     def save_state(self) -> bool:
         """
-        Save current state to disk.
+        Save current state to disk (thread-safe via atomic write).
         
         Returns:
             True if saved successfully, False otherwise
@@ -111,7 +119,6 @@ class StateManager:
                 json.dump(self.state, f, indent=2)
             
             # Atomic rename
-            import os
             if os.path.exists(self.state_file):
                 os.replace(temp_file, self.state_file)
             else:
@@ -161,6 +168,91 @@ class StateManager:
         """Add to today's P&L."""
         self.state["daily_pnl"] = self.state.get("daily_pnl", 0.0) + amount
         self.state["total_lifetime_pnl"] = self.state.get("total_lifetime_pnl", 0.0) + amount
+    
+    def record_trade_detail(self, trade: Dict[str, Any]):
+        """
+        Record detailed trade info for journal and per-symbol tracking.
+        
+        Args:
+            trade: Dict with symbol, strategy, buy_ex, sell_ex, qty, net, roi_pct
+        """
+        symbol = trade.get('symbol', 'UNKNOWN')
+        strategy = trade.get('strategy', 'UNKNOWN')
+        net = trade.get('net', 0.0)
+        is_win = net > 0
+        
+        # Per-symbol P&L tracking
+        if 'symbol_pnl' not in self.state:
+            self.state['symbol_pnl'] = {}
+        if symbol not in self.state['symbol_pnl']:
+            self.state['symbol_pnl'][symbol] = {'pnl': 0.0, 'trades': 0, 'wins': 0}
+        self.state['symbol_pnl'][symbol]['pnl'] += net
+        self.state['symbol_pnl'][symbol]['trades'] += 1
+        if is_win:
+            self.state['symbol_pnl'][symbol]['wins'] += 1
+        
+        # Per-strategy P&L tracking
+        if 'strategy_pnl' not in self.state:
+            self.state['strategy_pnl'] = {}
+        if strategy not in self.state['strategy_pnl']:
+            self.state['strategy_pnl'][strategy] = {'pnl': 0.0, 'trades': 0, 'wins': 0}
+        self.state['strategy_pnl'][strategy]['pnl'] += net
+        self.state['strategy_pnl'][strategy]['trades'] += 1
+        if is_win:
+            self.state['strategy_pnl'][strategy]['wins'] += 1
+        
+        # Write to CSV trade journal (append)
+        self._append_trade_csv(trade)
+    
+    def _append_trade_csv(self, trade: Dict[str, Any]):
+        """Append trade to CSV journal."""
+        try:
+            file_exists = os.path.exists(self.trades_csv)
+            with open(self.trades_csv, 'a', newline='') as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow(['timestamp', 'symbol', 'strategy', 'buy_ex', 'sell_ex',
+                                   'qty', 'buy_price', 'sell_price', 'net', 'roi_pct', 'mode'])
+                writer.writerow([
+                    time.strftime('%Y-%m-%d %H:%M:%S'),
+                    trade.get('symbol', ''),
+                    trade.get('strategy', ''),
+                    trade.get('buy_ex', ''),
+                    trade.get('sell_ex', ''),
+                    f"{trade.get('qty', 0):.8f}",
+                    f"{trade.get('buy_avg', 0):.6f}",
+                    f"{trade.get('sell_avg', 0):.6f}",
+                    f"{trade.get('net', 0):.6f}",
+                    f"{trade.get('roi_pct', 0):.4f}",
+                    'dry-run' if getattr(settings, 'DRY_RUN', True) else 'live'
+                ])
+        except Exception as e:
+            logger.debug(f"Error writing trade CSV: {e}")
+    
+    def get_symbol_pnl(self) -> Dict[str, Dict]:
+        """Get per-symbol P&L breakdown."""
+        return self.state.get('symbol_pnl', {})
+    
+    def get_strategy_pnl(self) -> Dict[str, Dict]:
+        """Get per-strategy P&L breakdown."""
+        return self.state.get('strategy_pnl', {})
+    
+    def get_top_symbols(self, n: int = 5) -> List[tuple]:
+        """Get top N profitable symbols."""
+        sym_pnl = self.get_symbol_pnl()
+        sorted_syms = sorted(sym_pnl.items(), key=lambda x: x[1].get('pnl', 0), reverse=True)
+        return sorted_syms[:n]
+    
+    def get_losing_symbols(self) -> List[tuple]:
+        """Get symbols with negative P&L (candidates for removal)."""
+        sym_pnl = self.get_symbol_pnl()
+        return [(s, d) for s, d in sym_pnl.items() if d.get('pnl', 0) < 0]
+    
+    def record_crash(self):
+        """Record that a crash happened (for restart tracking)."""
+        self.state['last_crash_time'] = time.time()
+        self.state['crash_count'] = self.state.get('crash_count', 0) + 1
+        self.save_state()
     
     def increment_trades(self):
         """Increment trade counters."""

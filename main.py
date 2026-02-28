@@ -827,7 +827,8 @@ class IntegratedArbitrageBot:
                 market_adaptive_strategy=self.market_adaptive_strategy,
                 ml_model_trainer=self.ml_model_trainer,
                 twap_engine=self.twap_engine,
-                signal_allocator=getattr(self, 'signal_allocator', None)
+                signal_allocator=getattr(self, 'signal_allocator', None),
+                state_manager=self.state_manager
             )
             logger.info("✅ Main Arbitrage Engine initialized with professional components + ML")
             
@@ -888,6 +889,12 @@ class IntegratedArbitrageBot:
                 telegram_task = asyncio.create_task(self.telegram_bot.start_monitoring_loop(self))
                 self.tasks.append(telegram_task)
                 logger.info("✅ Telegram monitoring task started")
+            
+            # Periodic Telegram report task (every 4 hours + at midnight)
+            if self.telegram_bot and self.state_manager:
+                report_task = asyncio.create_task(self._periodic_report_loop())
+                self.tasks.append(report_task)
+                logger.info("✅ Periodic Telegram report task started (4h interval)")
             
             # Auto-rebalancer task
             if self.rebalancer:
@@ -1286,6 +1293,38 @@ class IntegratedArbitrageBot:
         except asyncio.CancelledError:
             logger.info("Triangular scan loop cancelled")
 
+    async def _periodic_report_loop(self):
+        """Send periodic P&L reports via Telegram (every 4 hours)."""
+        REPORT_INTERVAL = 4 * 3600  # 4 hours
+        await asyncio.sleep(300)  # Wait 5 min before first report
+        
+        try:
+            while True:
+                await asyncio.sleep(REPORT_INTERVAL)
+                if self.state_manager and self.telegram_bot:
+                    stats = self.state_manager.get_statistics()
+                    # Add top/losing symbols
+                    top_syms = self.state_manager.get_top_symbols(3)
+                    losing_syms = self.state_manager.get_losing_symbols()
+                    
+                    top_str = ', '.join(f"{s}: ${d['pnl']:.4f}" for s, d in top_syms) if top_syms else 'None yet'
+                    lose_str = ', '.join(f"{s}: ${d['pnl']:.4f}" for s, d in losing_syms[:3]) if losing_syms else 'None'
+                    
+                    stats['top_symbols'] = top_str
+                    stats['losing_symbols'] = lose_str
+                    stats['win_rate'] = 0
+                    
+                    total_trades = stats.get('trades_today', 0)
+                    if total_trades > 0:
+                        sym_pnl = self.state_manager.get_symbol_pnl()
+                        total_wins = sum(d.get('wins', 0) for d in sym_pnl.values())
+                        total_all = sum(d.get('trades', 0) for d in sym_pnl.values())
+                        stats['win_rate'] = (total_wins / total_all * 100) if total_all > 0 else 0
+                    
+                    await self.telegram_bot.notify_daily_report(stats)
+        except asyncio.CancelledError:
+            logger.info("Periodic report loop cancelled")
+
     async def _strategy_dispatcher_loop(self):
         """Background task for running strategy dispatcher scans.
         
@@ -1331,6 +1370,13 @@ class IntegratedArbitrageBot:
                                     can_trade, reason = self.risk_manager.check_can_trade(trade_info)
                                     if not can_trade:
                                         logger.debug(f"Risk manager blocked {opp['strategy']}: {reason}")
+                                        # Alert on risk limit hits (pauses)
+                                        if self.telegram_bot and 'paused' in str(reason).lower():
+                                            try:
+                                                asyncio.create_task(self.telegram_bot.notify_risk_limit_hit(
+                                                    opp['strategy'], reason))
+                                            except Exception:
+                                                pass
                                         continue
                                 # Execute via OrderExecutor
                                 result = await self.engine.executor.execute_arbitrage(trade_info)
@@ -1355,6 +1401,18 @@ class IntegratedArbitrageBot:
                                             exchange=trade_info.get('buy_ex', ''),
                                             roi_pct=trade_info.get('roi_pct', 0)
                                         )
+                                    # Record to state manager (trade journal + per-symbol P&L)
+                                    if self.state_manager:
+                                        trade_info['strategy'] = opp['strategy']
+                                        self.state_manager.record_trade_detail(trade_info)
+                                        self.state_manager.add_to_daily_pnl(trade_info.get('net', 0))
+                                        self.state_manager.increment_trades()
+                                    # Telegram notification
+                                    if self.telegram_bot:
+                                        try:
+                                            asyncio.create_task(self.telegram_bot.notify_trade_executed(trade_info))
+                                        except Exception:
+                                            pass
                             else:
                                 # Signal didn't produce a trade but still useful for allocation
                                 if hasattr(self, 'signal_allocator') and self.signal_allocator:
@@ -1682,28 +1740,61 @@ class IntegratedArbitrageBot:
 
 
 async def main():
-    """Main entry point."""
-    bot = IntegratedArbitrageBot()
+    """Main entry point with auto-restart on crash."""
+    MAX_RESTARTS = 5
+    RESTART_DELAYS = [5, 15, 30, 60, 120]  # Exponential backoff
     
-    try:
-        # Initialize all components
-        success = await bot.initialize()
-        if not success:
-            logger.error("Initialization failed, exiting...")
-            return 1
+    for attempt in range(MAX_RESTARTS + 1):
+        bot = IntegratedArbitrageBot()
         
-        # Run the bot
-        await bot.run()
-        
-    except KeyboardInterrupt:
-        logger.info("\n⚠️  KeyboardInterrupt received")
-    except Exception as e:
-        logger.exception(f"❌ Fatal error: {e}")
-        return 1
-    finally:
-        await bot.shutdown()
+        try:
+            # Initialize all components
+            success = await bot.initialize()
+            if not success:
+                logger.error("Initialization failed, exiting...")
+                return 1
+            
+            # Run the bot
+            await bot.run()
+            return 0  # Clean exit
+            
+        except KeyboardInterrupt:
+            logger.info("\n⚠️  KeyboardInterrupt received")
+            await bot.shutdown()
+            return 0
+        except Exception as e:
+            logger.exception(f"❌ Fatal error (attempt {attempt + 1}/{MAX_RESTARTS + 1}): {e}")
+            
+            # Record crash in state manager
+            if bot.state_manager:
+                bot.state_manager.record_crash()
+            
+            await bot.shutdown()
+            
+            if attempt < MAX_RESTARTS:
+                delay = RESTART_DELAYS[min(attempt, len(RESTART_DELAYS) - 1)]
+                logger.info(f"🔄 Auto-restarting in {delay}s (attempt {attempt + 2}/{MAX_RESTARTS + 1})...")
+                
+                # Send Telegram alert about restart
+                if bot.telegram_bot:
+                    try:
+                        await bot.telegram_bot.send_message(
+                            f"🔄 Bot crashed: {str(e)[:100]}\nRestarting in {delay}s (attempt {attempt + 2})")
+                    except Exception:
+                        pass
+                
+                await asyncio.sleep(delay)
+            else:
+                logger.error(f"❌ Max restarts ({MAX_RESTARTS}) exceeded. Giving up.")
+                if bot.telegram_bot:
+                    try:
+                        await bot.telegram_bot.send_message(
+                            f"🔴 Bot stopped after {MAX_RESTARTS} restart attempts.\nLast error: {str(e)[:150]}")
+                    except Exception:
+                        pass
+                return 1
     
-    return 0
+    return 1
 
 
 if __name__ == "__main__":

@@ -61,7 +61,8 @@ class ArbitrageEngine:
                  market_adaptive_strategy = None,
                  ml_model_trainer = None,
                  twap_engine = None,
-                 signal_allocator = None):
+                 signal_allocator = None,
+                 state_manager = None):
         self.store = store
         self.params = EXCHANGE_PARAMS
         
@@ -117,6 +118,7 @@ class ArbitrageEngine:
         self.ml_model_trainer = ml_model_trainer
         self.twap_engine = twap_engine
         self.signal_allocator = signal_allocator
+        self.state_manager = state_manager
 
         # Event-driven scanning state
         self.updated_symbols: Set[str] = set()
@@ -785,6 +787,15 @@ class ArbitrageEngine:
                     # Update risk manager after trade
                     if self.risk_manager and result.get('trade_info'):
                         self.risk_manager.record_trade(result['trade_info'])
+                    
+                    # Record to state manager (trade journal + per-symbol P&L)
+                    if result.get('status') in ('simulated', 'success') and result.get('trade_info'):
+                        ti = result['trade_info']
+                        ti['strategy'] = 'CROSS_EXCHANGE'
+                        if hasattr(self, 'state_manager') and self.state_manager:
+                            self.state_manager.record_trade_detail(ti)
+                            self.state_manager.add_to_daily_pnl(ti.get('net_profit', 0))
+                            self.state_manager.increment_trades()
                     
                     if result['status'] == 'simulated':
                         # Already logged by executor
