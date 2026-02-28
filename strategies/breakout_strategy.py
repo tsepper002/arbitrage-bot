@@ -88,7 +88,7 @@ class BreakoutStrategy:
         current_cluster = [sorted_levels[0]]
         
         for level in sorted_levels[1:]:
-            if abs(level - current_cluster[-1]) / current_cluster[-1] <= tolerance:
+            if current_cluster[-1] == 0 or abs(level - current_cluster[-1]) / abs(current_cluster[-1]) <= tolerance:
                 current_cluster.append(level)
             else:
                 clusters.append(np.mean(current_cluster))
@@ -102,7 +102,7 @@ class BreakoutStrategy:
         """Count how many times price touched a level"""
         touches = 0
         for price in prices:
-            if abs(price - level) / level <= tolerance:
+            if level == 0 or abs(price - level) / abs(level) <= tolerance:
                 touches += 1
         return touches
     

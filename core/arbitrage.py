@@ -741,6 +741,11 @@ class ArbitrageEngine:
                                 state = {'spread': o.get('roi_pct', 0), 'volatility': 0, 'trend': 0}
                                 reward = trade_profit if trade_successful else -abs(trade_profit)
                                 self.rl_agent.update(state, 'TRADE', reward, state)
+                                # Decay epsilon periodically (every 50 trades)
+                                self.rl_agent.episode_count += 1
+                                if self.rl_agent.episode_count % 50 == 0:
+                                    if self.rl_agent.epsilon > self.rl_agent.epsilon_min:
+                                        self.rl_agent.epsilon *= self.rl_agent.epsilon_decay
                             except Exception as e:
                                 logger.debug(f"RL agent post-trade error: {e}")
                         

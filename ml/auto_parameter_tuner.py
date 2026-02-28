@@ -97,6 +97,8 @@ class AutoParameterTuner:
             best_arm = self._arms[0]
 
             for arm in self._arms:
+                if arm['count'] == 0:
+                    continue
                 mean_r = arm['total_reward'] / arm['count']
                 exploration = math.sqrt(2.0 * log_total / arm['count'])
                 ucb = mean_r + exploration

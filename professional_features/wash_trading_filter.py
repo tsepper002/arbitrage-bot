@@ -214,7 +214,7 @@ class WashTradingFilter:
         
         # Suspicious if high volume but low price movement
         if price_volatility < 0.001 and total_volume > np.median(volumes) * 20:
-            confidence = min(1.0, (0.001 - price_volatility) / 0.001)
+            confidence = max(0.0, min(1.0, (0.001 - price_volatility) / 0.001))
             
             if confidence < self.min_confidence:
                 return None

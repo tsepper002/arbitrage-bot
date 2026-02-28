@@ -38,6 +38,10 @@ class MarketRegimeDetector:
             
             prices = list(self.price_history[symbol])
             
+            # Guard against zero prices
+            if prices[0] <= 0 or any(p <= 0 for p in prices):
+                return 'NORMAL'
+            
             # Calculate metrics
             returns = np.diff(prices) / prices[:-1]
             volatility = np.std(returns) if len(returns) > 0 else 0

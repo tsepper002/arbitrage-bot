@@ -129,6 +129,9 @@ class NeuralNetworkPredictor:
     def _train_single(self, features: List[float], target: float, lr: float):
         """One step of backpropagation."""
         x, h, output = self._forward(features)
+        # Guard against NaN/Inf propagation
+        if any(math.isnan(v) or math.isinf(v) for v in h) or math.isnan(output):
+            return
         # Output error (binary cross-entropy derivative simplifies to)
         d_output = output - target  # dL/dz_o for sigmoid + BCE
 
