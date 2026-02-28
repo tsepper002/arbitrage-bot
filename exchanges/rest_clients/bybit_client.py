@@ -146,33 +146,49 @@ class BybitRESTClient(BaseRESTClient):
     async def get_balance(self, currency: Optional[str] = None) -> Dict[str, float]:
         """Get account balances from Bybit using v5 API with header authentication.
         
-        Uses UNIFIED account type which covers both spot and derivatives wallets.
-        Bybit v5 migrated all accounts to unified trading accounts.
+        Tries UNIFIED account first (new unified trading accounts).
+        Falls back to SPOT account if UNIFIED returns empty balances
+        (user hasn't upgraded to unified trading account yet).
         """
         url = f"{self.BASE_URL}/v5/account/wallet-balance"
         
-        query_string = "accountType=UNIFIED"
-        headers = self._get_auth_headers(query_string)
+        # Try UNIFIED first (covers spot + derivatives in unified accounts)
+        for account_type in ["UNIFIED", "SPOT"]:
+            query_string = f"accountType={account_type}"
+            headers = self._get_auth_headers(query_string)
+            
+            session = await self._get_session()
+            async with session.get(f"{url}?{query_string}", headers=headers) as resp:
+                data = await resp.json()
+                if data.get("retCode") != 0:
+                    logger.debug(f"Bybit {account_type} balance query failed: {data.get('retMsg', '')}")
+                    continue
+                
+                # Parse balances
+                balances = {}
+                result = data.get("result", {})
+                for item in result.get("list", []):
+                    for coin in item.get("coin", []):
+                        coin_name = coin.get("coin")
+                        # Try multiple balance fields — Bybit uses different field names
+                        # for UNIFIED vs SPOT accounts
+                        available = float(coin.get("availableToWithdraw", 0) or
+                                         coin.get("free", 0) or
+                                         coin.get("walletBalance", 0) or 0)
+                        if available > 0:
+                            balances[coin_name] = available
+                
+                if balances:
+                    logger.info(f"✅ Bybit balance loaded from {account_type} account: {len(balances)} coins")
+                    if currency:
+                        return {currency: balances.get(currency, 0.0)}
+                    return balances
         
-        session = await self._get_session()
-        async with session.get(f"{url}?{query_string}", headers=headers) as resp:
-            data = await resp.json()
-            if data.get("retCode") != 0:
-                raise Exception(f"Bybit get balance failed: {data}")
-            
-            # Parse balances
-            balances = {}
-            result = data.get("result", {})
-            for item in result.get("list", []):
-                for coin in item.get("coin", []):
-                    coin_name = coin.get("coin")
-                    available = float(coin.get("availableToWithdraw", 0))
-                    if available > 0:
-                        balances[coin_name] = available
-            
-            if currency:
-                return {currency: balances.get(currency, 0.0)}
-            return balances
+        # Both account types returned empty
+        logger.warning("⚠️  Bybit: no balances found in UNIFIED or SPOT accounts")
+        if currency:
+            return {currency: 0.0}
+        return {}
     
     async def get_trading_pairs(self) -> List[Dict[str, Any]]:
         """Get trading pairs from Bybit."""

@@ -60,7 +60,8 @@ class ArbitrageEngine:
                  pattern_recognition = None,
                  market_adaptive_strategy = None,
                  ml_model_trainer = None,
-                 twap_engine = None):
+                 twap_engine = None,
+                 signal_allocator = None):
         self.store = store
         self.params = EXCHANGE_PARAMS
         
@@ -115,6 +116,7 @@ class ArbitrageEngine:
         self.market_adaptive_strategy = market_adaptive_strategy
         self.ml_model_trainer = ml_model_trainer
         self.twap_engine = twap_engine
+        self.signal_allocator = signal_allocator
 
         # Event-driven scanning state
         self.updated_symbols: Set[str] = set()
@@ -653,6 +655,15 @@ class ArbitrageEngine:
                                 success=success,
                                 profit=profit,
                                 execution_time=execution_time
+                            )
+                        
+                        # Record to signal allocator for inventory management
+                        if self.signal_allocator and result['status'] in ('success', 'simulated'):
+                            self.signal_allocator.record_trade(
+                                symbol=o.get('symbol', ''),
+                                strategy='CROSS_EXCHANGE',
+                                exchange=o.get('buy_ex', ''),
+                                roi_pct=o.get('roi_pct', 0)
                             )
                     
                     # PROFESSIONAL ANALYTICS: Record trade details

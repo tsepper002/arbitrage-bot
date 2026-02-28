@@ -47,6 +47,7 @@ from core.windows_optimizer import setup_windows_optimizations, WindowsOptimizer
 from core.smart_capital_allocator import get_smart_allocator
 from core.exchange_config import EXCHANGE_PARAMS
 from core.strategy_dispatcher import StrategyDispatcher  # NEW: All 14 strategies!
+from core.signal_allocator import SignalAllocator  # Signal-based inventory management
 
 # Professional Infrastructure
 from infrastructure.health_monitor import HealthMonitor
@@ -418,6 +419,10 @@ class IntegratedArbitrageBot:
             self.capital_allocator = get_smart_allocator(self.balance_manager)
             logger.info("✅ Smart Capital Allocator initialized")
             self.capital_allocator.print_allocation_summary()
+            
+            # Signal-Based Inventory Allocator
+            self.signal_allocator = SignalAllocator(self.balance_manager)
+            logger.info("✅ Signal Allocator initialized (HFT inventory management)")
             
             # Professional Infrastructure
             logger.info("\n🔬 Initializing Professional Infrastructure...")
@@ -821,7 +826,8 @@ class IntegratedArbitrageBot:
                 pattern_recognition=self.pattern_recognition,
                 market_adaptive_strategy=self.market_adaptive_strategy,
                 ml_model_trainer=self.ml_model_trainer,
-                twap_engine=self.twap_engine
+                twap_engine=self.twap_engine,
+                signal_allocator=getattr(self, 'signal_allocator', None)
             )
             logger.info("✅ Main Arbitrage Engine initialized with professional components + ML")
             
@@ -1168,6 +1174,15 @@ class IntegratedArbitrageBot:
                     if by_strategy:
                         logger.info(f"💰 Profit by strategy: {by_strategy}")
                 
+                # Log signal allocator status (inventory recommendations)
+                if hasattr(self, 'signal_allocator') and self.signal_allocator:
+                    summary = self.signal_allocator.get_summary()
+                    if summary['total_signals'] > 0:
+                        top = summary.get('top_symbols', [])[:3]
+                        if top:
+                            top_str = ', '.join(f"{t['symbol']}({t['signals']})" for t in top)
+                            logger.info(f"📦 Inventory signals: {summary['total_signals']} total | Top: {top_str}")
+                
         except asyncio.CancelledError:
             return
     
@@ -1254,6 +1269,27 @@ class IntegratedArbitrageBot:
                                             success=True,
                                             profit=trade_info.get('net', 0),
                                             execution_time=0
+                                        )
+                                    # Record to signal allocator for inventory management
+                                    if hasattr(self, 'signal_allocator') and self.signal_allocator:
+                                        self.signal_allocator.record_trade(
+                                            symbol=trade_info['symbol'],
+                                            strategy=opp['strategy'],
+                                            exchange=trade_info.get('buy_ex', ''),
+                                            roi_pct=trade_info.get('roi_pct', 0)
+                                        )
+                            else:
+                                # Signal didn't produce a trade but still useful for allocation
+                                if hasattr(self, 'signal_allocator') and self.signal_allocator:
+                                    sym = opp.get('symbol', '')
+                                    if '/' in sym:
+                                        sym = sym.split('/')[0]
+                                    if sym:
+                                        self.signal_allocator.record_signal(
+                                            symbol=sym,
+                                            strategy=opp['strategy'],
+                                            exchange=opp.get('data', {}).get('exchange', ''),
+                                            roi_pct=opp.get('data', {}).get('roi_pct', 0)
                                         )
                 
                 await asyncio.sleep(settings.SCAN_INTERVAL_SEC)

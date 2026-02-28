@@ -488,7 +488,7 @@ class StrategyDispatcher:
         return opportunities
     
     async def _scan_market_making(self) -> List[Dict[str, Any]]:
-        """Market Making: check if cross-exchange spread is wide enough."""
+        """Market Making: check if cross-exchange spread covers fees + min ROI."""
         self.strategy_stats['MARKET_MAKING']['calls'] += 1
         opportunities = []
         
@@ -500,6 +500,7 @@ class StrategyDispatcher:
         if not store:
             return opportunities
         snap = store.snapshot()
+        from core.exchange_config import EXCHANGE_PARAMS
         
         # Check cross-exchange spread for each symbol
         for symbol, exmap in snap.items():
@@ -515,7 +516,11 @@ class StrategyDispatcher:
                     best_ask, ask_ex = a, ex
             if best_bid > best_ask and bid_ex != ask_ex:
                 spread_pct = (best_bid - best_ask) / best_ask
-                if spread_pct > 0.0005:  # > 0.05% cross-exchange spread
+                # Fee-aware threshold: spread must cover both sides' taker fees
+                buy_fee = EXCHANGE_PARAMS.get(ask_ex, {}).get("taker", 0.001)
+                sell_fee = EXCHANGE_PARAMS.get(bid_ex, {}).get("taker", 0.001)
+                min_spread = buy_fee + sell_fee  # e.g. 0.001+0.001 = 0.002 (0.20%)
+                if spread_pct > min_spread:  # Spread must exceed total fees
                     opportunities.append({
                         'strategy': 'MARKET_MAKING',
                         'type': 'cross_spread',
@@ -577,7 +582,11 @@ class StrategyDispatcher:
         return opportunities
     
     async def _scan_funding_rate(self) -> List[Dict[str, Any]]:
-        """Funding Rate: detect premium/discount between exchange prices."""
+        """Funding Rate: detect premium/discount between exchange prices.
+        
+        Only signals when deviation exceeds trading fees, so the opportunity
+        is actually profitable to capture.
+        """
         self.strategy_stats['FUNDING_RATE']['calls'] += 1
         opportunities = []
         
@@ -586,6 +595,7 @@ class StrategyDispatcher:
             return opportunities
         
         snap = store.snapshot()
+        from core.exchange_config import EXCHANGE_PARAMS
         
         # Check for price deviations between exchanges (proxy for funding rate)
         for symbol, exmap in snap.items():
@@ -607,7 +617,12 @@ class StrategyDispatcher:
             
             for ex, price in prices.items():
                 deviation = ((price - avg_price) / avg_price) * 100
-                if abs(deviation) > 0.3:  # >0.3% premium/discount
+                # Fee-aware: deviation must exceed fees to be profitable
+                # Max fees = buy on cheapest (0.10%) + sell on this (0.20%) = 0.30%
+                ex_fee = EXCHANGE_PARAMS.get(ex, {}).get("taker", 0.001) * 100
+                avg_fee = sum(EXCHANGE_PARAMS.get(e, {}).get("taker", 0.001) for e in prices) / len(prices) * 100
+                min_deviation = ex_fee + avg_fee  # e.g. 0.10% + 0.12% = 0.22%
+                if abs(deviation) > min_deviation:  # Must exceed total fees
                     opportunities.append({
                         'strategy': 'FUNDING_RATE',
                         'type': 'premium',
@@ -621,7 +636,12 @@ class StrategyDispatcher:
         return opportunities
     
     async def _scan_volatility_arb(self) -> List[Dict[str, Any]]:
-        """Volatility Arb: detect spread width differences between exchanges."""
+        """Volatility Arb: detect spread width differences between exchanges.
+        
+        When one exchange has a much wider spread, the narrow-spread exchange
+        has tighter pricing — we can buy there and sell on the wide-spread one
+        (or vice versa). Only signals when the spread DIFFERENCE covers fees.
+        """
         self.strategy_stats['VOLATILITY_ARB']['calls'] += 1
         opportunities = []
         
@@ -630,6 +650,7 @@ class StrategyDispatcher:
             return opportunities
         
         snap = store.snapshot()
+        from core.exchange_config import EXCHANGE_PARAMS
         
         for symbol, exmap in snap.items():
             if len(exmap) < 2:
@@ -649,10 +670,16 @@ class StrategyDispatcher:
             max_spread = max(vals)
             min_spread = min(vals)
             
-            # Signal when one exchange has significantly wider spread
-            if max_spread > 0 and min_spread > 0 and max_spread > min_spread * 2:
-                wide_ex = max(spreads, key=spreads.get)
-                narrow_ex = min(spreads, key=spreads.get)
+            # Signal when spread difference is large enough to cover fees
+            wide_ex = max(spreads, key=spreads.get)
+            narrow_ex = min(spreads, key=spreads.get)
+            spread_diff = max_spread - min_spread
+            # Fee threshold for trading between these two exchanges
+            fee_wide = EXCHANGE_PARAMS.get(wide_ex, {}).get("taker", 0.001)
+            fee_narrow = EXCHANGE_PARAMS.get(narrow_ex, {}).get("taker", 0.001)
+            fee_threshold = fee_wide + fee_narrow  # e.g. 0.002 = 0.20%
+            
+            if spread_diff > fee_threshold and max_spread > min_spread * 2:
                 opportunities.append({
                     'strategy': 'VOLATILITY_ARB',
                     'type': 'spread_diff',
@@ -669,7 +696,10 @@ class StrategyDispatcher:
         return opportunities
     
     async def _scan_index_arb(self) -> List[Dict[str, Any]]:
-        """Index Arb: compare each symbol's exchange price to its composite average."""
+        """Index Arb: compare each symbol's exchange price to its composite average.
+        
+        Only signals when deviation exceeds trading fees.
+        """
         self.strategy_stats['INDEX_ARB']['calls'] += 1
         opportunities = []
         
@@ -678,6 +708,7 @@ class StrategyDispatcher:
             return opportunities
         
         snap = store.snapshot()
+        from core.exchange_config import EXCHANGE_PARAMS
         
         for symbol, exmap in snap.items():
             prices = {}
@@ -694,7 +725,11 @@ class StrategyDispatcher:
             
             for ex, price in prices.items():
                 dev = ((price - avg) / avg) * 100
-                if abs(dev) > 0.1:  # > 0.1% deviation from composite
+                # Fee-aware: deviation must exceed fees to trade profitably
+                ex_fee = EXCHANGE_PARAMS.get(ex, {}).get("taker", 0.001) * 100
+                avg_fee = sum(EXCHANGE_PARAMS.get(e, {}).get("taker", 0.001) for e in prices) / len(prices) * 100
+                min_dev = ex_fee + avg_fee  # e.g. 0.10% + 0.12% = 0.22%
+                if abs(dev) > min_dev:  # Must exceed total fees
                     opportunities.append({
                         'strategy': 'INDEX_ARB',
                         'type': 'index_deviation',

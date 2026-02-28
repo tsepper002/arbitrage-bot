@@ -274,7 +274,7 @@ def get_config() -> dict:
         'TRADING_SYMBOLS': TRADING_SYMBOLS,
         'SCAN_INTERVAL_SEC': SCAN_INTERVAL_SEC,
         'SYMBOL_COOLDOWN_SEC': PER_SYMBOL_COOLDOWN_SEC,
-        'EXCHANGES': ['Bybit', 'KuCoin', 'HTX', 'MEXC'],
+        'EXCHANGES': ['Bybit', 'KuCoin', 'HTX', 'MEXC', 'Binance'],
         'MAX_DAILY_LOSS': MAX_DAILY_LOSS,
         'MAX_HOURLY_LOSS': MAX_HOURLY_LOSS,
         'MAX_SINGLE_TRADE_LOSS': MAX_SINGLE_TRADE_LOSS,
@@ -290,7 +290,7 @@ def get_config_summary() -> str:
     return """
 === Arbitrage Bot Configuration (ENHANCED) ===
 Execution Mode: {mode}
-Exchanges: Bybit, KuCoin, HTX, MEXC (4 total)
+Exchanges: Bybit, KuCoin, HTX, MEXC, Binance (5 total)
 Min Net ROI: {roi}%
 Max Exposure: ${exp} USDT
 Safety Factor: {sf}
@@ -338,10 +338,10 @@ def validate_api_keys() -> tuple[bool, List[str]]:
             issues.append("⚠️  KuCoin API keys not set")
         if not HTX_API_KEY or not HTX_API_SECRET:
             issues.append("⚠️  HTX API keys not set")
-        if not XT_API_KEY or not XT_API_SECRET:
-            issues.append("⚠️  XT API keys not set")
         if not MEXC_API_KEY or not MEXC_API_SECRET:
             issues.append("⚠️  MEXC API keys not set")
+        if not BINANCE_API_KEY or not BINANCE_API_SECRET:
+            issues.append("⚠️  Binance API keys not set")
     
     return len(issues) == 0, issues
 
