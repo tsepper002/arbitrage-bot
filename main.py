@@ -1223,11 +1223,10 @@ class IntegratedArbitrageBot:
         In LIVE: places real market buy/sell orders.
         """
         REBALANCE_INTERVAL = 300  # Check every 5 min (pre-funded: arb naturally rebalances)
-        INITIAL_DELAY = 90  # Wait 90s to collect enough signals for best initial coin choice
+        # No fixed delay — bot waits for 30+ OPPORTUNITY signals before buying (signal-driven, not time-driven)
         
         try:
-            await asyncio.sleep(INITIAL_DELAY)
-            logger.info("🔄 Inventory rebalance loop started (every 60s + reactive)")
+            logger.info("🔄 Inventory rebalance loop started — waiting for 30+ signals before first buy")
             
             while True:
                 try:
@@ -1242,7 +1241,7 @@ class IntegratedArbitrageBot:
                     # Normal rebalance if we have enough signals, OR urgent
                     has_signals = (
                         self.signal_allocator 
-                        and self.signal_allocator.has_sufficient_signals(15)
+                        and self.signal_allocator.has_sufficient_signals(30)
                     )
                     
                     if has_signals or urgent:
