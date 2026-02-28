@@ -842,6 +842,14 @@ class ArbitrageEngine:
                         missed_exchange = result.get('missed_exchange', '')
                         missed_side = result.get('missed_side', 'sell')
                         self.signal_allocator.record_miss(missed_symbol, missed_exchange, missed_side)
+                        # Also record the blocked opportunity as a signal for allocation
+                        # This tells the allocator which coins are HOT (even if we can't trade yet)
+                        self.signal_allocator.record_signal(
+                            symbol=o.get('symbol', ''),
+                            strategy='CROSS_EXCHANGE',
+                            exchange=o.get('buy_ex', ''),
+                            roi_pct=o.get('roi_pct', 0)
+                        )
                         continue
                     
                     # Record trade to strategy manager AND dispatcher stats

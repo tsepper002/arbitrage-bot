@@ -323,12 +323,15 @@ class BalanceManager:
         return total
     
     def _get_price_from_store(self, price_store, symbol: str, exchange: str) -> float:
-        """Get mid-price for a symbol on a specific exchange from PriceStore."""
+        """Get mid-price for a symbol on a specific exchange from PriceStore.
+        
+        PriceStore.snapshot() returns: {symbol: {exchange: {bid, ask, ...}}}
+        """
         try:
             snapshot = price_store.snapshot()
-            key = (symbol, exchange)
-            if key in snapshot:
-                entry = snapshot[key]
+            exmap = snapshot.get(symbol, {})
+            if exchange in exmap:
+                entry = exmap[exchange]
                 bid = entry.get('bid', 0) or 0
                 ask = entry.get('ask', 0) or 0
                 if bid > 0 and ask > 0:
@@ -339,17 +342,20 @@ class BalanceManager:
         return 0.0
     
     def _get_any_price(self, price_store, symbol: str) -> float:
-        """Get mid-price for a symbol from any exchange in PriceStore."""
+        """Get mid-price for a symbol from any exchange in PriceStore.
+        
+        PriceStore.snapshot() returns: {symbol: {exchange: {bid, ask, ...}}}
+        """
         try:
             snapshot = price_store.snapshot()
-            for (sym, _ex), entry in snapshot.items():
-                if sym == symbol:
-                    bid = entry.get('bid', 0) or 0
-                    ask = entry.get('ask', 0) or 0
-                    if bid > 0 and ask > 0:
-                        return (bid + ask) / 2
-                    if bid > 0 or ask > 0:
-                        return bid or ask
+            exmap = snapshot.get(symbol, {})
+            for _ex, entry in exmap.items():
+                bid = entry.get('bid', 0) or 0
+                ask = entry.get('ask', 0) or 0
+                if bid > 0 and ask > 0:
+                    return (bid + ask) / 2
+                if bid > 0 or ask > 0:
+                    return bid or ask
         except Exception:
             pass
         return 0.0

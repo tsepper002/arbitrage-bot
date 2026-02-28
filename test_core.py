@@ -101,8 +101,53 @@ def test_arbitrage_engine():
     print(f"  ✅ Found {len(opps)} opps: ${best['net']:.4f} ({best['roi_pct']:.3f}% ROI)")
 
 
-def test_all_symbols():
-    """TEST 6: All 10 Symbols × 4 Exchanges"""
+def test_balance_manager_price_lookup():
+    """TEST 5b: BalanceManager price lookup from PriceStore (nested dict)"""
+    print("\n" + "=" * 60)
+    print("TEST 5b: BalanceManager price lookup (PriceStore)")
+    print("=" * 60)
+    from core.price_store import PriceStore
+    from core.balance_manager import BalanceManager
+    
+    store = PriceStore()
+    bm = BalanceManager()
+    
+    # Populate price store with data
+    loop.run_until_complete(store.update('MEXC', 'NEAR-USDT', bid=1.15, bid_size=100, ask=1.155, ask_size=100))
+    loop.run_until_complete(store.update('KuCoin', 'NEAR-USDT', bid=1.16, bid_size=100, ask=1.165, ask_size=100))
+    
+    # Snapshot is {symbol: {exchange: {bid, ask, ...}}} — nested dict, NOT tuple keys
+    snap = store.snapshot()
+    assert 'NEAR-USDT' in snap, "Symbol must be in snapshot"
+    assert 'MEXC' in snap['NEAR-USDT'], "Exchange must be nested under symbol"
+    assert ('NEAR-USDT', 'MEXC') not in snap, "Tuple key must NOT be in snapshot"
+    
+    # Test _get_price_from_store: specific exchange
+    price = bm._get_price_from_store(store, 'NEAR-USDT', 'MEXC')
+    assert price > 1.0, f"Price should be > 1.0, got {price}"
+    print(f"  ✅ _get_price_from_store(MEXC): {price}")
+    
+    # Test _get_any_price: any exchange
+    price2 = bm._get_any_price(store, 'NEAR-USDT')
+    assert price2 > 1.0, f"Price should be > 1.0, got {price2}"
+    print(f"  ✅ _get_any_price: {price2}")
+    
+    # Test get_symbol_price: public API
+    price3 = bm.get_symbol_price(store, 'NEAR-USDT', 'KuCoin')
+    assert price3 > 1.0, f"Price should be > 1.0, got {price3}"
+    print(f"  ✅ get_symbol_price(KuCoin): {price3}")
+    
+    # Test get_total_balance_usdt: converts coins to USDT
+    bm.balances = {
+        'MEXC': {'USDT': 12.0, 'NEAR': 5.0},
+        'KuCoin': {'USDT': 12.0, 'NEAR': 5.0},
+    }
+    total = bm.get_total_balance_usdt(store)
+    assert total > 34.0, f"Total should be > $34, got ${total:.2f}"
+    print(f"  ✅ get_total_balance_usdt: ${total:.2f}")
+
+
+
     print("\n" + "=" * 60)
     print("TEST 6: All 10 Symbols × 4 Exchanges")
     print("=" * 60)
