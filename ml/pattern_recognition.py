@@ -128,7 +128,8 @@ class PatternRecognition:
         current_cluster = [levels_sorted[0]]
         
         for level in levels_sorted[1:]:
-            if abs(level - np.mean(current_cluster)) / np.mean(current_cluster) < threshold:
+            cluster_mean = np.mean(current_cluster)
+            if cluster_mean > 0 and abs(level - cluster_mean) / cluster_mean < threshold:
                 current_cluster.append(level)
             else:
                 clustered.append(np.mean(current_cluster))
@@ -275,7 +276,7 @@ class PatternRecognition:
             # Head should be highest
             if head > left and head > right:
                 # Shoulders should be similar
-                if abs(left - right) / left < 0.05:
+                if left > 0 and abs(left - right) / left < 0.05:
                     return Pattern(
                         type=PatternType.HEAD_AND_SHOULDERS.value,
                         confidence=0.8,
@@ -306,7 +307,7 @@ class PatternRecognition:
             peak1 = peaks[i][1]
             peak2 = peaks[i+1][1]
             
-            if abs(peak1 - peak2) / peak1 < 0.02:  # Within 2%
+            if peak1 > 0 and abs(peak1 - peak2) / peak1 < 0.02:  # Within 2%
                 return Pattern(
                     type=PatternType.DOUBLE_TOP.value,
                     confidence=0.75,

@@ -205,17 +205,21 @@ class HealthMonitor:
             HEALTHY if all healthy, DEGRADED if some degraded, UNHEALTHY if any unhealthy
         """
         async with self.lock:
-            if not self.checks:
-                return HealthStatus.UNKNOWN
-            
-            statuses = [check.last_status for check in self.checks.values()]
-            
-            if all(s == HealthStatus.HEALTHY for s in statuses):
-                return HealthStatus.HEALTHY
-            elif any(s == HealthStatus.UNHEALTHY for s in statuses):
-                return HealthStatus.UNHEALTHY
-            else:
-                return HealthStatus.DEGRADED
+            return await self._get_overall_status_unlocked()
+
+    async def _get_overall_status_unlocked(self) -> HealthStatus:
+        """Internal: get status without acquiring lock (caller must hold lock)."""
+        if not self.checks:
+            return HealthStatus.UNKNOWN
+        
+        statuses = [check.last_status for check in self.checks.values()]
+        
+        if all(s == HealthStatus.HEALTHY for s in statuses):
+            return HealthStatus.HEALTHY
+        elif any(s == HealthStatus.UNHEALTHY for s in statuses):
+            return HealthStatus.UNHEALTHY
+        else:
+            return HealthStatus.DEGRADED
     
     async def _monitoring_loop(self):
         """Background monitoring loop."""
@@ -277,7 +281,7 @@ class HealthMonitor:
             Dashboard with all component statuses and statistics
         """
         async with self.lock:
-            overall_status = await self.get_overall_status()
+            overall_status = await self._get_overall_status_unlocked()
             
             components = {}
             for component, check in self.checks.items():

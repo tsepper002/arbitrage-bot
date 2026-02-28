@@ -124,7 +124,7 @@ class SmartOrderRouter:
         best_quote, best_score = venue_scores[0]
         
         # Вычислить price improvement relative to worst venue
-        worst_price = min(v.price for v in venues) if side == 'sell' else max(v.price for v in venues)
+        worst_price = max(v.price for v in venues) if side == 'buy' else min(v.price for v in venues)
         if side == 'sell':
             price_improvement = (best_quote.price - worst_price) / worst_price if worst_price > 0 else 0
         else:
@@ -193,7 +193,7 @@ class SmartOrderRouter:
             self.venue_avg_latency[exchange].pop(0)
         
         # Вычислить reliability score
-        success_rate = sum(self.venue_success_rate[exchange]) / len(self.venue_success_rate[exchange])
+        success_rate = sum(self.venue_success_rate[exchange]) / len(self.venue_success_rate[exchange]) if self.venue_success_rate[exchange] else 0.9
         self.venue_reliability[exchange] = success_rate
     
     def get_venue_statistics(self, exchange: str) -> Dict:
@@ -205,7 +205,7 @@ class SmartOrderRouter:
                 'total_orders': 0
             }
         
-        success_rate = sum(self.venue_success_rate[exchange]) / len(self.venue_success_rate[exchange])
+        success_rate = sum(self.venue_success_rate[exchange]) / len(self.venue_success_rate[exchange]) if self.venue_success_rate[exchange] else 0.9
         avg_latency = statistics.mean(self.venue_avg_latency[exchange]) if self.venue_avg_latency[exchange] else 0.0
         
         return {
