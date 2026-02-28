@@ -125,7 +125,17 @@ class OrderExecutor:
             return await self._execute_live(opportunity)
     
     def _execute_dry_run(self, opp: Dict) -> Dict:
-        """Simulate order execution with detailed logging."""
+        """Simulate order execution with realistic balance tracking.
+        
+        In dry-run mode, virtual balances are updated to reflect the trade:
+        - Buy side: USDT decreases, base coin increases
+        - Sell side: base coin decreases, USDT increases
+        
+        This ensures realistic simulation where:
+        - Trades can't happen without sufficient USDT on buy exchange
+        - Trades can't happen without pre-positioned base coin on sell exchange
+        - Capital depletion is tracked accurately
+        """
         symbol = opp['symbol']
         buy_ex = opp['buy_ex']
         sell_ex = opp['sell_ex']
@@ -135,6 +145,40 @@ class OrderExecutor:
         net_profit = opp['net']
         roi_pct = opp['roi_pct']
         
+        # Parse currencies
+        base_currency = symbol.split('-')[0] if '-' in symbol else symbol.replace('USDT', '')
+        quote_currency = 'USDT'
+        
+        # Check virtual balances before executing (realistic simulation)
+        if self.balance_manager:
+            buy_cost = qty * buy_price * 1.002  # 0.2% fee buffer
+            can_buy, buy_reason = self.balance_manager.has_sufficient_balance(
+                buy_ex, quote_currency, buy_cost
+            )
+            can_sell, sell_reason = self.balance_manager.has_sufficient_balance(
+                sell_ex, base_currency, qty
+            )
+            
+            if not can_buy:
+                logger.debug(f"[DRY] Trade blocked: {buy_reason}")
+                return {
+                    'status': 'blocked',
+                    'reason': f'Insufficient USDT on {buy_ex}: {buy_reason}',
+                    'missed_symbol': symbol,
+                    'missed_exchange': buy_ex,
+                    'missed_side': 'buy',
+                }
+            
+            if not can_sell:
+                logger.debug(f"[DRY] Trade blocked: {sell_reason}")
+                return {
+                    'status': 'blocked',
+                    'reason': f'No {base_currency} on {sell_ex}: {sell_reason}',
+                    'missed_symbol': symbol,
+                    'missed_exchange': sell_ex,
+                    'missed_side': 'sell',
+                }
+        
         logger.info(
             f"💰 [DRY RUN] ARBITRAGE OPPORTUNITY DETECTED\n"
             f"   Symbol: {symbol}\n"
@@ -142,6 +186,15 @@ class OrderExecutor:
             f"   Sell: {qty:.6f} @ ${sell_price:.6f} on {sell_ex} (receive: ${qty * sell_price:.2f})\n"
             f"   Net Profit: ${net_profit:.4f} ({roi_pct:.3f}% ROI)"
         )
+        
+        # Update virtual balances (realistic simulation)
+        if self.balance_manager:
+            buy_cost_actual = qty * buy_price
+            sell_proceeds = qty * sell_price
+            self.balance_manager.record_trade(
+                buy_ex, sell_ex, base_currency, quote_currency,
+                qty, buy_cost_actual, sell_proceeds
+            )
         
         # Record simulated trade
         order_info = {

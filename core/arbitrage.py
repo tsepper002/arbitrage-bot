@@ -638,6 +638,14 @@ class ArbitrageEngine:
                             logger.debug(f"TWAP execution error: {e}")
                     result = await self.executor.execute_arbitrage(o)
                     
+                    # Record MISSED opportunity if blocked due to insufficient inventory
+                    if result.get('status') == 'blocked' and self.signal_allocator:
+                        missed_symbol = result.get('missed_symbol', o.get('symbol', ''))
+                        missed_exchange = result.get('missed_exchange', '')
+                        missed_side = result.get('missed_side', 'sell')
+                        self.signal_allocator.record_miss(missed_symbol, missed_exchange, missed_side)
+                        continue
+                    
                     # Record trade to strategy manager AND dispatcher stats
                     if result.get('trade_info'):
                         # Feed trade count to strategy dispatcher for dashboard Trds column

@@ -1196,32 +1196,45 @@ class IntegratedArbitrageBot:
             return
     
     async def _rebalance_loop(self):
-        """Periodic inventory rebalance — distributes USDT into 'hot' coins.
+        """Periodic + reactive inventory rebalance.
         
-        Runs every 5 minutes. Uses signal_allocator to determine which coins 
-        are most frequently involved in profitable opportunities, then 
-        pre-positions capital into those coins across all exchanges.
+        Two modes:
+        1. PERIODIC (every 60s): Check if inventory needs rebalancing
+        2. REACTIVE (instant): When 2+ missed trades for same coin in 60s,
+           immediately pre-position that coin
         
         In DRY RUN: updates virtual balances.
         In LIVE: places real market buy/sell orders.
         """
-        REBALANCE_INTERVAL = 300  # 5 minutes
-        INITIAL_DELAY = 120  # Wait 2 minutes for signals to accumulate
+        REBALANCE_INTERVAL = 60  # Check every 60 seconds
+        INITIAL_DELAY = 30  # Wait 30s for initial signals
         
         try:
             await asyncio.sleep(INITIAL_DELAY)
-            logger.info("🔄 Inventory rebalance loop started (runs every 5 min)")
+            logger.info("🔄 Inventory rebalance loop started (every 60s + reactive)")
             
             while True:
                 try:
                     price_store = self.engine.price_store if self.engine else None
                     
-                    # Only rebalance if we have enough signal data
-                    if self.signal_allocator and len(self.signal_allocator._signals) >= 10:
+                    # Check for URGENT rebalance (missed opportunities)
+                    urgent = (
+                        self.signal_allocator 
+                        and self.signal_allocator.needs_urgent_rebalance()
+                    )
+                    
+                    # Normal rebalance if we have enough signals, OR urgent
+                    has_signals = (
+                        self.signal_allocator 
+                        and len(self.signal_allocator._signals) >= 5
+                    )
+                    
+                    if has_signals or urgent:
                         allocation = self.signal_allocator.get_allocation()
                         if allocation:
+                            mode = "🔥 URGENT" if urgent else "🔄 Periodic"
                             logger.info(
-                                f"🔄 Running inventory rebalance — "
+                                f"{mode} rebalance — "
                                 f"{len(allocation)} target coins"
                             )
                             

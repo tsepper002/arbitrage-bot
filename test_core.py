@@ -1350,6 +1350,86 @@ def test_scaling_and_e2e_pipeline():
     print(f"  ✅ Full E2E pipeline: scan → find → risk → execute → record ✅")
 
 
+def test_dry_run_balance_tracking():
+    """TEST 29: Dry-run trades update virtual balances + reactive rebalance"""
+    print("\n" + "=" * 60)
+    print("TEST 29: Dry-Run Balance Tracking + Reactive Rebalance")
+    print("=" * 60)
+
+    from core.balance_manager import BalanceManager
+    from core.order_executor import OrderExecutor
+    from core.signal_allocator import SignalAllocator
+
+    # Setup virtual balances: 5 exchanges × $20 USDT each
+    settings.DRY_RUN = True
+    settings.VIRTUAL_CAPITAL_PER_EXCHANGE = 20
+    bm = BalanceManager()
+    bm._use_virtual_balances()
+
+    # Verify all 5 exchanges have $20 USDT
+    for ex in ['Bybit', 'KuCoin', 'HTX', 'MEXC', 'Binance']:
+        bal = bm.get_balance(ex, 'USDT')
+        assert bal == 20.0, f"{ex} should have $20 USDT, got ${bal}"
+    print("  ✅ All 5 exchanges: $20 USDT each")
+
+    # Pre-position: simulate putting some APT on Bybit
+    bm.update_balance_optimistic('Bybit', 'USDT', -5.0)
+    bm.update_balance_optimistic('Bybit', 'APT', 0.6)  # ~$5 worth at $8.24
+    assert bm.get_balance('Bybit', 'USDT') == 15.0
+    assert bm.get_balance('Bybit', 'APT') == 0.6
+    print("  ✅ Pre-positioned 0.6 APT ($5) on Bybit")
+
+    # Create executor WITH balance_manager
+    executor = OrderExecutor(dry_run=True)
+    executor.balance_manager = bm
+
+    # Trade 1: Buy APT on MEXC, Sell APT on Bybit (we have APT on Bybit!)
+    opp = {
+        'symbol': 'APT-USDT', 'buy_ex': 'MEXC', 'sell_ex': 'Bybit',
+        'qty': 0.5, 'buy_avg': 8.21, 'sell_avg': 8.24,
+        'net': 0.015, 'roi_pct': 0.365,
+    }
+    result = executor._execute_dry_run(opp)
+    assert result['status'] == 'simulated', f"Expected simulated, got {result['status']}"
+
+    # Check balances updated
+    mexc_usdt = bm.get_balance('MEXC', 'USDT')
+    mexc_apt = bm.get_balance('MEXC', 'APT')
+    bybit_apt = bm.get_balance('Bybit', 'APT')
+    bybit_usdt = bm.get_balance('Bybit', 'USDT')
+    assert mexc_usdt < 20.0, f"MEXC USDT should decrease: ${mexc_usdt}"
+    assert mexc_apt > 0, f"MEXC should now have APT: {mexc_apt}"
+    assert bybit_apt < 0.6, f"Bybit APT should decrease from 0.6: {bybit_apt}"
+    assert bybit_usdt > 15.0, f"Bybit USDT should increase: ${bybit_usdt}"
+    print(f"  ✅ Balances updated: MEXC USDT=${mexc_usdt:.2f}, APT={mexc_apt:.3f}")
+    print(f"  ✅ Balances updated: Bybit USDT=${bybit_usdt:.2f}, APT={bybit_apt:.3f}")
+
+    # Trade 2: Try to sell APT on KuCoin (we DON'T have APT there)
+    opp2 = {
+        'symbol': 'APT-USDT', 'buy_ex': 'MEXC', 'sell_ex': 'KuCoin',
+        'qty': 0.5, 'buy_avg': 8.21, 'sell_avg': 8.24,
+        'net': 0.015, 'roi_pct': 0.365,
+    }
+    result2 = executor._execute_dry_run(opp2)
+    assert result2['status'] == 'blocked', f"Expected blocked (no APT on KuCoin), got {result2['status']}"
+    assert 'missed_symbol' in result2, "Should include missed_symbol"
+    print(f"  ✅ Trade correctly blocked: {result2.get('reason', '')[:60]}")
+
+    # Test reactive rebalance
+    sa = SignalAllocator(balance_manager=bm)
+    sa.record_miss('APT-USDT', 'KuCoin', 'sell')
+    assert not sa.needs_urgent_rebalance(), "1 miss shouldn't trigger urgent"
+    sa.record_miss('APT-USDT', 'KuCoin', 'sell')
+    assert sa.needs_urgent_rebalance(), "2 misses should trigger urgent"
+    print("  ✅ Reactive rebalance triggered after 2 misses")
+
+    # Test capital-based coin count scaling
+    sa2 = SignalAllocator(balance_manager=bm)
+    coins = sa2.get_max_preposition_coins()
+    assert coins >= 1, f"Should pre-position at least 1 coin, got {coins}"
+    print(f"  ✅ Capital ${20}/exchange → pre-position {coins} coin(s)")
+
+
 if __name__ == "__main__":
     tests = [
         test_settings, test_price_store, test_exchange_config, test_order_executor,
@@ -1366,6 +1446,7 @@ if __name__ == "__main__":
         test_ml_observation_outside_prefilter,
         test_cross_exchange_and_triangular_signals,
         test_scaling_and_e2e_pipeline,
+        test_dry_run_balance_tracking,
     ]
     passed = failed = 0
     for t in tests:

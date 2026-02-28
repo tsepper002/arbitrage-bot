@@ -83,12 +83,21 @@ class SignalAllocator:
     # Weight multiplier for executed trades vs raw signals
     EXECUTED_WEIGHT = 5.0
 
+    # Reactive rebalance: how many missed trades trigger immediate rebalance
+    MISS_THRESHOLD = 2  # 2 misses in MISS_WINDOW → urgent rebalance
+    MISS_WINDOW = 60.0  # seconds
+
     def __init__(self, balance_manager=None):
         self.balance_manager = balance_manager
         self._signals: List[SignalRecord] = []
         self._symbol_scores: Dict[str, float] = {}
         self._last_update = 0.0
         self._update_interval = 30.0  # Recalculate every 30s
+
+        # Missed opportunity tracking for reactive rebalance
+        self._misses: List[Dict] = []  # [{symbol, exchange, side, timestamp}]
+        self._urgent_rebalance_needed = False
+        self._urgent_symbols: Dict[str, float] = {}  # symbol → timestamp of last miss
 
         logger.info("✅ SignalAllocator initialized (HFT-style inventory management)")
 
@@ -125,6 +134,88 @@ class SignalAllocator:
     def record_trade(self, symbol: str, strategy: str, exchange: str, roi_pct: float):
         """Convenience: record an executed trade signal (weighted 5× more)."""
         self.record_signal(symbol, strategy, exchange, roi_pct, executed=True)
+
+    def record_miss(self, symbol: str, exchange: str, side: str = 'sell'):
+        """Record a missed opportunity (trade blocked due to missing inventory).
+        
+        When 2+ misses occur for the same symbol within 60 seconds,
+        triggers urgent rebalance to pre-position that coin.
+        
+        Args:
+            symbol: Trading symbol (e.g. 'APT-USDT')
+            exchange: Exchange that was missing inventory
+            side: 'sell' (missing base coin) or 'buy' (missing USDT)
+        """
+        now = time.time()
+        self._misses.append({
+            'symbol': symbol,
+            'exchange': exchange,
+            'side': side,
+            'timestamp': now,
+        })
+        
+        # Trim old misses
+        cutoff = now - self.MISS_WINDOW
+        self._misses = [m for m in self._misses if m['timestamp'] > cutoff]
+        
+        # Count recent misses for this symbol
+        recent_for_symbol = sum(
+            1 for m in self._misses 
+            if m['symbol'] == symbol and m['timestamp'] > cutoff
+        )
+        
+        if recent_for_symbol >= self.MISS_THRESHOLD:
+            self._urgent_rebalance_needed = True
+            self._urgent_symbols[symbol] = now
+            logger.info(
+                f"🔥 URGENT: {symbol} missed {recent_for_symbol}× in {self.MISS_WINDOW:.0f}s "
+                f"(no {side}-side inventory on {exchange}) → triggering immediate rebalance"
+            )
+            # Also boost the signal score for this symbol
+            self.record_signal(symbol, 'MISS_REACTIVE', exchange, roi_pct=0.5, executed=False)
+            self.record_signal(symbol, 'MISS_REACTIVE', exchange, roi_pct=0.5, executed=False)
+            self.record_signal(symbol, 'MISS_REACTIVE', exchange, roi_pct=0.5, executed=False)
+
+    def needs_urgent_rebalance(self) -> bool:
+        """Check if reactive rebalance is needed (missed opportunities detected)."""
+        if self._urgent_rebalance_needed:
+            self._urgent_rebalance_needed = False
+            return True
+        return False
+
+    def get_max_preposition_coins(self) -> int:
+        """Calculate how many different coins to pre-position based on capital.
+        
+        With small capital ($10/exchange): 1-2 coins
+        With medium capital ($100/exchange): 3-5 coins
+        With large capital ($1000+/exchange): 5-8 coins
+        """
+        if not self.balance_manager:
+            return 3
+        
+        # Get average USDT per exchange
+        total_usdt = 0
+        num_exchanges = 0
+        for exchange, balances in self.balance_manager.balances.items():
+            usdt = balances.get('USDT', 0)
+            total_usdt += usdt
+            num_exchanges += 1
+        
+        if num_exchanges == 0:
+            return 3
+        
+        avg_per_exchange = total_usdt / num_exchanges
+        
+        if avg_per_exchange < 20:
+            return 1  # Very small: only 1 coin
+        elif avg_per_exchange < 50:
+            return 2  # Small: 2 coins
+        elif avg_per_exchange < 200:
+            return 4  # Medium: up to 4 coins
+        elif avg_per_exchange < 1000:
+            return 6  # Large: up to 6 coins
+        else:
+            return 8  # Very large: up to 8 coins
 
     def _compute_scores(self) -> Dict[str, float]:
         """Compute weighted signal scores per symbol.
@@ -186,7 +277,8 @@ class SignalAllocator:
         # Normalize to allocation fractions
         total_score = sum(eligible.values())
         allocation = {}
-        for sym, score in sorted(eligible.items(), key=lambda x: -x[1]):
+        max_coins = self.get_max_preposition_coins()
+        for sym, score in sorted(eligible.items(), key=lambda x: -x[1])[:max_coins]:
             frac = (score / total_score) * self.MAX_PREPOSITION_PCT
             frac = min(frac, self.MAX_SINGLE_SYMBOL_PCT)
             allocation[sym] = round(frac, 4)
