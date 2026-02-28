@@ -104,10 +104,14 @@ class SignalAllocator:
     MISS_THRESHOLD = 50  # Effectively disabled: 50 misses before rebalance
     MISS_WINDOW = 300.0  # 5 min window
 
-    # Coin rotation: minimum time before switching to a different coin
-    COIN_SWITCH_COOLDOWN = 1800  # 30 minutes before rotating coins
-    # Minimum score ratio for new coin to replace current: new must be 3× better
-    COIN_SWITCH_RATIO = 3.0
+    # Coin rotation: smart switch conditions
+    SILENCE_TIMEOUT = 600       # 10 minutes of zero signals → consider switch
+    MIN_ALTERNATIVES = 3        # Need at least 3 hot alternatives to switch
+    MIN_ALT_TRACK_RECORD = 900  # Each alternative must have 15 min of signal history
+    MAX_SELL_LOSS_PCT = 0.5     # Don't sell if price dropped >0.5% from entry
+    COIN_SWITCH_COOLDOWN = 600  # 10 min cooldown between switches
+    # Signal scoring window
+    INITIAL_SIGNAL_WINDOW = 30  # Use last 30 signals for initial coin selection
     # Emergency exit: if coin drops >3% in 5 minutes → immediate sell and switch
     EMERGENCY_DROP_PCT = 3.0   # percentage drop threshold
     EMERGENCY_WINDOW = 300     # seconds to measure drop over
@@ -137,6 +141,8 @@ class SignalAllocator:
         self._initial_setup_done: bool = False  # True after first pre-positioning
         self._last_prices: Dict[str, float] = {}  # symbol → last known price
         self._coin_entry_price: float = 0.0  # price when coin was first positioned
+        self._last_signal_time: Dict[str, float] = {}  # symbol → last signal timestamp
+        self._symbol_first_seen: Dict[str, float] = {}  # symbol → first signal timestamp
 
         logger.info("✅ SignalAllocator initialized (pre-funded inventory model)")
 
@@ -165,6 +171,12 @@ class SignalAllocator:
             roi_pct=roi_pct,
             executed=executed,
         ))
+
+        # Track signal timing per symbol
+        now = time.time()
+        self._last_signal_time[symbol] = now
+        if symbol not in self._symbol_first_seen:
+            self._symbol_first_seen[symbol] = now
 
         # Trim history
         if len(self._signals) > self.MAX_HISTORY:
@@ -275,6 +287,56 @@ class SignalAllocator:
         if hasattr(self, '_last_prices') and symbol in self._last_prices:
             return self._last_prices[symbol]
         return 0.0
+
+    def _score_symbol_recent(self, symbol: str, last_n: int = 30) -> float:
+        """Score a symbol by frequency × avg_roi from the last N signals.
+        
+        This gives better initial coin selection: picks the coin with
+        both frequent signals AND high average ROI, not just most signals.
+        
+        Returns: score = signal_count × avg_roi_pct (higher = better)
+        """
+        # Get last N signals for this symbol
+        symbol_signals = [s for s in reversed(self._signals) if s.symbol == symbol][:last_n]
+        if not symbol_signals:
+            return 0.0
+        
+        count = len(symbol_signals)
+        avg_roi = sum(max(s.roi_pct, 0) for s in symbol_signals) / count if count > 0 else 0.0
+        
+        return count * avg_roi
+
+    def _get_hot_alternatives(self, exclude_symbol: str, min_track_record_sec: float = 900) -> list:
+        """Find alternative coins with sufficient track record (15+ min of signals).
+        
+        Returns list of (symbol, score) sorted by score descending.
+        Only includes coins with track record >= min_track_record_sec.
+        """
+        now = time.time()
+        alternatives = []
+        
+        scores = self._compute_scores()
+        for symbol, score in scores.items():
+            if symbol == exclude_symbol:
+                continue
+            if score <= 0:
+                continue
+            
+            # Check track record: must have first signal at least min_track_record_sec ago
+            first_seen = self._symbol_first_seen.get(symbol, now)
+            track_record = now - first_seen
+            if track_record < min_track_record_sec:
+                continue
+            
+            # Must have recent signals (not just old ones)
+            last_signal = self._last_signal_time.get(symbol, 0)
+            if now - last_signal > 120:  # No signal in last 2 min = stale
+                continue
+            
+            alternatives.append((symbol, score))
+        
+        alternatives.sort(key=lambda x: x[1], reverse=True)
+        return alternatives
 
     def _compute_scores(self) -> Dict[str, float]:
         """Compute weighted signal scores per symbol.
@@ -435,10 +497,11 @@ class SignalAllocator:
           - Sell side accumulates USDT, spends base coin
           This is FREE — no extra fees!
         
-        Phase 3 (COIN SWITCH — rare, only when necessary):
-          If current coin has zero signals for 30+ minutes AND
-          a new coin has 3× more signals → sell old, buy new.
-          Max 1 switch per 30 minutes.
+        Phase 3 (SMART COIN SWITCH — when 10 min of silence):
+          If current coin has 0 signals for 10+ minutes AND
+          at least 3 hot alternatives with 15+ min track record AND
+          sale price not >0.5% below entry → switch to most profitable.
+          Picks best by: frequency × avg ROI from recent signals.
         
         Returns:
             List of executed order dicts
@@ -454,8 +517,15 @@ class SignalAllocator:
         executed = []
         exchanges = list(self.balance_manager.balances.keys())
         
-        # Determine the #1 best coin from signals
-        best_coin = max(allocation, key=allocation.get) if allocation else None
+        # Determine the #1 best coin using frequency × avg_roi scoring
+        # This picks the coin with BOTH frequent signals AND high average ROI
+        symbol_scores = {}
+        for symbol in allocation:
+            symbol_scores[symbol] = self._score_symbol_recent(symbol, self.INITIAL_SIGNAL_WINDOW)
+        best_coin = max(symbol_scores, key=symbol_scores.get) if symbol_scores else None
+        if not best_coin or symbol_scores.get(best_coin, 0) <= 0:
+            # Fallback to allocation-based if no ROI data yet
+            best_coin = max(allocation, key=allocation.get) if allocation else None
         if not best_coin:
             return []
         
@@ -554,95 +624,124 @@ class SignalAllocator:
                         logger.warning(f"🚨 Emergency exit complete: sold {old_base} on {len(executed)} exchanges. Will pick new coin next cycle.")
                     return executed
         
-        # ========== PHASE 2B: CHECK IF COIN SWITCH NEEDED ==========
-        # Only switch if: (1) cooldown passed, (2) current coin has no signals, 
-        # (3) new coin is 3× better
+        # ========== PHASE 2B: SMART COIN SWITCH ==========
+        # Switch conditions (ALL must be met):
+        # 1. Current coin has 0 signals for >= SILENCE_TIMEOUT (10 min)
+        # 2. At least MIN_ALTERNATIVES (3) hot alternative coins available
+        # 3. Each alternative has MIN_ALT_TRACK_RECORD (15 min) of signal history
+        # 4. Sale price not more than MAX_SELL_LOSS_PCT (0.5%) below entry price
+        # 5. Cooldown since last switch >= COIN_SWITCH_COOLDOWN (10 min)
         time_since_position = now - self._coin_positioned_at
         
         if time_since_position > self.COIN_SWITCH_COOLDOWN and self._current_coin:
-            current_score = allocation.get(self._current_coin, 0.0)
-            best_score = allocation.get(best_coin, 0.0)
+            # Check condition 1: silence timeout for current coin
+            last_signal = self._last_signal_time.get(self._current_coin, 0)
+            silence_duration = now - last_signal if last_signal > 0 else time_since_position
             
-            should_switch = False
-            reason = ""
-            
-            if current_score == 0.0 and best_score > 0:
-                # Current coin has zero signals — dead
-                should_switch = True
-                reason = f"{self._current_coin} has 0 signals, {best_coin} is active"
-            elif current_score > 0 and best_score > current_score * self.COIN_SWITCH_RATIO and best_coin != self._current_coin:
-                # New coin is dramatically better
-                should_switch = True
-                reason = f"{best_coin} score {best_score:.2f} > {self.COIN_SWITCH_RATIO}× {self._current_coin} score {current_score:.2f}"
-            
-            if should_switch:
-                old_coin = self._current_coin
-                old_base = old_coin.split('-')[0] if '-' in old_coin else old_coin.replace('USDT', '')
-                new_base = best_coin.split('-')[0] if '-' in best_coin else best_coin.replace('USDT', '')
+            if silence_duration >= self.SILENCE_TIMEOUT:
+                # Check condition 2 & 3: at least MIN_ALTERNATIVES with track record
+                alternatives = self._get_hot_alternatives(
+                    self._current_coin, 
+                    min_track_record_sec=self.MIN_ALT_TRACK_RECORD
+                )
                 
-                logger.info(f"🔄 COIN SWITCH: {old_base} → {new_base} ({reason})")
-                
-                # Sell old coin on all exchanges
-                for exchange in exchanges:
-                    amount = self.balance_manager.get_balance(exchange, old_base)
-                    if amount <= 0:
-                        continue
-                    price = 0.0
-                    if price_store:
-                        price = self.balance_manager._get_price_from_store(price_store, old_coin, exchange)
-                        if price <= 0:
-                            price = self.balance_manager._get_any_price(price_store, old_coin)
-                    if price <= 0:
-                        continue
+                if len(alternatives) >= self.MIN_ALTERNATIVES:
+                    # Pick the best alternative (highest score)
+                    new_coin, new_score = alternatives[0]
                     
-                    sell_usdt = amount * price
-                    if sell_usdt < self.MIN_PREPOSITION_USDT:
-                        continue
+                    # Check condition 4: sale price not >0.5% below entry
+                    sell_ok = True
+                    if self._coin_entry_price > 0 and price_store:
+                        current_price = self.balance_manager._get_any_price(price_store, self._current_coin)
+                        if current_price > 0:
+                            loss_pct = ((self._coin_entry_price - current_price) / self._coin_entry_price) * 100
+                            if loss_pct > self.MAX_SELL_LOSS_PCT:
+                                sell_ok = False
+                                logger.info(
+                                    f"⏸️ Coin switch delayed: {self._current_coin} price loss {loss_pct:.2f}% "
+                                    f"> max {self.MAX_SELL_LOSS_PCT}% — holding until price recovers"
+                                )
                     
-                    sell_qty = amount * self.LIQUIDATION_PCT
-                    order = await self._execute_sell_order(
-                        exchange, old_coin, old_base, sell_qty, sell_qty * price, price,
-                        f'Switch out {old_base}', rest_clients
-                    )
-                    if order:
-                        executed.append(order)
-                
-                # Buy new coin on all exchanges
-                for exchange in exchanges:
-                    usdt_balance = self.balance_manager.get_balance(exchange, 'USDT')
-                    reserve = getattr(settings, 'BALANCE_RESERVE_USDT', 2.0)
-                    available = usdt_balance - reserve
-                    if available < self.MIN_PREPOSITION_USDT:
-                        continue
-                    
-                    buy_usdt = available * self.MAX_PREPOSITION_PCT
-                    if buy_usdt < self.MIN_PREPOSITION_USDT:
-                        continue
-                    
-                    price = 0.0
-                    if price_store:
-                        price = self.balance_manager._get_price_from_store(price_store, best_coin, exchange)
-                        if price <= 0:
-                            price = self.balance_manager._get_any_price(price_store, best_coin)
-                    if price <= 0:
-                        continue
-                    
-                    buy_qty = buy_usdt / price
-                    order = await self._execute_buy_order(
-                        exchange, best_coin, new_base, buy_qty, buy_usdt, price,
-                        f'Switch in {new_base}', rest_clients
-                    )
-                    if order:
-                        executed.append(order)
-                
-                self._current_coin = best_coin
-                self._coin_positioned_at = now
-                # Use price_store for accurate entry price (not stale cache)
-                entry_price = self.balance_manager._get_any_price(price_store, best_coin) if price_store else 0.0
-                self._coin_entry_price = entry_price if entry_price > 0 else self._last_prices.get(best_coin, 0.0)
-                
-                if executed:
-                    logger.info(f"🔄 Coin switch complete: {old_base} → {new_base} ({len(executed)} orders) @ ${self._coin_entry_price:.4f}")
+                    if sell_ok:
+                        old_coin = self._current_coin
+                        old_base = old_coin.split('-')[0] if '-' in old_coin else old_coin.replace('USDT', '')
+                        new_base = new_coin.split('-')[0] if '-' in new_coin else new_coin.replace('USDT', '')
+                        
+                        logger.info(
+                            f"🔄 SMART SWITCH: {old_base} → {new_base} "
+                            f"(silence {silence_duration:.0f}s, {len(alternatives)} alternatives, "
+                            f"best score {new_score:.2f})"
+                        )
+                        
+                        # Sell old coin on all exchanges
+                        for exchange in exchanges:
+                            amount = self.balance_manager.get_balance(exchange, old_base)
+                            if amount <= 0:
+                                continue
+                            price = 0.0
+                            if price_store:
+                                price = self.balance_manager._get_price_from_store(price_store, old_coin, exchange)
+                                if price <= 0:
+                                    price = self.balance_manager._get_any_price(price_store, old_coin)
+                            if price <= 0:
+                                continue
+                            
+                            sell_usdt = amount * price
+                            if sell_usdt < self.MIN_PREPOSITION_USDT:
+                                continue
+                            
+                            sell_qty = amount * self.LIQUIDATION_PCT
+                            order = await self._execute_sell_order(
+                                exchange, old_coin, old_base, sell_qty, sell_qty * price, price,
+                                f'Smart switch out {old_base}', rest_clients
+                            )
+                            if order:
+                                executed.append(order)
+                        
+                        # Buy new coin on all exchanges
+                        for exchange in exchanges:
+                            usdt_balance = self.balance_manager.get_balance(exchange, 'USDT')
+                            reserve = getattr(settings, 'BALANCE_RESERVE_USDT', 2.0)
+                            available = usdt_balance - reserve
+                            if available < self.MIN_PREPOSITION_USDT:
+                                continue
+                            
+                            buy_usdt = available * self.MAX_PREPOSITION_PCT
+                            if buy_usdt < self.MIN_PREPOSITION_USDT:
+                                continue
+                            
+                            price = 0.0
+                            if price_store:
+                                price = self.balance_manager._get_price_from_store(price_store, new_coin, exchange)
+                                if price <= 0:
+                                    price = self.balance_manager._get_any_price(price_store, new_coin)
+                            if price <= 0:
+                                continue
+                            
+                            buy_qty = buy_usdt / price
+                            order = await self._execute_buy_order(
+                                exchange, new_coin, new_base, buy_qty, buy_usdt, price,
+                                f'Smart switch in {new_base}', rest_clients
+                            )
+                            if order:
+                                executed.append(order)
+                        
+                        self._current_coin = new_coin
+                        self._coin_positioned_at = now
+                        entry_price = self.balance_manager._get_any_price(price_store, new_coin) if price_store else 0.0
+                        self._coin_entry_price = entry_price if entry_price > 0 else self._last_prices.get(new_coin, 0.0)
+                        
+                        if executed:
+                            logger.info(
+                                f"🔄 Smart switch complete: {old_base} → {new_base} "
+                                f"({len(executed)} orders) @ ${self._coin_entry_price:.4f}"
+                            )
+                else:
+                    if silence_duration > self.SILENCE_TIMEOUT:
+                        logger.debug(
+                            f"⏸️ {self._current_coin} silent {silence_duration:.0f}s but only "
+                            f"{len(alternatives)} alternatives (need {self.MIN_ALTERNATIVES})"
+                        )
         
         # ========== PHASE 3: TOP-UP depleted exchanges (rare) ==========
         # If arb trades have depleted coin on one exchange (all sold → only USDT left)
