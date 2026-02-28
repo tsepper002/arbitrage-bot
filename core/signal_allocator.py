@@ -308,19 +308,31 @@ class SignalAllocator:
         return count * avg_roi
 
     def _get_hot_alternatives(self, exclude_symbol: str, min_track_record_sec: float = 900) -> list:
-        """Find alternative coins with sufficient track record (15+ min of signals).
+        """Find alternative coins with sufficient track record and signal count.
         
         Returns list of (symbol, score) sorted by score descending.
-        Only includes coins with track record >= min_track_record_sec.
+        Only includes coins that meet ALL criteria:
+        - track record >= min_track_record_sec (15 min of signal history)
+        - signal count >= MIN_SIGNALS_FOR_ALLOCATION (15 OPPORTUNITY signals)
+        - recent signals (not stale)
         """
         now = time.time()
         alternatives = []
+        
+        # Count signals per symbol
+        signal_counts: Dict[str, int] = defaultdict(int)
+        for sig in self._signals:
+            signal_counts[sig.symbol] += 1
         
         scores = self._compute_scores()
         for symbol, score in scores.items():
             if symbol == exclude_symbol:
                 continue
             if score <= 0:
+                continue
+            
+            # Must have 15+ OPPORTUNITY signals (same as initial coin selection)
+            if signal_counts.get(symbol, 0) < self.MIN_SIGNALS_FOR_ALLOCATION:
                 continue
             
             # Check track record: must have first signal at least min_track_record_sec ago
