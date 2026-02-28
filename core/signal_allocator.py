@@ -294,7 +294,8 @@ class SignalAllocator:
 
     def get_inventory_orders(
         self,
-        exchanges: Optional[List[str]] = None
+        exchanges: Optional[List[str]] = None,
+        price_store=None
     ) -> List[Dict]:
         """Get specific orders to pre-position inventory on exchanges.
 
@@ -303,6 +304,7 @@ class SignalAllocator:
 
         Args:
             exchanges: List of exchange names to allocate across
+            price_store: PriceStore for converting holdings to USDT
 
         Returns:
             List of order dicts: {exchange, symbol, side, amount_usdt}
@@ -335,7 +337,14 @@ class SignalAllocator:
                 # Check if we already have enough of this coin
                 # Handle both 'BTC-USDT' and 'BTCUSDT' formats
                 base_coin = symbol.split('-')[0] if '-' in symbol else symbol.replace('USDT', '')
-                current_holding_usdt = self.balance_manager.get_balance(exchange, base_coin)
+                current_holding = self.balance_manager.get_balance(exchange, base_coin)
+                # Convert holding to USDT (get_balance returns base coin qty, not USDT)
+                price = 0.0
+                if price_store:
+                    price = self.balance_manager._get_price_from_store(price_store, symbol, exchange)
+                    if price <= 0:
+                        price = self.balance_manager._get_any_price(price_store, symbol)
+                current_holding_usdt = current_holding * price if price > 0 else 0
                 # Skip if already holding equivalent value
                 if current_holding_usdt > amount_usdt * 0.5:
                     continue

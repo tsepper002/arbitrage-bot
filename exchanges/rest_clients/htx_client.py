@@ -212,8 +212,11 @@ class HTXRESTClient(BaseRESTClient):
             for item in data.get("data", {}).get("list", []):
                 if item.get("type") == "trade":  # Available balance
                     currency = item.get("currency", "").upper()
-                    balance = float(item.get("balance", 0))
-                    if currency:
+                    try:
+                        balance = float(item.get("balance", 0))
+                    except (ValueError, TypeError):
+                        continue
+                    if currency and balance > 0:
                         balances[currency] = balance
             
             return balances

@@ -34,6 +34,7 @@ class OrderExecutor:
         self.rest_clients = rest_clients or {}
         self.balance_manager = balance_manager
         self.order_history: List[Dict] = []
+        self.MAX_ORDER_HISTORY = 10000  # Prevent unbounded memory growth
         self.trade_count_per_minute: Dict[int, int] = {}  # minute timestamp -> count
         self.last_trade_time_per_symbol: Dict[str, float] = {}  # symbol -> last trade timestamp
         
@@ -83,6 +84,9 @@ class OrderExecutor:
         order_info['executed_at'] = current_time
         order_info['executed_at_iso'] = datetime.fromtimestamp(current_time).isoformat()
         self.order_history.append(order_info)
+        # Prevent unbounded memory growth
+        if len(self.order_history) > self.MAX_ORDER_HISTORY:
+            self.order_history = self.order_history[-self.MAX_ORDER_HISTORY:]
         
         # Clean old minute counters (keep last 5 minutes)
         old_minutes = [m for m in self.trade_count_per_minute.keys() if m < current_minute - 5]

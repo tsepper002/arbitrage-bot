@@ -104,11 +104,11 @@ class PriceStore:
     
     def snapshot(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         """
-        Get full snapshot in O(1) - returns current dict reference.
-        Safe to read concurrently under CPython GIL.
-        
-        W1 OPTIMIZATION: No lock, no copy, instant return.
+        Get full snapshot - deep copy for thread safety.
+        Each record dict is independently copied so mutations
+        in the live store don't affect the snapshot.
         """
-        # Return the current reference - atomic read under GIL
-        # Each dict and nested dict is immutable after assignment
-        return {s: dict(exmap) for s, exmap in self._data.items()}
+        return {
+            s: {ex: dict(rec) for ex, rec in exmap.items()}
+            for s, exmap in self._data.items()
+        }
