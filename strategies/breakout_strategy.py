@@ -88,7 +88,8 @@ class BreakoutStrategy:
         current_cluster = [sorted_levels[0]]
         
         for level in sorted_levels[1:]:
-            if current_cluster[-1] == 0 or abs(level - current_cluster[-1]) / abs(current_cluster[-1]) <= tolerance:
+            denom = abs(current_cluster[-1]) if current_cluster[-1] != 0 else 1e-10
+            if abs(level - current_cluster[-1]) / denom <= tolerance:
                 current_cluster.append(level)
             else:
                 clusters.append(np.mean(current_cluster))
@@ -102,7 +103,9 @@ class BreakoutStrategy:
         """Count how many times price touched a level"""
         touches = 0
         for price in prices:
-            if level == 0 or abs(price - level) / abs(level) <= tolerance:
+            if level <= 0:
+                continue
+            if abs(price - level) / level <= tolerance:
                 touches += 1
         return touches
     
