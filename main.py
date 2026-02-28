@@ -1242,7 +1242,7 @@ class IntegratedArbitrageBot:
                     # Normal rebalance if we have enough signals, OR urgent
                     has_signals = (
                         self.signal_allocator 
-                        and self.signal_allocator.has_sufficient_signals(5)
+                        and self.signal_allocator.has_sufficient_signals(15)
                     )
                     
                     if has_signals or urgent:
