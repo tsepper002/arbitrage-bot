@@ -142,6 +142,48 @@ BALANCE_RESERVE_USDT = _get_env_float("ARB_BALANCE_RESERVE_USDT", 2.0)  # Keep r
 MAX_BALANCE_USAGE_PCT = _get_env_float("ARB_MAX_BALANCE_USAGE_PCT", 75.0)  # AGGRESSIVE: 75% for max capital utilization
 
 # ============================================================================
+# CAPITAL-AWARE STRATEGY PRIORITY
+# ============================================================================
+# Strategies ranked by profitability at different capital levels.
+# Each strategy has: min_capital (per exchange), priority (1=highest),
+# and expected_edge (historical average profit per trade %).
+# Strategies below min_capital are DISABLED to avoid fee-losing trades.
+STRATEGY_PRIORITY = {
+    # Tier 1: Works with ANY capital ($5+) — pure cross-exchange spread
+    'CROSS_EXCHANGE':  {'min_capital': 5,    'priority': 1, 'edge_pct': 0.05},
+    'SMART_ORDER':     {'min_capital': 5,    'priority': 2, 'edge_pct': 0.04},
+    # Tier 2: Works with small capital ($10+) — statistical signals
+    'FUNDING_RATE':    {'min_capital': 10,   'priority': 3, 'edge_pct': 0.08},
+    'INDEX_ARB':       {'min_capital': 10,   'priority': 4, 'edge_pct': 0.06},
+    'VOLATILITY_ARB':  {'min_capital': 10,   'priority': 5, 'edge_pct': 0.05},
+    'VOLATILITY':      {'min_capital': 10,   'priority': 6, 'edge_pct': 0.03},
+    # Tier 3: Medium capital ($25+) — needs multiple positions
+    'PAIRS_TRADING':   {'min_capital': 25,   'priority': 7, 'edge_pct': 0.10},
+    'SPREAD_BETTING':  {'min_capital': 25,   'priority': 8, 'edge_pct': 0.08},
+    'MARKET_MAKING':   {'min_capital': 25,   'priority': 9, 'edge_pct': 0.06},
+    'MOMENTUM':        {'min_capital': 25,   'priority': 10, 'edge_pct': 0.12},
+    # Tier 4: Larger capital ($50+) — long-term hold strategies
+    'DCA':             {'min_capital': 50,   'priority': 11, 'edge_pct': 0.15},
+    'GRID_TRADING':    {'min_capital': 50,   'priority': 12, 'edge_pct': 0.10},
+    'BREAKOUT':        {'min_capital': 50,   'priority': 13, 'edge_pct': 0.20},
+    'TRIANGULAR':      {'min_capital': 100,  'priority': 14, 'edge_pct': 0.15},
+}
+
+def get_enabled_strategies(capital_per_exchange: float = None) -> list:
+    """Return list of strategy names enabled for current capital level.
+    
+    Strategies with min_capital > user's per-exchange balance are DISABLED
+    because they can't generate enough profit to cover fees at that size.
+    """
+    if capital_per_exchange is None:
+        capital_per_exchange = VIRTUAL_CAPITAL_PER_EXCHANGE
+    enabled = []
+    for name, cfg in sorted(STRATEGY_PRIORITY.items(), key=lambda x: x[1]['priority']):
+        if capital_per_exchange >= cfg['min_capital']:
+            enabled.append(name)
+    return enabled
+
+# ============================================================================
 # PERFORMANCE & THROTTLING (optimized for weak hardware)
 # ============================================================================
 # Scan interval in seconds

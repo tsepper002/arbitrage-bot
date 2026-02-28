@@ -168,10 +168,11 @@ class HtxWS:
                     bids_out = self._book_to_levels(self._local_books[sym]["bids"], "bids")
                     asks_out = self._book_to_levels(self._local_books[sym]["asks"], "asks")
                     logger.debug(f"HTX depth snapshot for {sym}: bids={len(bids_out)} asks={len(asks_out)}")
-                    asyncio.run_coroutine_threadsafe(
-                        self.price_store.update_levels(self.exchange, sym, bids_out, asks_out, time.time()),
-                        self.loop
-                    )
+                    if not self.loop.is_closed():
+                        asyncio.run_coroutine_threadsafe(
+                            self.price_store.update_levels(self.exchange, sym, bids_out, asks_out, time.time()),
+                            self.loop
+                        )
                     return
 
                 # Some ticks include top-of-book fields (bid/ask/ bidSize/askSize/close)
@@ -180,7 +181,7 @@ class HtxWS:
                         close = float(tick["close"])
                     except Exception:
                         close = None
-                    if close is not None:
+                    if close is not None and not self.loop.is_closed():
                         # update top-of-book using close as both bid and ask fallback
                         asyncio.run_coroutine_threadsafe(
                             self.price_store.update(self.exchange, sym, close, None, close, None, time.time()),
@@ -213,10 +214,11 @@ class HtxWS:
                     if sym and sym in self._local_books:
                         bids_out = self._book_to_levels(self._local_books[sym]["bids"], "bids")
                         asks_out = self._book_to_levels(self._local_books[sym]["asks"], "asks")
-                        asyncio.run_coroutine_threadsafe(
-                            self.price_store.update_levels(self.exchange, sym, bids_out, asks_out, time.time()),
-                            self.loop
-                        )
+                        if not self.loop.is_closed():
+                            asyncio.run_coroutine_threadsafe(
+                                self.price_store.update_levels(self.exchange, sym, bids_out, asks_out, time.time()),
+                                self.loop
+                            )
                     return
 
             # Fallback: sometimes messages are lists or other shapes — ignore safely

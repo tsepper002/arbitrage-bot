@@ -184,10 +184,11 @@ class KucoinWS:
                     # Track symbol-level health
                     self._health_monitor.on_message_received(sym)
                     
-                    asyncio.run_coroutine_threadsafe(
-                        self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
-                        self.loop
-                    )
+                    if not self.loop.is_closed():
+                        asyncio.run_coroutine_threadsafe(
+                            self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
+                            self.loop
+                        )
                     return
 
                 # incremental updates: some formats use 'changes' or 'delta' fields
@@ -208,10 +209,11 @@ class KucoinWS:
                     if sym and sym in self._local_books:
                         bids_levels = self._book_to_levels(self._local_books[sym]["bids"], "bids")
                         asks_levels = self._book_to_levels(self._local_books[sym]["asks"], "asks")
-                        asyncio.run_coroutine_threadsafe(
-                            self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
-                            self.loop
-                        )
+                        if not self.loop.is_closed():
+                            asyncio.run_coroutine_threadsafe(
+                                self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
+                                self.loop
+                            )
                     return
 
                 # some updates may come with 'bids'/'asks' fields directly (treat as changes)
@@ -220,7 +222,7 @@ class KucoinWS:
                         self._apply_changes(sym, "bids", payload.get("bids", []))
                     if "asks" in payload:
                         self._apply_changes(sym, "asks", payload.get("asks", []))
-                    if sym and sym in self._local_books:
+                    if sym and sym in self._local_books and not self.loop.is_closed():
                         bids_levels = self._book_to_levels(self._local_books[sym]["bids"], "bids")
                         asks_levels = self._book_to_levels(self._local_books[sym]["asks"], "asks")
                         asyncio.run_coroutine_threadsafe(
@@ -250,7 +252,7 @@ class KucoinWS:
                     bid = best_bid or price
                     ask_size = best_ask_size
                     bid_size = best_bid_size
-                    if sym:
+                    if sym and not self.loop.is_closed():
                         logger.debug(f"KuCoin -> update store: {sym} bid={bid} ask={ask} bid_size={bid_size} ask_size={ask_size}")
                         asyncio.run_coroutine_threadsafe(
                             self.price_store.update(self.exchange, sym, bid, bid_size, ask, ask_size, time.time()),

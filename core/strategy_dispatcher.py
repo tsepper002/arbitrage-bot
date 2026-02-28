@@ -42,6 +42,9 @@ class StrategyDispatcher:
         self.last_slow_scan = 0
         self.slow_scan_interval = 60  # 1 minute
         
+        # Capital-aware strategy selection
+        self._enabled_strategies = set(settings.get_enabled_strategies())
+        
         # Price history for strategies that need time series
         # symbol -> deque of (timestamp, mid_price)
         self._price_history: Dict[str, deque] = {}
@@ -72,9 +75,14 @@ class StrategyDispatcher:
         
         fast_names = ['CROSS_EXCHANGE', 'TRIANGULAR', 'SMART_ORDER', 'VOLATILITY']
         slow_names = [k for k in self.strategy_stats if k not in fast_names]
+        enabled_fast = [n for n in fast_names if n in self._enabled_strategies]
+        enabled_slow = [n for n in slow_names if n in self._enabled_strategies]
+        disabled = [n for n in self.strategy_stats if n not in self._enabled_strategies]
         logger.info(f"✅ StrategyDispatcher initialized with {len(self.strategy_stats)} strategies")
-        logger.info(f"   Fast strategies ({len(fast_names)}): {', '.join(fast_names)}")
-        logger.info(f"   Slow strategies ({len(slow_names)}): {', '.join(slow_names)}")
+        logger.info(f"   Fast strategies ({len(enabled_fast)}): {', '.join(enabled_fast)}")
+        logger.info(f"   Slow strategies ({len(enabled_slow)}): {', '.join(enabled_slow)}")
+        if disabled:
+            logger.info(f"   ⏸️  Disabled (capital too low): {', '.join(disabled)}")
     
     def _get_price_store(self):
         """Get the PriceStore from bot_manager."""
@@ -237,140 +245,140 @@ class StrategyDispatcher:
             # Real ROI = spread_a + spread_b - 4 * fee  (4 legs total)
             # where spread_a = bid_a_ex2/ask_a_ex1 - 1  (buy ex1, sell ex2)
             #       spread_b = bid_b_ex1/ask_b_ex2 - 1  (buy ex2, sell ex1)
-            from core.exchange_config import EXCHANGE_PARAMS
-            tri_pairs = [
-                ('BTC-USDT', 'ETH-USDT'),
-                ('BTC-USDT', 'SOL-USDT'),
-                ('BTC-USDT', 'BNB-USDT'),
-                ('ETH-USDT', 'SOL-USDT'),
-                ('BTC-USDT', 'XRP-USDT'),
-                ('ETH-USDT', 'BNB-USDT'),
-                ('BTC-USDT', 'DOGE-USDT'),
-                ('SOL-USDT', 'XRP-USDT'),
-            ]
-            best_tri_roi = -999
-            best_tri_info = ""
-            for pair_a, pair_b in tri_pairs:
-                exmap_a = snap.get(pair_a, {})
-                exmap_b = snap.get(pair_b, {})
-                common_exs = [ex for ex in exmap_a if ex in exmap_b]
-                if len(common_exs) < 2:
-                    continue
-                for i, ex1 in enumerate(common_exs):
-                    rec_a1, rec_b1 = exmap_a[ex1], exmap_b[ex1]
-                    bid_a1, ask_a1 = rec_a1.get("bid"), rec_a1.get("ask")
-                    bid_b1, ask_b1 = rec_b1.get("bid"), rec_b1.get("ask")
-                    if not (bid_a1 and ask_a1 and bid_b1 and ask_b1):
+            # Capital-aware: only process TRIANGULAR if enabled for current capital
+            if 'TRIANGULAR' in self._enabled_strategies:
+                from core.exchange_config import EXCHANGE_PARAMS
+                tri_pairs = [
+                    ('BTC-USDT', 'ETH-USDT'),
+                    ('BTC-USDT', 'SOL-USDT'),
+                    ('BTC-USDT', 'BNB-USDT'),
+                    ('ETH-USDT', 'SOL-USDT'),
+                    ('BTC-USDT', 'XRP-USDT'),
+                    ('ETH-USDT', 'BNB-USDT'),
+                    ('BTC-USDT', 'DOGE-USDT'),
+                    ('SOL-USDT', 'XRP-USDT'),
+                ]
+                best_tri_roi = -999
+                best_tri_info = ""
+                for pair_a, pair_b in tri_pairs:
+                    exmap_a = snap.get(pair_a, {})
+                    exmap_b = snap.get(pair_b, {})
+                    common_exs = [ex for ex in exmap_a if ex in exmap_b]
+                    if len(common_exs) < 2:
                         continue
-                    if ask_a1 <= 0 or ask_b1 <= 0:
-                        continue
-                    for ex2 in common_exs[i+1:]:
-                        rec_a2, rec_b2 = exmap_a[ex2], exmap_b[ex2]
-                        bid_a2, ask_a2 = rec_a2.get("bid"), rec_a2.get("ask")
-                        bid_b2, ask_b2 = rec_b2.get("bid"), rec_b2.get("ask")
-                        if not (bid_a2 and ask_a2 and bid_b2 and ask_b2):
+                    for i, ex1 in enumerate(common_exs):
+                        rec_a1, rec_b1 = exmap_a[ex1], exmap_b[ex1]
+                        bid_a1, ask_a1 = rec_a1.get("bid"), rec_a1.get("ask")
+                        bid_b1, ask_b1 = rec_b1.get("bid"), rec_b1.get("ask")
+                        if not (bid_a1 and ask_a1 and bid_b1 and ask_b1):
                             continue
-                        if ask_a2 <= 0 or ask_b2 <= 0:
+                        if ask_a1 <= 0 or ask_b1 <= 0:
                             continue
-                        fee1 = EXCHANGE_PARAMS.get(ex1, {}).get("taker", 0.001)
-                        fee2 = EXCHANGE_PARAMS.get(ex2, {}).get("taker", 0.001)
-                        
-                        # Direction 1: buy pair_a on ex1, sell on ex2 + buy pair_b on ex2, sell on ex1
-                        spread_a_fwd = (bid_a2 / ask_a1 - 1) * 100  # pair_a: ex1→ex2
-                        spread_b_rev = (bid_b1 / ask_b2 - 1) * 100  # pair_b: ex2→ex1
-                        fees_pct = (fee1 + fee2) * 2 * 100  # 4 legs total
-                        roi1 = spread_a_fwd + spread_b_rev - fees_pct
-                        
-                        # Direction 2: buy pair_a on ex2, sell on ex1 + buy pair_b on ex1, sell on ex2
-                        spread_a_rev = (bid_a1 / ask_a2 - 1) * 100
-                        spread_b_fwd = (bid_b2 / ask_b1 - 1) * 100
-                        roi2 = spread_a_rev + spread_b_fwd - fees_pct
-                        
-                        best_roi = max(roi1, roi2)
-                        if best_roi > best_tri_roi:
-                            best_tri_roi = best_roi
-                            if roi1 >= roi2:
-                                best_tri_info = f"{pair_a}:{ex1}→{ex2} + {pair_b}:{ex2}→{ex1}"
-                            else:
-                                best_tri_info = f"{pair_a}:{ex2}→{ex1} + {pair_b}:{ex1}→{ex2}"
-                        
-                        if best_roi > settings.MIN_NET_ROI_PCT:
-                            if roi1 >= roi2:
-                                direction = f"{pair_a}:{ex1}→{ex2} + {pair_b}:{ex2}→{ex1}"
-                            else:
-                                direction = f"{pair_a}:{ex2}→{ex1} + {pair_b}:{ex1}→{ex2}"
-                            opportunities.append({
-                                'strategy': 'TRIANGULAR',
-                                'type': 'cross_exchange_triangle',
-                                'route': direction,
-                                'data': {'roi_pct': best_roi}
-                            })
-                            self.strategy_stats['TRIANGULAR']['opportunities'] += 1
-                            self.strategy_stats['TRIANGULAR']['signals'] += 1
-                            # Record signal for both pairs (trade attribution)
-                            self.record_signal('TRIANGULAR', pair_a)
-                            self.record_signal('TRIANGULAR', pair_b)
-                            logger.info(f"   🔺 TRI: {direction} net_roi={best_roi:.3f}%")
-            
-            # Triangular near-misses tracked via best_tri_roi but not counted as signals
-            # (only actual profitable routes increment signal counter)
+                        for ex2 in common_exs[i+1:]:
+                            rec_a2, rec_b2 = exmap_a[ex2], exmap_b[ex2]
+                            bid_a2, ask_a2 = rec_a2.get("bid"), rec_a2.get("ask")
+                            bid_b2, ask_b2 = rec_b2.get("bid"), rec_b2.get("ask")
+                            if not (bid_a2 and ask_a2 and bid_b2 and ask_b2):
+                                continue
+                            if ask_a2 <= 0 or ask_b2 <= 0:
+                                continue
+                            fee1 = EXCHANGE_PARAMS.get(ex1, {}).get("taker", 0.001)
+                            fee2 = EXCHANGE_PARAMS.get(ex2, {}).get("taker", 0.001)
+                            
+                            # Direction 1: buy pair_a on ex1, sell on ex2 + buy pair_b on ex2, sell on ex1
+                            spread_a_fwd = (bid_a2 / ask_a1 - 1) * 100
+                            spread_b_rev = (bid_b1 / ask_b2 - 1) * 100
+                            fees_pct = (fee1 + fee2) * 2 * 100
+                            roi1 = spread_a_fwd + spread_b_rev - fees_pct
+                            
+                            # Direction 2: reverse
+                            spread_a_rev = (bid_a1 / ask_a2 - 1) * 100
+                            spread_b_fwd = (bid_b2 / ask_b1 - 1) * 100
+                            roi2 = spread_a_rev + spread_b_fwd - fees_pct
+                            
+                            best_roi = max(roi1, roi2)
+                            if best_roi > best_tri_roi:
+                                best_tri_roi = best_roi
+                                if roi1 >= roi2:
+                                    best_tri_info = f"{pair_a}:{ex1}→{ex2} + {pair_b}:{ex2}→{ex1}"
+                                else:
+                                    best_tri_info = f"{pair_a}:{ex2}→{ex1} + {pair_b}:{ex1}→{ex2}"
+                            
+                            if best_roi > settings.MIN_NET_ROI_PCT:
+                                if roi1 >= roi2:
+                                    direction = f"{pair_a}:{ex1}→{ex2} + {pair_b}:{ex2}→{ex1}"
+                                else:
+                                    direction = f"{pair_a}:{ex2}→{ex1} + {pair_b}:{ex1}→{ex2}"
+                                opportunities.append({
+                                    'strategy': 'TRIANGULAR',
+                                    'type': 'cross_exchange_triangle',
+                                    'route': direction,
+                                    'data': {'roi_pct': best_roi}
+                                })
+                                self.strategy_stats['TRIANGULAR']['opportunities'] += 1
+                                self.strategy_stats['TRIANGULAR']['signals'] += 1
+                                self.record_signal('TRIANGULAR', pair_a)
+                                self.record_signal('TRIANGULAR', pair_b)
+                                logger.info(f"   🔺 TRI: {direction} net_roi={best_roi:.3f}%")
 
             # --- SMART_ORDER: detect when spread is wide enough for limit orders ---
             # These are market condition SIGNALS (wide spread on single exchange).
             # Count as signals, not opportunities — actual opportunities are only
             # counted when _build_trade_from_signal() finds a profitable cross-exchange pair.
-            from core.exchange_config import EXCHANGE_PARAMS as EP
-            smart_order_signals_this_scan = 0
-            for symbol, exmap in snap.items():
-                for ex, rec in exmap.items():
-                    bid, ask = rec.get("bid"), rec.get("ask")
-                    if bid and ask and ask > 0:
-                        spread_pct = (ask - bid) / ask * 100
-                        # Use exchange-specific taker fee
-                        fee_pct = EP.get(ex, {}).get("taker", 0.001) * 100
-                        # Spread wide enough to profit from limit orders
-                        if spread_pct > fee_pct * 2:
-                            opportunities.append({
-                                'strategy': 'SMART_ORDER',
-                                'type': 'limit_opportunity',
-                                'symbol': symbol,
-                                'exchange': ex,
-                                'data': {'spread_pct': spread_pct, 'ratio': spread_pct / fee_pct if fee_pct > 0 else 1.0}
-                            })
-                            self.record_signal('SMART_ORDER', symbol)
-                            smart_order_signals_this_scan += 1
-                            break  # one per symbol
-            if smart_order_signals_this_scan > 0:
-                self.strategy_stats['SMART_ORDER']['signals'] += 1  # 1 per scan, not per symbol
-                self.strategy_stats['SMART_ORDER']['opportunities'] += 1
+            if 'SMART_ORDER' in self._enabled_strategies:
+                from core.exchange_config import EXCHANGE_PARAMS as EP
+                smart_order_signals_this_scan = 0
+                for symbol, exmap in snap.items():
+                    for ex, rec in exmap.items():
+                        bid, ask = rec.get("bid"), rec.get("ask")
+                        if bid and ask and ask > 0:
+                            spread_pct = (ask - bid) / ask * 100
+                            # Use exchange-specific taker fee
+                            fee_pct = EP.get(ex, {}).get("taker", 0.001) * 100
+                            # Spread wide enough to profit from limit orders
+                            if spread_pct > fee_pct * 2:
+                                opportunities.append({
+                                    'strategy': 'SMART_ORDER',
+                                    'type': 'limit_opportunity',
+                                    'symbol': symbol,
+                                    'exchange': ex,
+                                    'data': {'spread_pct': spread_pct, 'ratio': spread_pct / fee_pct if fee_pct > 0 else 1.0}
+                                })
+                                self.record_signal('SMART_ORDER', symbol)
+                                smart_order_signals_this_scan += 1
+                                break  # one per symbol
+                if smart_order_signals_this_scan > 0:
+                    self.strategy_stats['SMART_ORDER']['signals'] += 1  # 1 per scan, not per symbol
+                    self.strategy_stats['SMART_ORDER']['opportunities'] += 1
 
             # --- VOLATILITY: detect high short-term volatility ---
             # Only signal when volatility exceeds round-trip fees (otherwise noise)
             # Avg round-trip = MEXC(0.05%)+KuCoin(0.10%) = 0.15% minimum
-            avg_round_trip_fee = AVG_ROUND_TRIP_FEE_PCT  # cheapest cross-exchange path in %
-            volatility_signals_this_scan = 0
-            for symbol in list(self._price_history.keys()):
-                prices = self._get_prices_list(symbol)
-                if len(prices) < 10:
-                    continue
-                recent = prices[-10:]
-                mean_p = sum(recent) / len(recent)
-                if mean_p <= 0:
-                    continue
-                variance = sum((p - mean_p) ** 2 for p in recent) / len(recent)
-                volatility = (variance ** 0.5) / mean_p * 100
-                if volatility > avg_round_trip_fee:  # must exceed fees to be exploitable
-                    opportunities.append({
-                        'strategy': 'VOLATILITY',
-                        'type': 'high_volatility',
-                        'symbol': symbol,
-                        'data': {'volatility_pct': volatility}
-                    })
-                    self.record_signal('VOLATILITY', symbol)
-                    volatility_signals_this_scan += 1
-            if volatility_signals_this_scan > 0:
-                self.strategy_stats['VOLATILITY']['signals'] += 1  # 1 per scan, not per symbol
-                self.strategy_stats['VOLATILITY']['opportunities'] += 1
+            if 'VOLATILITY' in self._enabled_strategies:
+                avg_round_trip_fee = AVG_ROUND_TRIP_FEE_PCT  # cheapest cross-exchange path in %
+                volatility_signals_this_scan = 0
+                for symbol in list(self._price_history.keys()):
+                    prices = self._get_prices_list(symbol)
+                    if len(prices) < 10:
+                        continue
+                    recent = prices[-10:]
+                    mean_p = sum(recent) / len(recent)
+                    if mean_p <= 0:
+                        continue
+                    variance = sum((p - mean_p) ** 2 for p in recent) / len(recent)
+                    volatility = (variance ** 0.5) / mean_p * 100
+                    if volatility > avg_round_trip_fee:  # must exceed fees to be exploitable
+                        opportunities.append({
+                            'strategy': 'VOLATILITY',
+                            'type': 'high_volatility',
+                            'symbol': symbol,
+                            'data': {'volatility_pct': volatility}
+                        })
+                        self.record_signal('VOLATILITY', symbol)
+                        volatility_signals_this_scan += 1
+                if volatility_signals_this_scan > 0:
+                    self.strategy_stats['VOLATILITY']['signals'] += 1  # 1 per scan, not per symbol
+                    self.strategy_stats['VOLATILITY']['opportunities'] += 1
 
         except Exception as e:
             logger.error(f"Error in fast strategy scan: {e}")
@@ -401,6 +409,8 @@ class StrategyDispatcher:
             ]
             
             for name, scanner in scanners:
+                if name not in self._enabled_strategies:
+                    continue
                 try:
                     opps = await scanner()
                     if opps:
@@ -426,6 +436,17 @@ class StrategyDispatcher:
     def should_scan_slow(self) -> bool:
         """Check if it's time for slow strategy scan."""
         return (time.time() - self.last_slow_scan) >= self.slow_scan_interval
+    
+    def update_capital(self, capital_per_exchange: float):
+        """Update enabled strategies when capital changes (e.g., after profitable trades)."""
+        new_enabled = set(settings.get_enabled_strategies(capital_per_exchange))
+        newly_enabled = new_enabled - self._enabled_strategies
+        newly_disabled = self._enabled_strategies - new_enabled
+        if newly_enabled:
+            logger.info(f"📈 Capital grew! Enabled strategies: {', '.join(newly_enabled)}")
+        if newly_disabled:
+            logger.info(f"📉 Capital shrank! Disabled strategies: {', '.join(newly_disabled)}")
+        self._enabled_strategies = new_enabled
     
     # --- Individual strategy scanners using PriceStore data ---
     

@@ -525,51 +525,51 @@ class SignalAllocator:
                 sell_usdt = sell_qty * price
                 if sell_usdt < self.MIN_PREPOSITION_USDT:
                     continue
-                    
-                    order = {
-                        'exchange': exchange,
-                        'symbol': symbol,
-                        'side': 'sell',
-                        'qty': sell_qty,
-                        'price': price,
-                        'amount_usdt': round(sell_usdt, 2),
-                        'reason': reason,
-                    }
-                    
-                    if settings.DRY_RUN:
-                        self.balance_manager.update_balance_optimistic(exchange, coin, -sell_qty)
-                        self.balance_manager.update_balance_optimistic(exchange, 'USDT', sell_usdt)
-                        order['status'] = 'simulated'
-                        logger.info(
-                            f"🔄 [DRY] {exchange}: Sell {sell_qty:.6g} {coin} "
-                            f"(${sell_usdt:.2f}) — liquidate"
-                        )
+                
+                order = {
+                    'exchange': exchange,
+                    'symbol': symbol,
+                    'side': 'sell',
+                    'qty': sell_qty,
+                    'price': price,
+                    'amount_usdt': round(sell_usdt, 2),
+                    'reason': reason,
+                }
+                
+                if settings.DRY_RUN:
+                    self.balance_manager.update_balance_optimistic(exchange, coin, -sell_qty)
+                    self.balance_manager.update_balance_optimistic(exchange, 'USDT', sell_usdt)
+                    order['status'] = 'simulated'
+                    logger.info(
+                        f"🔄 [DRY] {exchange}: Sell {sell_qty:.6g} {coin} "
+                        f"(${sell_usdt:.2f}) — {reason}"
+                    )
+                else:
+                    client = (rest_clients or {}).get(exchange)
+                    if client and hasattr(client, 'place_order'):
+                        try:
+                            result = await client.place_order(
+                                symbol=symbol,
+                                side='sell',
+                                order_type='market',
+                                quantity=sell_qty,
+                            )
+                            order['status'] = 'executed'
+                            order['result'] = result
+                            self.balance_manager.update_balance_optimistic(exchange, coin, -sell_qty)
+                            self.balance_manager.update_balance_optimistic(exchange, 'USDT', sell_usdt)
+                            logger.info(
+                                f"🔄 {exchange}: Sold {sell_qty:.6g} {coin} "
+                                f"(${sell_usdt:.2f}) — {reason}"
+                            )
+                        except Exception as e:
+                            order['status'] = 'failed'
+                            order['error'] = str(e)
+                            logger.warning(f"⚠️ {exchange}: Liquidation sell failed: {e}")
                     else:
-                        client = (rest_clients or {}).get(exchange)
-                        if client and hasattr(client, 'place_order'):
-                            try:
-                                result = await client.place_order(
-                                    symbol=symbol,
-                                    side='sell',
-                                    order_type='market',
-                                    quantity=sell_qty,
-                                )
-                                order['status'] = 'executed'
-                                order['result'] = result
-                                self.balance_manager.update_balance_optimistic(exchange, coin, -sell_qty)
-                                self.balance_manager.update_balance_optimistic(exchange, 'USDT', sell_usdt)
-                                logger.info(
-                                    f"🔄 {exchange}: Sold {sell_qty:.6g} {coin} "
-                                    f"(${sell_usdt:.2f}) — liquidate"
-                                )
-                            except Exception as e:
-                                order['status'] = 'failed'
-                                order['error'] = str(e)
-                                logger.warning(f"⚠️ {exchange}: Liquidation sell failed: {e}")
-                        else:
-                            continue
-                    
-                    executed.append(order)
+                        continue
+                
+                executed.append(order)
         
         if executed:
             logger.info(f"📊 Rebalance complete: {len(executed)} orders executed")
