@@ -508,7 +508,9 @@ class SignalAllocator:
                     executed.append(order)
             
             if executed:
-                self._coin_entry_price = self._last_prices.get(best_coin, 0.0)
+                # Use price_store for accurate entry price (not stale cache)
+                entry_price = self.balance_manager._get_any_price(price_store, best_coin) if price_store else 0.0
+                self._coin_entry_price = entry_price if entry_price > 0 else self._last_prices.get(best_coin, 0.0)
                 logger.info(
                     f"🏦 Pre-fund complete: {base_coin} on {len(executed)}/{len(exchanges)} exchanges "
                     f"@ ${self._coin_entry_price:.4f}. Now pure arb trades — NO more buy/sell overhead!"
@@ -516,12 +518,14 @@ class SignalAllocator:
             return executed
         
         # ========== PHASE 2A: EMERGENCY EXIT on price crash ==========
-        # If coin dropped >3% from entry → sell immediately, don't wait 30 min
+        # If coin dropped >3% from entry AND enough time has passed to avoid false triggers
         if self._current_coin and self._coin_entry_price > 0 and price_store:
-            current_price = self.balance_manager._get_any_price(price_store, self._current_coin)
-            if current_price > 0:
-                self._last_prices[self._current_coin] = current_price
-                drop_pct = ((self._coin_entry_price - current_price) / self._coin_entry_price) * 100
+            time_since_entry = now - self._coin_positioned_at
+            if time_since_entry >= self.EMERGENCY_WINDOW:  # Only check after window period
+                current_price = self.balance_manager._get_any_price(price_store, self._current_coin)
+                if current_price > 0:
+                    self._last_prices[self._current_coin] = current_price
+                    drop_pct = ((self._coin_entry_price - current_price) / self._coin_entry_price) * 100
                 if drop_pct >= self.EMERGENCY_DROP_PCT:
                     old_base = self._current_coin.split('-')[0] if '-' in self._current_coin else self._current_coin.replace('USDT', '')
                     logger.warning(
@@ -633,7 +637,9 @@ class SignalAllocator:
                 
                 self._current_coin = best_coin
                 self._coin_positioned_at = now
-                self._coin_entry_price = self._last_prices.get(best_coin, 0.0)
+                # Use price_store for accurate entry price (not stale cache)
+                entry_price = self.balance_manager._get_any_price(price_store, best_coin) if price_store else 0.0
+                self._coin_entry_price = entry_price if entry_price > 0 else self._last_prices.get(best_coin, 0.0)
                 
                 if executed:
                     logger.info(f"🔄 Coin switch complete: {old_base} → {new_base} ({len(executed)} orders) @ ${self._coin_entry_price:.4f}")
