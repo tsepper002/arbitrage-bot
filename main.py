@@ -1011,7 +1011,7 @@ class IntegratedArbitrageBot:
                 
                 # Balance info — total portfolio value in USDT (all coins)
                 if self.balance_manager:
-                    total_bal = self.balance_manager.get_total_balance_usdt(self.engine.price_store if self.engine else None)
+                    total_bal = self.balance_manager.get_total_balance_usdt(self.engine.store if self.engine else None)
                     virt = " (virtual)" if settings.DRY_RUN else ""
                     print(f" 💵 Capital: ${total_bal:.2f} USDT equiv{virt}")
                 
@@ -1159,7 +1159,7 @@ class IntegratedArbitrageBot:
                 
                 if self.performance_tracker and self.balance_manager:
                     # Update balance in performance tracker (total portfolio in USDT)
-                    price_store = self.engine.price_store if self.engine else None
+                    price_store = self.engine.store if self.engine else None
                     total_balance = self.balance_manager.get_total_balance_usdt(price_store)
                     if total_balance <= 0:
                         total_balance = self.balance_manager.get_total_balance('USDT')
@@ -1222,7 +1222,7 @@ class IntegratedArbitrageBot:
             
             while True:
                 try:
-                    price_store = self.engine.price_store if self.engine else None
+                    price_store = self.engine.store if self.engine else None
                     
                     # Check for URGENT rebalance (missed opportunities)
                     urgent = (

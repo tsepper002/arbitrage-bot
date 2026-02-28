@@ -478,32 +478,53 @@ class SignalAllocator:
                     if available_usdt < self.MIN_PREPOSITION_USDT:
                         break
             
-            # SELL phase: sell coins that are no longer "hot"
+            # SELL phase: HFT-style rotation — sell coins that are no longer
+            # "hot" OR whose allocation decreased significantly in favor of
+            # hotter coins. This is how HFT traders manage inventory:
+            # always rotate capital toward the most profitable signals.
             for coin, amount in list(self.balance_manager.balances.get(exchange, {}).items()):
                 if coin == 'USDT' or amount <= 0:
                     continue
                 
                 symbol = f"{coin}-USDT"
-                # If this coin is NOT in current allocation, sell it back to USDT
-                if symbol not in allocation and amount > 0:
-                    price = 0.0
-                    if price_store:
-                        price = self.balance_manager._get_price_from_store(price_store, symbol, exchange)
-                        if price <= 0:
-                            price = self.balance_manager._get_any_price(price_store, symbol)
+                price = 0.0
+                if price_store:
+                    price = self.balance_manager._get_price_from_store(price_store, symbol, exchange)
                     if price <= 0:
-                        continue
-                    
-                    sell_value = amount * price
-                    if sell_value < self.MIN_PREPOSITION_USDT:
-                        continue
-                    
-                    # Keep a tiny amount for potential arb sells
+                        price = self.balance_manager._get_any_price(price_store, symbol)
+                if price <= 0:
+                    continue
+                
+                current_value = amount * price
+                if current_value < self.MIN_PREPOSITION_USDT:
+                    continue
+                
+                # Determine how much of this coin we SHOULD have
+                target_frac = allocation.get(symbol, 0.0)
+                total_portfolio = usdt_balance + sum(
+                    self.balance_manager.get_balance(exchange, c) *
+                    (self.balance_manager.get_symbol_price(price_store, f"{c}-USDT", exchange)
+                     if price_store else 0)
+                    for c, a in self.balance_manager.balances.get(exchange, {}).items()
+                    if c != 'USDT' and a > 0
+                )
+                target_value = max(total_portfolio, 0) * target_frac
+                
+                # Case 1: Coin no longer in allocation at all → sell 80%
+                # Case 2: Coin OVER-allocated (holding 2× target) → trim to target
+                if target_frac == 0:
                     sell_qty = amount * self.LIQUIDATION_PCT
-                    sell_usdt = sell_qty * price
-                    
-                    if sell_usdt < self.MIN_PREPOSITION_USDT:
-                        continue
+                    reason = f'Rotate out {coin} (no signals → sell for hotter coins)'
+                elif current_value > target_value * 2.0 and target_value > 0:
+                    excess = current_value - target_value
+                    sell_qty = excess / price
+                    reason = f'Trim {coin} (have ${current_value:.2f}, target ${target_value:.2f})'
+                else:
+                    continue
+                
+                sell_usdt = sell_qty * price
+                if sell_usdt < self.MIN_PREPOSITION_USDT:
+                    continue
                     
                     order = {
                         'exchange': exchange,
@@ -512,7 +533,7 @@ class SignalAllocator:
                         'qty': sell_qty,
                         'price': price,
                         'amount_usdt': round(sell_usdt, 2),
-                        'reason': f'Liquidate {coin} (no longer allocated)',
+                        'reason': reason,
                     }
                     
                     if settings.DRY_RUN:
