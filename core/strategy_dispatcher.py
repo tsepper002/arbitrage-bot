@@ -19,6 +19,14 @@ import settings
 
 logger = logging.getLogger(__name__)
 
+# Fee-aware strategy thresholds (base tier, no VIP discounts)
+# Cheapest round-trip: MEXC(0.05%) + KuCoin(0.10%) = 0.15%
+AVG_ROUND_TRIP_FEE_PCT = 0.15  # Used by VOLATILITY, GRID, BREAKOUT
+MIN_GRID_DEVIATION = 0.003     # 0.30% — covers fees (0.15%) + min profit (0.15%)
+MIN_BREAKOUT_MOVE = 0.002      # 0.20% — above fee level to filter noise
+MIN_MOMENTUM_STRENGTH = 0.3    # Minimum signal strength to avoid weak/noisy RSI
+DEFAULT_Z_ENTRY = 2.0          # z-score threshold (higher = fewer but stronger signals)
+
 
 class StrategyDispatcher:
     """
@@ -339,7 +347,7 @@ class StrategyDispatcher:
             # --- VOLATILITY: detect high short-term volatility ---
             # Only signal when volatility exceeds round-trip fees (otherwise noise)
             # Avg round-trip = MEXC(0.05%)+KuCoin(0.10%) = 0.15% minimum
-            avg_round_trip_fee = 0.15  # cheapest cross-exchange path in %
+            avg_round_trip_fee = AVG_ROUND_TRIP_FEE_PCT  # cheapest cross-exchange path in %
             volatility_signals_this_scan = 0
             for symbol in list(self._price_history.keys()):
                 prices = self._get_prices_list(symbol)
@@ -435,7 +443,7 @@ class StrategyDispatcher:
             return opportunities
         
         # Minimum deviation must exceed cheapest round-trip fees
-        min_deviation = 0.003  # 0.3% — covers fees (0.15%) + min profit (0.15%)
+        min_deviation = MIN_GRID_DEVIATION  # covers fees + min profit
         symbols = getattr(settings, 'TRADING_SYMBOLS', ['BTC-USDT'])
         
         for symbol in symbols:
@@ -574,7 +582,7 @@ class StrategyDispatcher:
             return opportunities
         
         # Feed ratio into strategy's internal state if possible
-        entry_z = getattr(pairs, 'entry_z', 2.0)  # 2.0 default (was 1.5) — stronger signal for small capital
+        entry_z = getattr(pairs, 'entry_z', DEFAULT_Z_ENTRY)  # stronger signal for small capital
         
         mean_ratio = sum(ratios) / len(ratios)
         std_ratio = (sum((r - mean_ratio) ** 2 for r in ratios) / len(ratios)) ** 0.5
@@ -795,7 +803,7 @@ class StrategyDispatcher:
         else:
             z = 0
         
-        entry_z = getattr(spread_strat, 'entry_z_score', 2.0)  # 2.0 default (was 1.5)
+        entry_z = getattr(spread_strat, 'entry_z_score', DEFAULT_Z_ENTRY)
         if abs(z) > entry_z:
             opportunities.append({
                 'strategy': 'SPREAD_BETTING',
@@ -832,7 +840,7 @@ class StrategyDispatcher:
             try:
                 if hasattr(momentum, 'analyze'):
                     signal = momentum.analyze(symbol, prices)
-                    if signal and getattr(signal, 'strength', 0) >= 0.3:  # min strength filter
+                    if signal and getattr(signal, 'strength', 0) >= MIN_MOMENTUM_STRENGTH:
                         opportunities.append({
                             'strategy': 'MOMENTUM',
                             'type': 'trend',
@@ -863,7 +871,7 @@ class StrategyDispatcher:
         if not breakout:
             return opportunities
         
-        min_move_pct = 0.002  # 0.2% minimum price move to consider a breakout
+        min_move_pct = MIN_BREAKOUT_MOVE  # minimum price move to consider a breakout
         symbols = getattr(settings, 'TRADING_SYMBOLS', ['BTC-USDT'])
         
         for symbol in symbols:
