@@ -337,7 +337,9 @@ class StrategyDispatcher:
                 self.strategy_stats['SMART_ORDER']['opportunities'] += 1
 
             # --- VOLATILITY: detect high short-term volatility ---
-            # Market condition SIGNAL. Counts as 1 opportunity per scan if any symbol volatile.
+            # Only signal when volatility exceeds round-trip fees (otherwise noise)
+            # Avg round-trip = MEXC(0.05%)+KuCoin(0.10%) = 0.15% minimum
+            avg_round_trip_fee = 0.15  # cheapest cross-exchange path in %
             volatility_signals_this_scan = 0
             for symbol in list(self._price_history.keys()):
                 prices = self._get_prices_list(symbol)
@@ -349,7 +351,7 @@ class StrategyDispatcher:
                     continue
                 variance = sum((p - mean_p) ** 2 for p in recent) / len(recent)
                 volatility = (variance ** 0.5) / mean_p * 100
-                if volatility > 0.15:  # > 0.15% volatility in 10 ticks
+                if volatility > avg_round_trip_fee:  # must exceed fees to be exploitable
                     opportunities.append({
                         'strategy': 'VOLATILITY',
                         'type': 'high_volatility',
@@ -420,7 +422,11 @@ class StrategyDispatcher:
     # --- Individual strategy scanners using PriceStore data ---
     
     async def _scan_grid_trading(self) -> List[Dict[str, Any]]:
-        """Grid Trading: check if current price deviates from SMA across all symbols."""
+        """Grid Trading: check if current price deviates from SMA across all symbols.
+        
+        Only signals when deviation exceeds cheapest round-trip fees (0.15%),
+        otherwise the grid rebalance would lose money on fees.
+        """
         self.strategy_stats['GRID_TRADING']['calls'] += 1
         opportunities = []
         
@@ -428,7 +434,8 @@ class StrategyDispatcher:
         if not grid:
             return opportunities
         
-        range_pct = getattr(grid, 'price_range_pct', 0.1)
+        # Minimum deviation must exceed cheapest round-trip fees
+        min_deviation = 0.003  # 0.3% — covers fees (0.15%) + min profit (0.15%)
         symbols = getattr(settings, 'TRADING_SYMBOLS', ['BTC-USDT'])
         
         for symbol in symbols:
@@ -443,7 +450,7 @@ class StrategyDispatcher:
             avg = sum(prices) / len(prices)
             deviation = abs(mid - avg) / avg if avg > 0 else 0
             
-            if deviation > range_pct * 0.1:
+            if deviation > min_deviation:
                 opportunities.append({
                     'strategy': 'GRID_TRADING',
                     'type': 'rebalance',
@@ -456,7 +463,12 @@ class StrategyDispatcher:
         return opportunities
     
     async def _scan_dca(self) -> List[Dict[str, Any]]:
-        """DCA: check if current price is below SMA across all symbols."""
+        """DCA: check if current price is below SMA across all symbols.
+        
+        Only triggers on significant dips (>1% below SMA) because the 
+        cross-exchange execution costs ~0.15% minimum in fees.
+        Deeper dips get higher confidence → lower ROI threshold.
+        """
         self.strategy_stats['DCA']['calls'] += 1
         opportunities = []
         
@@ -474,7 +486,7 @@ class StrategyDispatcher:
             current = prices[-1]
             sma20 = sum(prices[-20:]) / 20
             
-            if current < sma20 * 0.99:  # 1% below SMA
+            if current < sma20 * 0.99:  # 1% below SMA (covers fees + gives statistical edge)
                 dip_pct = ((sma20 - current) / sma20) * 100
                 opportunities.append({
                     'strategy': 'DCA',
@@ -534,7 +546,11 @@ class StrategyDispatcher:
         return opportunities
     
     async def _scan_pairs_trading(self) -> List[Dict[str, Any]]:
-        """Pairs Trading: check z-score of price ratio between two assets."""
+        """Pairs Trading: z-score on price ratio between correlated assets.
+        
+        Uses z-score threshold of 2.0 (stronger than default 1.5) for small capital
+        to reduce false signals. Confidence from z>2.0 provides up to 80% fee reduction.
+        """
         self.strategy_stats['PAIRS_TRADING']['calls'] += 1
         opportunities = []
         
@@ -558,7 +574,7 @@ class StrategyDispatcher:
             return opportunities
         
         # Feed ratio into strategy's internal state if possible
-        entry_z = getattr(pairs, 'entry_z', 1.5)
+        entry_z = getattr(pairs, 'entry_z', 2.0)  # 2.0 default (was 1.5) — stronger signal for small capital
         
         mean_ratio = sum(ratios) / len(ratios)
         std_ratio = (sum((r - mean_ratio) ** 2 for r in ratios) / len(ratios)) ** 0.5
@@ -743,7 +759,12 @@ class StrategyDispatcher:
         return opportunities
     
     async def _scan_spread_betting(self) -> List[Dict[str, Any]]:
-        """Spread Betting: z-score on cross-exchange spread history."""
+        """Spread Betting: z-score on cross-exchange spread history.
+        
+        Uses z-score threshold of 2.0 (stronger than default 1.5) to avoid
+        false signals on small capital. Mean-reversion signals provide confidence
+        for fee-reduced execution.
+        """
         self.strategy_stats['SPREAD_BETTING']['calls'] += 1
         opportunities = []
         
@@ -774,7 +795,7 @@ class StrategyDispatcher:
         else:
             z = 0
         
-        entry_z = getattr(spread_strat, 'entry_z_score', 1.5)
+        entry_z = getattr(spread_strat, 'entry_z_score', 2.0)  # 2.0 default (was 1.5)
         if abs(z) > entry_z:
             opportunities.append({
                 'strategy': 'SPREAD_BETTING',
@@ -788,7 +809,12 @@ class StrategyDispatcher:
         return opportunities
     
     async def _scan_momentum(self) -> List[Dict[str, Any]]:
-        """Momentum: call analyze() on MomentumStrategy with PriceStore data."""
+        """Momentum: RSI-based trend detection.
+        
+        Only signals on extreme RSI (<30 or >70) to ensure statistical edge
+        exceeds trading fees. The RSI extremity maps to confidence (0.4-1.0)
+        which reduces the min_roi threshold for cross-exchange execution.
+        """
         self.strategy_stats['MOMENTUM']['calls'] += 1
         opportunities = []
         
@@ -806,7 +832,7 @@ class StrategyDispatcher:
             try:
                 if hasattr(momentum, 'analyze'):
                     signal = momentum.analyze(symbol, prices)
-                    if signal:
+                    if signal and getattr(signal, 'strength', 0) >= 0.3:  # min strength filter
                         opportunities.append({
                             'strategy': 'MOMENTUM',
                             'type': 'trend',
@@ -825,7 +851,11 @@ class StrategyDispatcher:
         return opportunities
     
     async def _scan_breakout(self) -> List[Dict[str, Any]]:
-        """Breakout: call analyze() on BreakoutStrategy with PriceStore data."""
+        """Breakout: technical breakout detection via support/resistance levels.
+        
+        Only signals when the breakout move is significant (volume_proxy > 0.002 = 0.2%)
+        to filter out noise. Small capital ($14) can't afford false breakout whipsaws.
+        """
         self.strategy_stats['BREAKOUT']['calls'] += 1
         opportunities = []
         
@@ -833,6 +863,7 @@ class StrategyDispatcher:
         if not breakout:
             return opportunities
         
+        min_move_pct = 0.002  # 0.2% minimum price move to consider a breakout
         symbols = getattr(settings, 'TRADING_SYMBOLS', ['BTC-USDT'])
         
         for symbol in symbols:
@@ -843,6 +874,9 @@ class StrategyDispatcher:
             current_price = prices[-1]
             prev_price = prices[-2] if len(prices) >= 2 else 0
             volume_proxy = abs(current_price - prev_price) / prev_price if prev_price > 0 else 0
+            
+            if volume_proxy < min_move_pct:  # skip tiny moves
+                continue
             
             try:
                 if hasattr(breakout, 'analyze'):

@@ -1540,7 +1540,7 @@ class IntegratedArbitrageBot:
         if strategy in ('PAIRS_TRADING', 'SPREAD_BETTING'):
             # z-score > 2.0 = high confidence, > 3.0 = very high
             z = abs(data.get('z_score', 0))
-            return min(z / 4.0, 1.0) if z > 1.5 else 0.0
+            return min(z / 4.0, 1.0) if z > 2.0 else 0.0  # Raised from 1.5 to match scanner
         elif strategy == 'MOMENTUM':
             # RSI < 25 or > 75 = high confidence (extreme overbought/oversold)
             rsi = data.get('rsi', 50)
@@ -1564,8 +1564,12 @@ class IntegratedArbitrageBot:
         elif strategy == 'MARKET_MAKING':
             spread = data.get('spread_pct', 0)
             return min(spread / 1.0, 1.0) if spread > 0.1 else 0.0
-        elif strategy in ('SMART_ORDER', 'VOLATILITY', 'GRID_TRADING'):
+        elif strategy in ('SMART_ORDER', 'VOLATILITY'):
             return 0.3  # Moderate confidence for market condition signals
+        elif strategy == 'GRID_TRADING':
+            # Higher deviation = higher confidence
+            dev = data.get('deviation_pct', 0)
+            return min(dev / 2.0, 1.0) if dev > 0.3 else 0.0  # Only >0.3% deviation
         # Pure spread strategies: no additional statistical edge
         return 0.0
     
