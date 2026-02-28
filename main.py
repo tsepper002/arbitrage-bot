@@ -871,6 +871,12 @@ class IntegratedArbitrageBot:
                 self.tasks.append(analytics_task)
                 logger.info("✅ Professional analytics task started")
             
+            # Inventory rebalance task (signal-based capital distribution)
+            if hasattr(self, 'signal_allocator') and self.signal_allocator:
+                rebalance_task = asyncio.create_task(self._rebalance_loop())
+                self.tasks.append(rebalance_task)
+                logger.info("✅ Signal-based inventory rebalance task started")
+            
             # State persistence task
             if self.state_manager:
                 state_task = asyncio.create_task(self._state_save_loop())
@@ -996,11 +1002,11 @@ class IntegratedArbitrageBot:
                 print(f"{'─'*70}")
                 print(f" 💰 Trades: {total_trades} | Profit: ${total_profit:.4f} | Avg ROI: {avg_roi:.3f}%")
                 
-                # Balance info
+                # Balance info — total portfolio value in USDT (all coins)
                 if self.balance_manager:
-                    total_bal = self.balance_manager.get_total_balance('USDT')
+                    total_bal = self.balance_manager.get_total_balance_usdt(self.engine.price_store if self.engine else None)
                     virt = " (virtual)" if settings.DRY_RUN else ""
-                    print(f" 💵 Capital: ${total_bal:.2f} USDT{virt}")
+                    print(f" 💵 Capital: ${total_bal:.2f} USDT equiv{virt}")
                 
                 # ML module status — comprehensive line
                 ml_parts = []
@@ -1145,8 +1151,11 @@ class IntegratedArbitrageBot:
                 await asyncio.sleep(300)  # Update analytics every 5 minutes
                 
                 if self.performance_tracker and self.balance_manager:
-                    # Update balance in performance tracker
-                    total_balance = self.balance_manager.get_total_balance()
+                    # Update balance in performance tracker (total portfolio in USDT)
+                    price_store = self.engine.price_store if self.engine else None
+                    total_balance = self.balance_manager.get_total_balance_usdt(price_store)
+                    if total_balance <= 0:
+                        total_balance = self.balance_manager.get_total_balance('USDT')
                     if total_balance > 0:
                         self.performance_tracker.update_balance(total_balance)
                         
@@ -1186,7 +1195,60 @@ class IntegratedArbitrageBot:
         except asyncio.CancelledError:
             return
     
-    async def _triangular_scan_loop(self):
+    async def _rebalance_loop(self):
+        """Periodic inventory rebalance — distributes USDT into 'hot' coins.
+        
+        Runs every 5 minutes. Uses signal_allocator to determine which coins 
+        are most frequently involved in profitable opportunities, then 
+        pre-positions capital into those coins across all exchanges.
+        
+        In DRY RUN: updates virtual balances.
+        In LIVE: places real market buy/sell orders.
+        """
+        REBALANCE_INTERVAL = 300  # 5 minutes
+        INITIAL_DELAY = 120  # Wait 2 minutes for signals to accumulate
+        
+        try:
+            await asyncio.sleep(INITIAL_DELAY)
+            logger.info("🔄 Inventory rebalance loop started (runs every 5 min)")
+            
+            while True:
+                try:
+                    price_store = self.engine.price_store if self.engine else None
+                    
+                    # Only rebalance if we have enough signal data
+                    if self.signal_allocator and len(self.signal_allocator._signals) >= 10:
+                        allocation = self.signal_allocator.get_allocation()
+                        if allocation:
+                            logger.info(
+                                f"🔄 Running inventory rebalance — "
+                                f"{len(allocation)} target coins"
+                            )
+                            
+                            orders = await self.signal_allocator.execute_rebalance(
+                                rest_clients=getattr(self, 'rest_clients', None),
+                                price_store=price_store,
+                            )
+                            
+                            if orders:
+                                for order in orders:
+                                    logger.info(
+                                        f"  📦 {order['side'].upper()} {order.get('qty', 0):.6g} "
+                                        f"{order['symbol']} on {order['exchange']} "
+                                        f"(${order['amount_usdt']:.2f}) — {order['reason']}"
+                                    )
+                            else:
+                                logger.debug("Rebalance: no orders needed (inventory balanced)")
+                    else:
+                        logger.debug("Rebalance: waiting for more signal data...")
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Rebalance error: {e}")
+                
+                await asyncio.sleep(REBALANCE_INTERVAL)
+                
+        except asyncio.CancelledError:
+            return
         """Background task for triangular arbitrage scanning."""
         try:
             await asyncio.sleep(5)  # Wait for price data

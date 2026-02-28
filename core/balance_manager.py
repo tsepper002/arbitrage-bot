@@ -284,12 +284,115 @@ class BalanceManager:
             total += exchange_balances.get(currency, 0)
         return total
     
+    def get_total_balance_usdt(self, price_store=None) -> float:
+        """Get total portfolio value across all exchanges in USDT equivalent.
+        
+        Converts ALL coin holdings (BTC, ETH, SOL, etc.) to USDT using
+        current market prices from PriceStore.
+        
+        Args:
+            price_store: PriceStore instance for current prices. If None, counts only USDT.
+            
+        Returns:
+            Total portfolio value in USDT
+        """
+        total = 0.0
+        for exchange, currencies in self.balances.items():
+            total += self._exchange_balance_usdt(exchange, currencies, price_store)
+        return total
+    
+    def _exchange_balance_usdt(self, exchange: str, currencies: Dict[str, float], price_store=None) -> float:
+        """Convert all holdings on one exchange to USDT equivalent."""
+        total = 0.0
+        for coin, amount in currencies.items():
+            if amount <= 0:
+                continue
+            if coin == 'USDT':
+                total += amount
+            elif price_store:
+                # Try to get price from PriceStore: e.g. BTC → BTC-USDT
+                symbol = f"{coin}-USDT"
+                price = self._get_price_from_store(price_store, symbol, exchange)
+                if price > 0:
+                    total += amount * price
+                else:
+                    # Try without exchange-specific price (any exchange)
+                    price = self._get_any_price(price_store, symbol)
+                    if price > 0:
+                        total += amount * price
+        return total
+    
+    def _get_price_from_store(self, price_store, symbol: str, exchange: str) -> float:
+        """Get mid-price for a symbol on a specific exchange from PriceStore."""
+        try:
+            snapshot = price_store.snapshot()
+            key = (symbol, exchange)
+            if key in snapshot:
+                entry = snapshot[key]
+                bid = entry.get('bid', 0) or 0
+                ask = entry.get('ask', 0) or 0
+                if bid > 0 and ask > 0:
+                    return (bid + ask) / 2
+                return bid or ask
+        except Exception:
+            pass
+        return 0.0
+    
+    def _get_any_price(self, price_store, symbol: str) -> float:
+        """Get mid-price for a symbol from any exchange in PriceStore."""
+        try:
+            snapshot = price_store.snapshot()
+            for (sym, _ex), entry in snapshot.items():
+                if sym == symbol:
+                    bid = entry.get('bid', 0) or 0
+                    ask = entry.get('ask', 0) or 0
+                    if bid > 0 and ask > 0:
+                        return (bid + ask) / 2
+                    if bid > 0 or ask > 0:
+                        return bid or ask
+        except Exception:
+            pass
+        return 0.0
+
+    def get_exchange_balance_usdt(self, exchange: str, price_store=None) -> float:
+        """Get total portfolio value for one exchange in USDT equivalent."""
+        currencies = self.balances.get(exchange, {})
+        return self._exchange_balance_usdt(exchange, currencies, price_store)
+    
+    def get_portfolio_breakdown(self, price_store=None) -> Dict[str, Dict]:
+        """Get detailed portfolio breakdown per exchange.
+        
+        Returns:
+            Dict of {exchange: {coins: {coin: {amount, usdt_value}}, total_usdt: float}}
+        """
+        result = {}
+        for exchange, currencies in sorted(self.balances.items()):
+            coins = {}
+            exchange_total = 0.0
+            for coin, amount in sorted(currencies.items()):
+                if amount <= 0:
+                    continue
+                if coin == 'USDT':
+                    usdt_value = amount
+                elif price_store:
+                    symbol = f"{coin}-USDT"
+                    price = self._get_price_from_store(price_store, symbol, exchange)
+                    if price <= 0:
+                        price = self._get_any_price(price_store, symbol)
+                    usdt_value = amount * price if price > 0 else 0.0
+                else:
+                    usdt_value = 0.0
+                coins[coin] = {'amount': amount, 'usdt_value': usdt_value}
+                exchange_total += usdt_value
+            result[exchange] = {'coins': coins, 'total_usdt': exchange_total}
+        return result
+
     def get_excluded_exchanges(self) -> Set[str]:
         """Get set of exchanges currently excluded due to low balance."""
         return self.excluded_exchanges.copy()
     
-    def print_summary(self):
-        """Print balance summary to console."""
+    def print_summary(self, price_store=None):
+        """Print balance summary to console with all coins in USDT equivalent."""
         mode_label = " (VIRTUAL)" if settings.DRY_RUN else ""
         print(f"\n{'='*60}")
         print(f"  Balance Summary{mode_label}")
@@ -298,15 +401,32 @@ class BalanceManager:
         if not self.balances:
             print("  No balance data available")
         else:
-            total_usdt = 0
-            for exchange, currencies in sorted(self.balances.items()):
-                usdt = currencies.get('USDT', 0)
-                total_usdt += usdt
-                status = "❌ EXCLUDED" if exchange in self.excluded_exchanges else "✅"
-                print(f"  {exchange:12s} {status:12s} ${usdt:>10.2f} USDT")
+            breakdown = self.get_portfolio_breakdown(price_store)
+            grand_total = 0.0
             
-            print(f"  {'-'*60}")
-            print(f"  {'Total':12s} {'':12s} ${total_usdt:>10.2f} USDT")
+            for exchange, data in sorted(breakdown.items()):
+                status = "❌ EXCLUDED" if exchange in self.excluded_exchanges else "✅"
+                ex_total = data['total_usdt']
+                grand_total += ex_total
+                
+                # Show main line: exchange total
+                print(f"  {exchange:12s} {status} ${ex_total:>10.2f} USDT equiv")
+                
+                # Show coin breakdown (skip if only USDT)
+                coins = data['coins']
+                non_usdt_coins = {c: v for c, v in coins.items() if c != 'USDT' and v['usdt_value'] > 0.01}
+                if non_usdt_coins:
+                    usdt_amt = coins.get('USDT', {}).get('amount', 0)
+                    parts = []
+                    if usdt_amt > 0.01:
+                        parts.append(f"USDT: ${usdt_amt:.2f}")
+                    for coin, info in sorted(non_usdt_coins.items()):
+                        parts.append(f"{coin}: {info['amount']:.6g} (${info['usdt_value']:.2f})")
+                    if parts:
+                        print(f"  {'':12s}    {' | '.join(parts)}")
+            
+            print(f"  {'-'*58}")
+            print(f"  {'Total':12s}    ${grand_total:>10.2f} USDT equiv")
         
         print(f"{'='*60}\n")
     
