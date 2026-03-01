@@ -319,10 +319,11 @@ class SignalAllocator:
         now = time.time()
         alternatives = []
         
-        # Count signals per symbol
+        # Count CROSS_EXCHANGE signals per symbol (only arb signals matter)
         signal_counts: Dict[str, int] = defaultdict(int)
         for sig in self._signals:
-            signal_counts[sig.symbol] += 1
+            if sig.strategy == self.SCORING_STRATEGY:
+                signal_counts[sig.symbol] += 1
         
         scores = self._compute_scores()
         for symbol, score in scores.items():
@@ -351,8 +352,15 @@ class SignalAllocator:
         alternatives.sort(key=lambda x: x[1], reverse=True)
         return alternatives
 
+    # Only CROSS_EXCHANGE signals count for coin selection (actual arb profit)
+    SCORING_STRATEGY = 'CROSS_EXCHANGE'
+
     def _compute_scores(self) -> Dict[str, float]:
         """Compute weighted signal scores per symbol.
+
+        Only counts CROSS_EXCHANGE signals — these represent actual
+        profitable arbitrage opportunities. Other strategies (SMART_ORDER,
+        VOLATILITY, etc.) generate noise that pollutes coin selection.
 
         Uses exponential decay so recent signals matter more.
         Returns dict of symbol → score.
@@ -361,6 +369,10 @@ class SignalAllocator:
         scores: Dict[str, float] = defaultdict(float)
 
         for sig in self._signals:
+            # Only count CROSS_EXCHANGE signals for coin selection
+            if sig.strategy != self.SCORING_STRATEGY:
+                continue
+
             age = now - sig.timestamp
             # Exponential decay: weight halves every DECAY_HALF_LIFE seconds
             decay = 0.5 ** (age / self.DECAY_HALF_LIFE) if age > 0 else 1.0
@@ -394,10 +406,11 @@ class SignalAllocator:
             self._symbol_scores = {}
             return {}
 
-        # Filter: minimum signal count
+        # Filter: minimum CROSS_EXCHANGE signal count
         signal_counts = defaultdict(int)
         for sig in self._signals:
-            signal_counts[sig.symbol] += 1
+            if sig.strategy == self.SCORING_STRATEGY:
+                signal_counts[sig.symbol] += 1
 
         eligible = {
             sym: score for sym, score in scores.items()
@@ -941,9 +954,10 @@ class SignalAllocator:
             'max_preposition_pct': self.MAX_PREPOSITION_PCT * 100,
         }
 
-    def has_sufficient_signals(self, min_count: int = 5) -> bool:
-        """Check if enough signals have been collected for allocation decisions."""
-        return len(self._signals) >= min_count
+    def has_sufficient_signals(self, min_count: int = 30) -> bool:
+        """Check if enough CROSS_EXCHANGE signals collected for allocation."""
+        cross_count = sum(1 for s in self._signals if s.strategy == self.SCORING_STRATEGY)
+        return cross_count >= min_count
 
     def print_summary(self):
         """Print human-readable allocation summary."""
