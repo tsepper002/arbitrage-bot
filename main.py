@@ -1462,14 +1462,22 @@ class IntegratedArbitrageBot:
                                 # Signal didn't produce a trade but still useful for allocation
                                 if hasattr(self, 'signal_allocator') and self.signal_allocator:
                                     sym = opp.get('symbol', '')
+                                    # Normalize symbol format: BTC/USDT → BTC-USDT (not just BTC)
                                     if '/' in sym:
-                                        sym = sym.split('/')[0]
+                                        sym = sym.replace('/', '-')
                                     if sym:
+                                        # Try multiple paths for roi_pct
+                                        roi = (
+                                            opp.get('roi_pct', 0)
+                                            or opp.get('data', {}).get('roi_pct', 0)
+                                            or opp.get('data', {}).get('expected_profit', 0)
+                                            or opp.get('data', {}).get('spread_pct', 0)
+                                        )
                                         self.signal_allocator.record_signal(
                                             symbol=sym,
                                             strategy=opp['strategy'],
-                                            exchange=opp.get('data', {}).get('exchange', ''),
-                                            roi_pct=opp.get('data', {}).get('roi_pct', 0)
+                                            exchange=opp.get('data', {}).get('exchange', opp.get('exchange', '')),
+                                            roi_pct=float(roi) if roi else 0.0
                                         )
                 
                 await asyncio.sleep(settings.SCAN_INTERVAL_SEC)

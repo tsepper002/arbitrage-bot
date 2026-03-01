@@ -754,6 +754,13 @@ class ArbitrageEngine:
                         
                         # USER-FRIENDLY INFO LOGGING
                         logger.info(f"💰 OPPORTUNITY: {symbol} | Buy {buy_ex} @ {buy_avg:.6f} → Sell {sell_ex} @ {sell_avg:.6f} | ROI: {roi_pct:.3f}% | Net: ${net:.2f}")
+                        # Record EVERY opportunity to signal_allocator for coin selection
+                        # This is the PRIMARY source of signals — don't wait for blocked trades
+                        if self.signal_allocator:
+                            self.signal_allocator.record_signal(
+                                symbol=symbol, strategy='CROSS_EXCHANGE',
+                                exchange=buy_ex, roi_pct=roi_pct
+                            )
                 elif roi_pct > 0:
                     # Log near-miss opportunities occasionally (for debugging)
                     if logger.isEnabledFor(logging.DEBUG):
