@@ -848,9 +848,9 @@ class ArbitrageEngine:
                         continue
                     
                     # Only trade the pre-funded coin (skip other symbols)
-                    if self.signal_allocator and self.signal_allocator._current_coin:
-                        if o.get('symbol') != self.signal_allocator._current_coin:
-                            continue
+                    if (self.signal_allocator and self.signal_allocator._current_coin
+                            and o.get('symbol') != self.signal_allocator._current_coin):
+                        continue
                     
                     # Check risk manager before executing
                     if self.risk_manager:

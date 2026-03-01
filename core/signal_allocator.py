@@ -91,6 +91,7 @@ class SignalAllocator:
 
     # Minimum order size for pre-positioning
     MIN_PREPOSITION_USDT = 1.0  # $1 minimum
+    MIN_EXCHANGES_FOR_ARB = 2  # Need at least 2 exchanges to do cross-exchange arb
 
     # CRITICAL: Long cooldowns prevent fee-churning
     REBALANCE_THRESHOLD_PCT = 0.30  # Buy if holding < 30% of target
@@ -634,7 +635,7 @@ class SignalAllocator:
                 entry_price = self.balance_manager._get_any_price(price_store, best_coin) if price_store else 0.0
                 self._coin_entry_price = entry_price if entry_price > 0 else self._last_prices.get(best_coin, 0.0)
                 # Need at least 2 exchanges funded to do cross-exchange arb
-                if len(executed) >= 2:
+                if len(executed) >= self.MIN_EXCHANGES_FOR_ARB:
                     self._initial_setup_done = True
                     logger.info(
                         f"🏦 Pre-fund complete: {base_coin} on {len(executed)}/{len(exchanges)} exchanges "
