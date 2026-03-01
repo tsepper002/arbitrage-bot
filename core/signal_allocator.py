@@ -960,11 +960,24 @@ class SignalAllocator:
         }
 
     def has_sufficient_signals(self, min_count: int = 0) -> bool:
-        """Check if enough positive-ROI OPPORTUNITY signals collected for allocation."""
+        """Check if ANY SINGLE symbol has enough positive-ROI signals for allocation.
+        
+        Must check per-symbol (not total) because get_allocation() requires
+        MIN_SIGNALS_FOR_ALLOCATION per symbol.
+        """
         if min_count <= 0:
             min_count = self.MIN_SIGNALS_FOR_ALLOCATION
-        profitable_count = sum(1 for s in self._signals if self._is_profitable_signal(s))
-        return profitable_count >= min_count
+        # Count per symbol — must match get_allocation() filtering
+        from collections import defaultdict
+        symbol_counts = defaultdict(int)
+        for s in self._signals:
+            if self._is_profitable_signal(s):
+                symbol_counts[s.symbol] += 1
+        if not symbol_counts:
+            return False
+        best_symbol = max(symbol_counts, key=symbol_counts.get)
+        best_count = symbol_counts[best_symbol]
+        return best_count >= min_count
 
     def print_summary(self):
         """Print human-readable allocation summary."""
