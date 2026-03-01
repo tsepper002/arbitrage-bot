@@ -1466,17 +1466,20 @@ class IntegratedArbitrageBot:
                                     if '/' in sym:
                                         sym = sym.replace('/', '-')
                                     if sym:
-                                        # Try multiple paths for roi_pct
-                                        roi = (
-                                            opp.get('roi_pct', 0)
-                                            or opp.get('data', {}).get('roi_pct', 0)
-                                            or opp.get('data', {}).get('expected_profit', 0)
-                                            or opp.get('data', {}).get('spread_pct', 0)
-                                        )
+                                        # Try multiple paths for roi_pct (use None checks, not falsy)
+                                        data = opp.get('data', {})
+                                        roi = opp.get('roi_pct')
+                                        if roi is None:
+                                            roi = data.get('roi_pct')
+                                        if roi is None:
+                                            roi = data.get('expected_profit')
+                                        if roi is None:
+                                            roi = data.get('spread_pct', 0)
+                                        exch = data.get('exchange') or opp.get('exchange', '')
                                         self.signal_allocator.record_signal(
                                             symbol=sym,
                                             strategy=opp['strategy'],
-                                            exchange=opp.get('data', {}).get('exchange', opp.get('exchange', '')),
+                                            exchange=exch,
                                             roi_pct=float(roi) if roi else 0.0
                                         )
                 
