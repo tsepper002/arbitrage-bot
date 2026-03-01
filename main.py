@@ -376,11 +376,16 @@ class IntegratedArbitrageBot:
             if self.rest_clients:
                 logger.info("🕐 Syncing server time for all exchanges...")
                 sync_tasks = []
+                client_names = []
                 for name, client in self.rest_clients.items():
                     if hasattr(client, 'sync_server_time'):
                         sync_tasks.append(client.sync_server_time())
+                        client_names.append(name)
                 if sync_tasks:
-                    await asyncio.gather(*sync_tasks, return_exceptions=True)
+                    results = await asyncio.gather(*sync_tasks, return_exceptions=True)
+                    for name, result in zip(client_names, results):
+                        if isinstance(result, Exception):
+                            logger.warning(f"⚠️ {name} time sync failed: {result}")
                 logger.info("✅ Server time sync complete")
             
         except Exception as e:

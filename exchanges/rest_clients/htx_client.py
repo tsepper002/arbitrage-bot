@@ -38,11 +38,12 @@ class HTXRESTClient(BaseRESTClient):
             session = await self._get_session()
             for base_url in self.BASE_URLS:
                 try:
+                    local_before = time.time() * 1000
                     async with session.get(f"{base_url}/v1/common/timestamp") as resp:
                         data = await resp.json()
                         if data.get("status") == "ok":
                             server_time_ms = int(data.get("data", 0))
-                            self._time_offset_sec = int((server_time_ms - time.time() * 1000) / 1000)
+                            self._time_offset_sec = int((server_time_ms - local_before) / 1000)
                             logger.info(f"HTX time sync: offset={self._time_offset_sec}s")
                             return
                 except Exception:
