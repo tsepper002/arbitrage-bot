@@ -7,7 +7,6 @@ Note: MEXC has 0% maker fees - prioritize limit orders!
 import time
 import hmac
 import hashlib
-import urllib.parse
 import socket
 from typing import Dict, Any, Optional, List
 import aiohttp
@@ -61,24 +60,14 @@ class MEXCRESTClient(BaseRESTClient):
         if self._session and not self._session.closed:
             await self._session.close()
     
-    def _generate_signature(self, params: Dict[str, Any]) -> str:
-        """Generate HMAC SHA256 signature for MEXC API."""
-        # Sort parameters and create query string
-        sorted_params = sorted(params.items())
-        param_str = "&".join([f"{k}={v}" for k, v in sorted_params])
-        
-        signature = hmac.new(
-            self.api_secret.encode('utf-8'),
-            param_str.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
-        
-        return signature
-    
     def _get_headers(self) -> Dict[str, str]:
-        """Get common headers for API requests."""
+        """Get common headers for API requests.
+        
+        NOTE: No Content-Type header — MEXC expects query-string params,
+        not JSON body. Adding Content-Type: application/json can cause
+        signature validation to fail.
+        """
         return {
-            "Content-Type": "application/json",
             "X-MEXC-APIKEY": self.api_key
         }
     
@@ -87,17 +76,20 @@ class MEXCRESTClient(BaseRESTClient):
         return symbol.replace("-", "")
     
     def _build_signed_qs(self, params: Dict[str, str]) -> str:
-        """Build sorted query string with appended signature.
+        """Build sorted query string with appended HMAC-SHA256 signature.
         
-        MEXC validates by re-computing HMAC on the exact URL query string.
-        aiohttp's params= uses insertion order, which may differ from sorted
-        order used by _generate_signature(). Building the QS manually
-        ensures the signed string matches what the server sees.
+        MEXC validates by re-computing HMAC on the exact query string.
+        We build ONE string and sign that SAME string — guarantees match.
+        Same approach as Binance (MEXC is a Binance API clone).
         """
         sorted_params = sorted(params.items())
-        qs = "&".join(f"{k}={urllib.parse.quote_plus(str(v))}" for k, v in sorted_params)
-        sig = self._generate_signature(params)
-        return f"{qs}&signature={sig}"
+        qs = "&".join(f"{k}={v}" for k, v in sorted_params)
+        signature = hmac.new(
+            self.api_secret.encode('utf-8'),
+            qs.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        return f"{qs}&signature={signature}"
 
     async def place_order(
         self,

@@ -99,10 +99,16 @@ class BinanceRESTClient(BaseRESTClient):
             "symbol": self.normalize_symbol(symbol),
             "side": side.upper(),
             "type": "MARKET" if order_type == "market" else "LIMIT",
-            "quantity": f"{quantity:.8f}",
             "timestamp": self._synced_ts(),
             "recvWindow": 5000
         }
+
+        if order_type == "market" and side.upper() == "BUY" and price:
+            # Binance market buy: use quoteOrderQty (USDT amount to spend)
+            usdt_amount = round(quantity * price, 2)
+            params["quoteOrderQty"] = f"{usdt_amount:.2f}"
+        else:
+            params["quantity"] = f"{quantity:.8f}"
 
         if order_type == "limit" and price:
             params["price"] = f"{price:.8f}"

@@ -233,10 +233,12 @@ class OrderExecutor:
     FILL_TIMEOUT_SEC = 10.0
     # Poll interval for checking order status
     FILL_POLL_INTERVAL = 0.5
-    # Maximum allowed slippage vs expected price
-    MAX_SLIPPAGE_PCT = 1.0  # 1% max deviation from expected fill price
+    # Maximum allowed slippage vs expected price (per leg)
+    MAX_SLIPPAGE_PCT = 0.3  # 0.3% max deviation — tighter to protect thin arb spreads
     # Minimum order size in USDT to avoid exchange rejections
-    MIN_ORDER_USDT = 1.0
+    MIN_ORDER_USDT = 5.0  # All 5 exchanges require ≥$5 notional
+    # Minimum expected net profit to execute a LIVE trade (protects against slippage eating spread)
+    MIN_LIVE_NET_PROFIT = 0.02  # $0.02 minimum expected profit
     # Minimum ratio of adjusted qty vs requested qty to proceed
     QTY_ADJUST_THRESHOLD = 0.95  # Proceed if ≥95% of requested qty available
 
@@ -245,6 +247,7 @@ class OrderExecutor:
         Execute live arbitrage with PARALLEL order placement and fill verification.
         
         Strategy:
+        0. Verify expected profit is worth the risk (protects against slippage)
         1. Check balances and auto-adjust qty to available
         2. Place buy and sell orders SIMULTANEOUSLY
         3. VERIFY both orders filled (poll order status)
@@ -258,14 +261,25 @@ class OrderExecutor:
         qty = opp['qty']
         buy_price = opp.get('buy_avg', opp.get('buy_price'))
         sell_price = opp.get('sell_avg', opp.get('sell_price'))
+        expected_net = opp.get('net', 0)
+        expected_roi = opp.get('roi_pct', 0)
         
         base_currency = symbol.split('-')[0]
         quote_currency = symbol.split('-')[1] if '-' in symbol else 'USDT'
         
+        # Step 0: PROFIT GATE — refuse trades that are too thin for live execution
+        # Live has slippage, delays, and fill uncertainty. Need sufficient margin.
+        if expected_net < self.MIN_LIVE_NET_PROFIT:
+            reason = (f"Expected profit ${expected_net:.4f} < ${self.MIN_LIVE_NET_PROFIT} minimum "
+                      f"(ROI={expected_roi:.3f}%) — too thin for live execution")
+            logger.debug(f"⛔ {symbol}: {reason}")
+            return {'status': 'blocked', 'reason': reason}
+        
         logger.info(
             f"🔴 LIVE EXECUTION: {symbol} | "
             f"Buy {qty} @ ${buy_price:.4f} on {buy_ex} | "
-            f"Sell {qty} @ ${sell_price:.4f} on {sell_ex}"
+            f"Sell {qty} @ ${sell_price:.4f} on {sell_ex} | "
+            f"Expected: ${expected_net:.4f} ({expected_roi:.3f}%)"
         )
         
         try:

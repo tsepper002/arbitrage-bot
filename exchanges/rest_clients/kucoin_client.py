@@ -4,6 +4,7 @@ KuCoin REST API client for authenticated operations.
 Implements order placement, cancellation, balance queries, and withdrawals.
 """
 import time
+import math
 import hmac
 import hashlib
 import base64
@@ -127,7 +128,12 @@ class KuCoinRESTClient(BaseRESTClient):
                 if not price or price <= 0:
                     raise ValueError(f"Market buy requires valid price, got: {price}")
                 funds = quantity * price
-                order_data["funds"] = str(round(funds, 2))
+                # KuCoin requires funds rounded to quoteIncrement (0.0001 for most USDT pairs)
+                # Floor to 4 decimal places to avoid "Funds increment invalid"
+                funds = math.floor(funds * 10000) / 10000
+                if funds < 0.1:
+                    raise ValueError(f"Market buy funds ${funds} below KuCoin minimum $0.10")
+                order_data["funds"] = f"{funds:.4f}"
             else:
                 order_data["size"] = str(quantity)
         else:
