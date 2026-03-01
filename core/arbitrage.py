@@ -742,6 +742,14 @@ class ArbitrageEngine:
                     "roi_pct": roi_pct,
                 }
 
+                # Record EVERY positive-ROI finding to signal allocator BEFORE dedup
+                # This is the PRIMARY source for coin selection — count ALL, not just deduped
+                if roi_pct > 0 and self.signal_allocator:
+                    self.signal_allocator.record_signal(
+                        symbol=symbol, strategy='CROSS_EXCHANGE',
+                        exchange=buy_ex, roi_pct=roi_pct
+                    )
+
                 if net > 0 and roi_pct >= (regime_min_roi - imbalance_adj):
                     # dedupe and persist
                     key = f"{symbol}:{buy_ex}->{sell_ex}:{round(buy_avg,6)}:{round(sell_avg,6)}"
@@ -754,17 +762,6 @@ class ArbitrageEngine:
                         
                         # USER-FRIENDLY INFO LOGGING
                         logger.info(f"💰 OPPORTUNITY: {symbol} | Buy {buy_ex} @ {buy_avg:.6f} → Sell {sell_ex} @ {sell_avg:.6f} | ROI: {roi_pct:.3f}% | Net: ${net:.2f}")
-                        # Record EVERY opportunity to signal_allocator for coin selection
-                        # This is the PRIMARY source of signals — don't wait for blocked trades
-                        if self.signal_allocator:
-                            self.signal_allocator.record_signal(
-                                symbol=symbol, strategy='CROSS_EXCHANGE',
-                                exchange=buy_ex, roi_pct=roi_pct
-                            )
-                elif roi_pct > 0:
-                    # Log near-miss opportunities occasionally (for debugging)
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Near-miss: {symbol} {buy_ex}->{sell_ex} ROI={roi_pct:.3f}% (need {self.min_net_pct}%)")
         
         # Sort by net profit, with MEXC-first tiebreaker (lower fees = more profit)
         def _sort_key(x):
@@ -845,6 +842,11 @@ class ArbitrageEngine:
                         self.strategy_dispatcher.record_engine_near_misses(nm)
                         self._near_miss_count = 0  # Reset after feeding
                 for o in opps:
+                    # Skip trade execution if coins not yet positioned
+                    # (signals are already recorded above in scan_once)
+                    if self.signal_allocator and not self.signal_allocator._initial_setup_done:
+                        continue
+                    
                     # Check risk manager before executing
                     if self.risk_manager:
                         can_trade, reason = self.risk_manager.check_can_trade(o)

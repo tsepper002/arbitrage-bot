@@ -81,7 +81,7 @@ class SignalAllocator:
     MAX_HISTORY = 5000
 
     # Minimum signals before a symbol gets allocation
-    MIN_SIGNALS_FOR_ALLOCATION = 30  # Require 30+ OPPORTUNITY signals before buying a coin
+    MIN_SIGNALS_FOR_ALLOCATION = 15  # Require 15+ positive-ROI signals before buying a coin
 
     # Pre-fund: use 40% of USDT for ONE coin on each exchange
     MAX_PREPOSITION_PCT = 0.40

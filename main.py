@@ -1258,7 +1258,7 @@ class IntegratedArbitrageBot:
                     # Normal rebalance if we have enough signals, OR urgent
                     has_signals = (
                         self.signal_allocator 
-                        and self.signal_allocator.has_sufficient_signals(30)
+                        and self.signal_allocator.has_sufficient_signals(15)
                     )
                     
                     if has_signals or urgent:
@@ -1299,7 +1299,7 @@ class IntegratedArbitrageBot:
                             best_count = symbol_counts[best_sym]
                             logger.info(
                                 f"🔍 Searching for first coin... "
-                                f"Best: {best_sym} with {best_count}/30 positive-ROI signals | "
+                                f"Best: {best_sym} with {best_count}/15 positive-ROI signals | "
                                 f"Total symbols tracked: {len(symbol_counts)}"
                             )
                         else:
