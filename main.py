@@ -1417,8 +1417,8 @@ class IntegratedArbitrageBot:
                             if trade_info:
                                 # FILTER: Only trade the pre-funded coin
                                 if (hasattr(self, 'signal_allocator') and self.signal_allocator
-                                        and self.signal_allocator._current_coin
-                                        and trade_info['symbol'] != self.signal_allocator._current_coin):
+                                        and self.signal_allocator.get_current_coin()
+                                        and trade_info['symbol'] != self.signal_allocator.get_current_coin()):
                                     continue
                                 
                                 # GATE: Skip if coins not yet positioned
@@ -1557,9 +1557,10 @@ class IntegratedArbitrageBot:
         symbol = opp.get('symbol', 'BTC-USDT')
         data = opp.get('data', {})
         
-        # For pair strategies, use the first symbol; normalize to SYMBOL-USDT format
+        # Normalize symbol to SYMBOL-USDT format
         if '/' in symbol:
-            symbol = symbol.replace('/', '-')
+            parts = symbol.split('/')
+            symbol = f"{parts[0]}-{parts[1]}" if len(parts) == 2 else f"{parts[0]}-USDT"
         # If just a base currency like "BTC", add "-USDT"
         if '-' not in symbol and 'USDT' not in symbol:
             symbol = f"{symbol}-USDT"

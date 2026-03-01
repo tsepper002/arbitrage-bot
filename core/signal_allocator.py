@@ -268,6 +268,10 @@ class SignalAllocator:
         """Check if initial coin positioning is complete and trades can execute."""
         return self._initial_setup_done
 
+    def get_current_coin(self) -> Optional[str]:
+        """Return the currently pre-funded coin symbol (e.g. 'NEAR-USDT') or None."""
+        return self._current_coin
+
     def get_max_preposition_coins(self) -> int:
         """Calculate how many different coins to pre-position based on capital.
         

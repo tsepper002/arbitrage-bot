@@ -51,6 +51,9 @@ class OrderExecutor:
     def can_trade(self, symbol: str) -> Tuple[bool, Optional[str]]:
         """
         Check if trading is allowed based on rate limits, cooldowns, and blocked status.
+        
+        Returns:
+            (can_trade, reason) tuple — True/None if allowed, False/reason if blocked.
         """
         current_time = time.time()
         current_minute = int(current_time / 60)
@@ -70,7 +73,7 @@ class OrderExecutor:
         # Check blocked cooldown (prevents spamming failed trades)
         last_blocked = self._blocked_cooldown.get(symbol, 0)
         if current_time - last_blocked < self.BLOCKED_COOLDOWN_SEC:
-            return False, f"Blocked cooldown: {self.BLOCKED_COOLDOWN_SEC - (current_time - last_blocked):.0f}s"
+            return False, f"Blocked cooldown: {max(0, self.BLOCKED_COOLDOWN_SEC - (current_time - last_blocked)):.0f}s"
         
         return True, None
     
