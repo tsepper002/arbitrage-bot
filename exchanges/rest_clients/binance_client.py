@@ -103,7 +103,9 @@ class BinanceRESTClient(BaseRESTClient):
             "recvWindow": 5000
         }
 
-        if order_type == "market" and side.upper() == "BUY" and price:
+        if order_type == "market" and side.upper() == "BUY":
+            if not price or price <= 0:
+                raise ValueError(f"Binance market buy requires valid price, got: {price}")
             # Binance market buy: use quoteOrderQty (USDT amount to spend)
             usdt_amount = round(quantity * price, 2)
             params["quoteOrderQty"] = f"{usdt_amount:.2f}"

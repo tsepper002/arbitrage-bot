@@ -261,14 +261,16 @@ class OrderExecutor:
         qty = opp['qty']
         buy_price = opp.get('buy_avg', opp.get('buy_price'))
         sell_price = opp.get('sell_avg', opp.get('sell_price'))
-        expected_net = opp.get('net', 0)
-        expected_roi = opp.get('roi_pct', 0)
+        expected_net = opp.get('net')
+        expected_roi = opp.get('roi_pct')
         
         base_currency = symbol.split('-')[0]
         quote_currency = symbol.split('-')[1] if '-' in symbol else 'USDT'
         
         # Step 0: PROFIT GATE — refuse trades that are too thin for live execution
         # Live has slippage, delays, and fill uncertainty. Need sufficient margin.
+        if expected_net is None or expected_roi is None:
+            return {'status': 'blocked', 'reason': 'Missing net/roi_pct in opportunity — cannot verify profitability'}
         if expected_net < self.MIN_LIVE_NET_PROFIT:
             reason = (f"Expected profit ${expected_net:.4f} < ${self.MIN_LIVE_NET_PROFIT} minimum "
                       f"(ROI={expected_roi:.3f}%) — too thin for live execution")

@@ -670,33 +670,33 @@ class SignalAllocator:
                 if current_price > 0:
                     self._last_prices[self._current_coin] = current_price
                     drop_pct = ((self._coin_entry_price - current_price) / self._coin_entry_price) * 100
-                if drop_pct >= self.EMERGENCY_DROP_PCT:
-                    old_base = self._current_coin.split('-')[0] if '-' in self._current_coin else self._current_coin.replace('USDT', '')
-                    logger.warning(
-                        f"🚨 EMERGENCY EXIT: {old_base} dropped {drop_pct:.1f}% "
-                        f"(${self._coin_entry_price:.4f} → ${current_price:.4f}). Selling all!"
-                    )
-                    for exchange in exchanges:
-                        amount = self.balance_manager.get_balance(exchange, old_base)
-                        if amount <= 0:
-                            continue
-                        sell_usdt = amount * current_price
-                        if sell_usdt < self.MIN_PREPOSITION_USDT:
-                            continue
-                        order = await self._execute_sell_order(
-                            exchange, self._current_coin, old_base, amount,
-                            sell_usdt, current_price, f'EMERGENCY exit {old_base}', rest_clients
+                    if drop_pct >= self.EMERGENCY_DROP_PCT:
+                        old_base = self._current_coin.split('-')[0] if '-' in self._current_coin else self._current_coin.replace('USDT', '')
+                        logger.warning(
+                            f"🚨 EMERGENCY EXIT: {old_base} dropped {drop_pct:.1f}% "
+                            f"(${self._coin_entry_price:.4f} → ${current_price:.4f}). Selling all!"
                         )
-                        if order:
-                            executed.append(order)
-                    
-                    # Reset: pick new coin next cycle
-                    self._current_coin = None
-                    self._initial_setup_done = False
-                    self._coin_entry_price = 0.0
-                    if executed:
-                        logger.warning(f"🚨 Emergency exit complete: sold {old_base} on {len(executed)} exchanges. Will pick new coin next cycle.")
-                    return executed
+                        for exchange in exchanges:
+                            amount = self.balance_manager.get_balance(exchange, old_base)
+                            if amount <= 0:
+                                continue
+                            sell_usdt = amount * current_price
+                            if sell_usdt < self.MIN_PREPOSITION_USDT:
+                                continue
+                            order = await self._execute_sell_order(
+                                exchange, self._current_coin, old_base, amount,
+                                sell_usdt, current_price, f'EMERGENCY exit {old_base}', rest_clients
+                            )
+                            if order:
+                                executed.append(order)
+                        
+                        # Reset: pick new coin next cycle
+                        self._current_coin = None
+                        self._initial_setup_done = False
+                        self._coin_entry_price = 0.0
+                        if executed:
+                            logger.warning(f"🚨 Emergency exit complete: sold {old_base} on {len(executed)} exchanges. Will pick new coin next cycle.")
+                        return executed
         
         # ========== PHASE 2B: SMART COIN SWITCH ==========
         # Switch conditions (ALL must be met):
