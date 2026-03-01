@@ -586,7 +586,6 @@ class SignalAllocator:
         if not self._initial_setup_done:
             self._current_coin = best_coin
             self._coin_positioned_at = now
-            self._initial_setup_done = True
             
             base_coin = best_coin.split('-')[0] if '-' in best_coin else best_coin.replace('USDT', '')
             logger.info(
@@ -634,10 +633,20 @@ class SignalAllocator:
                 # Use price_store for accurate entry price (not stale cache)
                 entry_price = self.balance_manager._get_any_price(price_store, best_coin) if price_store else 0.0
                 self._coin_entry_price = entry_price if entry_price > 0 else self._last_prices.get(best_coin, 0.0)
-                logger.info(
-                    f"🏦 Pre-fund complete: {base_coin} on {len(executed)}/{len(exchanges)} exchanges "
-                    f"@ ${self._coin_entry_price:.4f}. Now pure arb trades — NO more buy/sell overhead!"
-                )
+                # Need at least 2 exchanges funded to do cross-exchange arb
+                if len(executed) >= 2:
+                    self._initial_setup_done = True
+                    logger.info(
+                        f"🏦 Pre-fund complete: {base_coin} on {len(executed)}/{len(exchanges)} exchanges "
+                        f"@ ${self._coin_entry_price:.4f}. Now pure arb trades — NO more buy/sell overhead!"
+                    )
+                else:
+                    logger.warning(
+                        f"⚠️ Pre-fund partial: {base_coin} on {len(executed)}/{len(exchanges)} exchanges. "
+                        f"Need 2+ exchanges for arb. Will retry next cycle."
+                    )
+            else:
+                logger.warning("⚠️ Pre-fund failed on ALL exchanges. Will retry next cycle.")
             return executed
         
         # ========== PHASE 2A: EMERGENCY EXIT on price crash ==========

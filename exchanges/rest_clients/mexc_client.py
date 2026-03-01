@@ -106,13 +106,17 @@ class MEXCRESTClient(BaseRESTClient):
             "symbol": self.normalize_symbol(symbol),
             "side": side.upper(),  # BUY or SELL
             "type": "MARKET" if order_type == "market" else "LIMIT",
-            "quantity": quantity,
-            "timestamp": self._synced_ts()
+            "quantity": str(quantity),
+            "timestamp": str(self._synced_ts())
         }
         
         if order_type == "limit" and price:
-            params["price"] = price
+            params["price"] = str(price)
             params["timeInForce"] = time_in_force
+        elif order_type == "market" and side.upper() == "BUY" and price:
+            # MEXC market buy can use quoteOrderQty (USDT amount) instead of quantity
+            params["quoteOrderQty"] = str(round(float(params["quantity"]) * price, 2))
+            del params["quantity"]
         
         # Add signature
         params["signature"] = self._generate_signature(params)
@@ -139,8 +143,8 @@ class MEXCRESTClient(BaseRESTClient):
         
         params = {
             "symbol": self.normalize_symbol(symbol),
-            "orderId": order_id,
-            "timestamp": self._synced_ts()
+            "orderId": str(order_id),
+            "timestamp": str(self._synced_ts())
         }
         
         params["signature"] = self._generate_signature(params)
@@ -164,8 +168,8 @@ class MEXCRESTClient(BaseRESTClient):
         
         params = {
             "symbol": self.normalize_symbol(symbol),
-            "orderId": order_id,
-            "timestamp": self._synced_ts()
+            "orderId": str(order_id),
+            "timestamp": str(self._synced_ts())
         }
         
         params["signature"] = self._generate_signature(params)
@@ -185,7 +189,7 @@ class MEXCRESTClient(BaseRESTClient):
         url = f"{self.BASE_URL}{path}"
         
         params = {
-            "timestamp": self._synced_ts()
+            "timestamp": str(self._synced_ts())
         }
         
         params["signature"] = self._generate_signature(params)
@@ -223,9 +227,9 @@ class MEXCRESTClient(BaseRESTClient):
         params = {
             "coin": currency,
             "address": address,
-            "amount": amount,
+            "amount": str(amount),
             "network": network,
-            "timestamp": self._synced_ts()
+            "timestamp": str(self._synced_ts())
         }
         
         if memo:
@@ -258,7 +262,7 @@ class MEXCRESTClient(BaseRESTClient):
             
             params = {
                 "coin": currency,
-                "timestamp": self._synced_ts()
+                "timestamp": str(self._synced_ts())
             }
             
             params["signature"] = self._generate_signature(params)

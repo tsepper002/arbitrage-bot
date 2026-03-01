@@ -111,6 +111,12 @@ class BybitRESTClient(BaseRESTClient):
             "qty": str(quantity),
         }
         
+        if order_type == "market" and side.lower() == "buy" and price:
+            # For market buy, send USDT amount (quoteCoin) to avoid minimum notional issues
+            usdt_amount = round(quantity * price, 2)
+            body["qty"] = str(usdt_amount)
+            body["marketUnit"] = "quoteCoin"
+        
         if order_type == "limit" and price:
             body["price"] = str(price)
             body["timeInForce"] = time_in_force
