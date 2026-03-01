@@ -844,7 +844,7 @@ class ArbitrageEngine:
                 for o in opps:
                     # Skip trade execution if coins not yet positioned
                     # (signals are already recorded above in scan_once)
-                    if self.signal_allocator and not self.signal_allocator._initial_setup_done:
+                    if self.signal_allocator and not self.signal_allocator.is_ready_to_trade():
                         continue
                     
                     # Check risk manager before executing

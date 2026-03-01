@@ -260,6 +260,10 @@ class SignalAllocator:
             return True
         return False
 
+    def is_ready_to_trade(self) -> bool:
+        """Check if initial coin positioning is complete and trades can execute."""
+        return self._initial_setup_done
+
     def get_max_preposition_coins(self) -> int:
         """Calculate how many different coins to pre-position based on capital.
         
