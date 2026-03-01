@@ -1273,9 +1273,9 @@ class IntegratedArbitrageBot:
                                 logger.debug("Rebalance: no orders needed (inventory balanced)")
                     elif not first_coin_found:
                         # Still searching for first coin — log progress
+                        # _signals is a flat List[SignalRecord], not a dict
                         total_signals = sum(
-                            len([s for s in sigs if s.roi_pct > 0])
-                            for sigs in self.signal_allocator._signals.values()
+                            1 for s in self.signal_allocator._signals if s.roi_pct > 0
                         ) if self.signal_allocator else 0
                         logger.info(f"🔍 Searching for first coin... {total_signals} positive-ROI signals so far (need 30+ for one coin)")
                     
