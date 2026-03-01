@@ -372,6 +372,17 @@ class IntegratedArbitrageBot:
             
             logger.info(f"📊 Total REST clients: {len(self.rest_clients)}/5")
             
+            # Sync server time for ALL clients (prevents "Timestamp outside recvWindow" errors)
+            if self.rest_clients:
+                logger.info("🕐 Syncing server time for all exchanges...")
+                sync_tasks = []
+                for name, client in self.rest_clients.items():
+                    if hasattr(client, 'sync_server_time'):
+                        sync_tasks.append(client.sync_server_time())
+                if sync_tasks:
+                    await asyncio.gather(*sync_tasks, return_exceptions=True)
+                logger.info("✅ Server time sync complete")
+            
         except Exception as e:
             logger.error(f"❌ Error initializing REST clients: {e}")
             raise

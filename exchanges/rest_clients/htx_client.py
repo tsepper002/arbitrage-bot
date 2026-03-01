@@ -30,6 +30,25 @@ class HTXRESTClient(BaseRESTClient):
         self._account_id: Optional[str] = None
         self._active_base_url: str = self.BASE_URLS[0]
         self._active_host: str = "api.htx.com"
+        self._time_offset_sec: int = 0  # Server time offset (seconds)
+
+    async def sync_server_time(self):
+        """Sync local clock with HTX server time."""
+        try:
+            session = await self._get_session()
+            for base_url in self.BASE_URLS:
+                try:
+                    async with session.get(f"{base_url}/v1/common/timestamp") as resp:
+                        data = await resp.json()
+                        if data.get("status") == "ok":
+                            server_time_ms = int(data.get("data", 0))
+                            self._time_offset_sec = int((server_time_ms - time.time() * 1000) / 1000)
+                            logger.info(f"HTX time sync: offset={self._time_offset_sec}s")
+                            return
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning(f"HTX time sync failed: {e}")
     
     @property
     def BASE_URL(self) -> str:
@@ -75,7 +94,7 @@ class HTXRESTClient(BaseRESTClient):
             "AccessKeyId": self.api_key,
             "SignatureMethod": "HmacSHA256",
             "SignatureVersion": "2",
-            "Timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+            "Timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() + self._time_offset_sec))
         }
     
     async def _get_account_id(self) -> str:

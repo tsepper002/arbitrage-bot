@@ -25,6 +25,24 @@ class BybitRESTClient(BaseRESTClient):
         super().__init__(api_key, api_secret, "Bybit")
         self.recv_window = 5000  # 5 seconds
         self._session: Optional[aiohttp.ClientSession] = None
+        self._time_offset_ms: int = 0  # Server time offset (ms)
+
+    def _synced_ts(self) -> str:
+        """Get server-synced timestamp in milliseconds."""
+        return str(int(time.time() * 1000) + self._time_offset_ms)
+
+    async def sync_server_time(self):
+        """Sync local clock with Bybit server time."""
+        try:
+            session = await self._get_session()
+            async with session.get(f"{self.BASE_URL}/v5/market/time") as resp:
+                data = await resp.json()
+                server_time = int(data.get("result", {}).get("timeNano", "0")) // 1_000_000
+                if server_time > 0:
+                    self._time_offset_ms = server_time - int(time.time() * 1000)
+                    logger.info(f"Bybit time sync: offset={self._time_offset_ms}ms")
+        except Exception as e:
+            logger.warning(f"Bybit time sync failed: {e}")
     
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session (reuse for efficiency)."""
@@ -60,7 +78,7 @@ class BybitRESTClient(BaseRESTClient):
         
         Bybit v5 uses X-BAPI-* headers for authentication (NOT query params).
         """
-        timestamp = str(int(time.time() * 1000))
+        timestamp = self._synced_ts()
         signature = self._generate_signature(timestamp, query_string)
         return {
             "X-BAPI-API-KEY": self.api_key,

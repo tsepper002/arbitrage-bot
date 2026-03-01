@@ -25,6 +25,24 @@ class MEXCRESTClient(BaseRESTClient):
     def __init__(self, api_key: str, api_secret: str):
         super().__init__(api_key, api_secret, "MEXC")
         self._session: Optional[aiohttp.ClientSession] = None
+        self._time_offset_ms: int = 0  # Server time offset (ms)
+
+    def _synced_ts(self) -> int:
+        """Get server-synced timestamp in milliseconds."""
+        return int(time.time() * 1000) + self._time_offset_ms
+
+    async def sync_server_time(self):
+        """Sync local clock with MEXC server time."""
+        try:
+            session = await self._get_session()
+            async with session.get(f"{self.BASE_URL}/api/v3/time") as resp:
+                data = await resp.json()
+                server_time = int(data.get("serverTime", 0))
+                if server_time > 0:
+                    self._time_offset_ms = server_time - int(time.time() * 1000)
+                    logger.info(f"MEXC time sync: offset={self._time_offset_ms}ms")
+        except Exception as e:
+            logger.warning(f"MEXC time sync failed: {e}")
     
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -89,7 +107,7 @@ class MEXCRESTClient(BaseRESTClient):
             "side": side.upper(),  # BUY or SELL
             "type": "MARKET" if order_type == "market" else "LIMIT",
             "quantity": quantity,
-            "timestamp": int(time.time() * 1000)
+            "timestamp": self._synced_ts()
         }
         
         if order_type == "limit" and price:
@@ -122,7 +140,7 @@ class MEXCRESTClient(BaseRESTClient):
         params = {
             "symbol": self.normalize_symbol(symbol),
             "orderId": order_id,
-            "timestamp": int(time.time() * 1000)
+            "timestamp": self._synced_ts()
         }
         
         params["signature"] = self._generate_signature(params)
@@ -147,7 +165,7 @@ class MEXCRESTClient(BaseRESTClient):
         params = {
             "symbol": self.normalize_symbol(symbol),
             "orderId": order_id,
-            "timestamp": int(time.time() * 1000)
+            "timestamp": self._synced_ts()
         }
         
         params["signature"] = self._generate_signature(params)
@@ -167,7 +185,7 @@ class MEXCRESTClient(BaseRESTClient):
         url = f"{self.BASE_URL}{path}"
         
         params = {
-            "timestamp": int(time.time() * 1000)
+            "timestamp": self._synced_ts()
         }
         
         params["signature"] = self._generate_signature(params)
@@ -207,7 +225,7 @@ class MEXCRESTClient(BaseRESTClient):
             "address": address,
             "amount": amount,
             "network": network,
-            "timestamp": int(time.time() * 1000)
+            "timestamp": self._synced_ts()
         }
         
         if memo:
@@ -240,7 +258,7 @@ class MEXCRESTClient(BaseRESTClient):
             
             params = {
                 "coin": currency,
-                "timestamp": int(time.time() * 1000)
+                "timestamp": self._synced_ts()
             }
             
             params["signature"] = self._generate_signature(params)
