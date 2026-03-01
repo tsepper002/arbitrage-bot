@@ -114,6 +114,8 @@ class BybitRESTClient(BaseRESTClient):
         if order_type == "market" and side.lower() == "buy" and price:
             # For market buy, send USDT amount (quoteCoin) to avoid minimum notional issues
             usdt_amount = round(quantity * price, 2)
+            if usdt_amount < 5.0:
+                usdt_amount = 5.0  # Bybit minimum for most spot pairs
             body["qty"] = str(usdt_amount)
             body["marketUnit"] = "quoteCoin"
         

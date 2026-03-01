@@ -86,6 +86,19 @@ class MEXCRESTClient(BaseRESTClient):
         """Convert BTC-USDT to BTCUSDT."""
         return symbol.replace("-", "")
     
+    def _build_signed_qs(self, params: Dict[str, str]) -> str:
+        """Build sorted query string with appended signature.
+        
+        MEXC validates by re-computing HMAC on the exact URL query string.
+        aiohttp's params= uses insertion order, which may differ from sorted
+        order used by _generate_signature(). Building the QS manually
+        ensures the signed string matches what the server sees.
+        """
+        sorted_params = sorted(params.items())
+        qs = "&".join(f"{k}={urllib.parse.quote_plus(str(v))}" for k, v in sorted_params)
+        sig = self._generate_signature(params)
+        return f"{qs}&signature={sig}"
+
     async def place_order(
         self,
         symbol: str,
@@ -100,37 +113,35 @@ class MEXCRESTClient(BaseRESTClient):
         Note: MEXC has 0% maker fees - prefer limit orders!
         """
         path = "/api/v3/order"
-        url = f"{self.BASE_URL}{path}"
         
         params = {
             "symbol": self.normalize_symbol(symbol),
-            "side": side.upper(),  # BUY or SELL
+            "side": side.upper(),
             "type": "MARKET" if order_type == "market" else "LIMIT",
-            "quantity": str(quantity),
-            "timestamp": str(self._synced_ts())
+            "timestamp": str(self._synced_ts()),
         }
+        
+        if order_type == "market" and side.upper() == "BUY" and price:
+            # MEXC market buy: use quoteOrderQty (USDT amount)
+            params["quoteOrderQty"] = str(round(quantity * price, 2))
+        else:
+            params["quantity"] = str(quantity)
         
         if order_type == "limit" and price:
             params["price"] = str(price)
             params["timeInForce"] = time_in_force
-        elif order_type == "market" and side.upper() == "BUY" and price:
-            # MEXC market buy can use quoteOrderQty (USDT amount) instead of quantity
-            params["quoteOrderQty"] = str(round(float(params["quantity"]) * price, 2))
-            del params["quantity"]
         
-        # Add signature
-        params["signature"] = self._generate_signature(params)
+        # Build sorted query string with signature appended
+        full_qs = self._build_signed_qs(params)
+        url = f"{self.BASE_URL}{path}?{full_qs}"
         
         headers = self._get_headers()
         session = await self._get_session()
         
-        async with session.post(url, params=params, headers=headers) as resp:
+        async with session.post(url, headers=headers) as resp:
             data = await resp.json()
-            
-            # MEXC returns different structures
             if "code" in data and data["code"] != 200:
                 raise Exception(f"MEXC order failed: {data}")
-            
             return data
     
     async def cancel_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
@@ -139,20 +150,18 @@ class MEXCRESTClient(BaseRESTClient):
         Note: MEXC requires symbol for cancellation.
         """
         path = "/api/v3/order"
-        url = f"{self.BASE_URL}{path}"
-        
         params = {
             "symbol": self.normalize_symbol(symbol),
             "orderId": str(order_id),
             "timestamp": str(self._synced_ts())
         }
-        
-        params["signature"] = self._generate_signature(params)
+        full_qs = self._build_signed_qs(params)
+        url = f"{self.BASE_URL}{path}?{full_qs}"
         
         headers = self._get_headers()
         session = await self._get_session()
         
-        async with session.delete(url, params=params, headers=headers) as resp:
+        async with session.delete(url, headers=headers) as resp:
             data = await resp.json()
             if "code" in data and data["code"] != 200:
                 raise Exception(f"MEXC cancel failed: {data}")
@@ -164,20 +173,18 @@ class MEXCRESTClient(BaseRESTClient):
         Note: MEXC requires symbol for order lookup.
         """
         path = "/api/v3/order"
-        url = f"{self.BASE_URL}{path}"
-        
         params = {
             "symbol": self.normalize_symbol(symbol),
             "orderId": str(order_id),
             "timestamp": str(self._synced_ts())
         }
-        
-        params["signature"] = self._generate_signature(params)
+        full_qs = self._build_signed_qs(params)
+        url = f"{self.BASE_URL}{path}?{full_qs}"
         
         headers = self._get_headers()
         session = await self._get_session()
         
-        async with session.get(url, params=params, headers=headers) as resp:
+        async with session.get(url, headers=headers) as resp:
             data = await resp.json()
             if "code" in data and data["code"] != 200:
                 raise Exception(f"MEXC get order failed: {data}")
@@ -186,18 +193,16 @@ class MEXCRESTClient(BaseRESTClient):
     async def get_balance(self) -> Dict[str, float]:
         """Get account balances from MEXC."""
         path = "/api/v3/account"
-        url = f"{self.BASE_URL}{path}"
-        
         params = {
             "timestamp": str(self._synced_ts())
         }
-        
-        params["signature"] = self._generate_signature(params)
+        full_qs = self._build_signed_qs(params)
+        url = f"{self.BASE_URL}{path}?{full_qs}"
         
         headers = self._get_headers()
         session = await self._get_session()
         
-        async with session.get(url, params=params, headers=headers) as resp:
+        async with session.get(url, headers=headers) as resp:
             data = await resp.json()
             
             if "code" in data and data["code"] != 200:
@@ -222,7 +227,6 @@ class MEXCRESTClient(BaseRESTClient):
     ) -> Dict[str, Any]:
         """Initiate a withdrawal on MEXC."""
         path = "/api/v3/capital/withdraw/apply"
-        url = f"{self.BASE_URL}{path}"
         
         params = {
             "coin": currency,
@@ -235,12 +239,13 @@ class MEXCRESTClient(BaseRESTClient):
         if memo:
             params["addressTag"] = memo
         
-        params["signature"] = self._generate_signature(params)
+        full_qs = self._build_signed_qs(params)
+        url = f"{self.BASE_URL}{path}?{full_qs}"
         
         headers = self._get_headers()
         session = await self._get_session()
         
-        async with session.post(url, params=params, headers=headers) as resp:
+        async with session.post(url, headers=headers) as resp:
             data = await resp.json()
             if "code" in data and data["code"] != 200:
                 raise Exception(f"MEXC withdrawal failed: {data}")
@@ -258,19 +263,17 @@ class MEXCRESTClient(BaseRESTClient):
         """
         try:
             path = "/api/v3/capital/deposit/address"
-            url = f"{self.BASE_URL}{path}"
-            
             params = {
                 "coin": currency,
                 "timestamp": str(self._synced_ts())
             }
-            
-            params["signature"] = self._generate_signature(params)
+            full_qs = self._build_signed_qs(params)
+            url = f"{self.BASE_URL}{path}?{full_qs}"
             
             headers = self._get_headers()
             session = await self._get_session()
             
-            async with session.get(url, params=params, headers=headers) as resp:
+            async with session.get(url, headers=headers) as resp:
                 data = await resp.json()
                 if "code" in data and data["code"] == 200:
                     return data

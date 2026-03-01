@@ -127,7 +127,7 @@ class KuCoinRESTClient(BaseRESTClient):
                 if not price or price <= 0:
                     raise ValueError(f"Market buy requires valid price, got: {price}")
                 funds = quantity * price
-                order_data["funds"] = str(round(funds, 6))
+                order_data["funds"] = str(round(funds, 2))
             else:
                 order_data["size"] = str(quantity)
         else:

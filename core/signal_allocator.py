@@ -83,8 +83,9 @@ class SignalAllocator:
     # Minimum signals before a symbol gets allocation
     MIN_SIGNALS_FOR_ALLOCATION = 15  # Require 15+ positive-ROI signals before buying a coin
 
-    # Pre-fund: use 40% of USDT for ONE coin on each exchange
-    MAX_PREPOSITION_PCT = 0.40
+    # Pre-fund: use 50% of USDT for ONE coin on each exchange
+    # With $14/exchange, $2 reserve → $12 available → $6 for coin (above $5 minimum)
+    MAX_PREPOSITION_PCT = 0.50
 
     # Maximum allocation to any single symbol
     MAX_SINGLE_SYMBOL_PCT = 0.40  # At small capital, focus on 1 coin
@@ -138,7 +139,7 @@ class SignalAllocator:
 
     # Exchange minimum order amounts in USDT
     MIN_ORDER_USDT = {
-        'Binance': 5.0, 'HTX': 5.0, 'KuCoin': 1.0, 'Bybit': 1.0, 'MEXC': 1.0,
+        'Binance': 5.0, 'HTX': 5.0, 'KuCoin': 0.1, 'Bybit': 5.0, 'MEXC': 5.0,
     }
 
     def __init__(self, balance_manager=None):
@@ -380,8 +381,12 @@ class SignalAllocator:
         return alternatives
 
     def _is_profitable_signal(self, sig) -> bool:
-        """Check if signal is a profitable OPPORTUNITY (positive ROI)."""
-        return sig.roi_pct > 0
+        """Check if signal is a profitable OPPORTUNITY (positive ROI from CROSS_EXCHANGE).
+        
+        Only CROSS_EXCHANGE signals represent actual tradeable cross-exchange arb.
+        SMART_ORDER/VOLATILITY signals have positive ROI but aren't arb opportunities.
+        """
+        return sig.roi_pct > 0 and sig.strategy == 'CROSS_EXCHANGE'
 
     def _compute_scores(self) -> Dict[str, float]:
         """Compute weighted signal scores per symbol.
@@ -1002,6 +1007,70 @@ class SignalAllocator:
 
         ranked = sorted(scores.items(), key=lambda x: -x[1])
         return [(sym, score, signal_counts[sym]) for sym, score in ranked[:n]]
+
+    async def sell_all_to_usdt(
+        self,
+        rest_clients: Optional[Dict] = None,
+        price_store=None,
+    ) -> list:
+        """Sell ALL coin holdings back to USDT on every exchange.
+        
+        Called during graceful shutdown so user ends with only USDT balances.
+        In dry-run mode, updates virtual balances. In live mode, places real
+        market sell orders.
+        
+        Returns list of executed sell orders.
+        """
+        if not self.balance_manager:
+            return []
+        
+        executed = []
+        exchanges = list(self.balance_manager.balances.keys())
+        
+        logger.info("💱 SHUTDOWN: Selling ALL coins back to USDT on all exchanges...")
+        
+        for exchange in exchanges:
+            balances = self.balance_manager.balances.get(exchange, {})
+            for asset, amount in list(balances.items()):
+                if asset == 'USDT' or amount <= 0:
+                    continue
+                
+                symbol = f"{asset}-USDT"
+                
+                # Get current price
+                price = 0.0
+                if price_store:
+                    price = self.balance_manager._get_price_from_store(price_store, symbol, exchange)
+                    if price <= 0:
+                        price = self.balance_manager._get_any_price(price_store, symbol)
+                if price <= 0:
+                    price = self._last_prices.get(symbol, 0.0)
+                if price <= 0:
+                    logger.warning(f"  ⚠️ {exchange}: Cannot sell {amount:.6g} {asset} — no price available")
+                    continue
+                
+                usdt_value = amount * price
+                if usdt_value < 1.0:
+                    logger.debug(f"  ⏭️ {exchange}: Skip {asset} — only ${usdt_value:.2f} (dust)")
+                    continue
+                
+                order = await self._execute_sell_order(
+                    exchange, symbol, asset, amount, usdt_value, price,
+                    f'SHUTDOWN: sell all {asset} to USDT', rest_clients
+                )
+                if order:
+                    executed.append(order)
+        
+        total_usdt = sum(o.get('amount_usdt', 0) for o in executed)
+        if executed:
+            logger.info(f"💱 SHUTDOWN: Sold {len(executed)} positions → ${total_usdt:.2f} USDT recovered")
+        else:
+            logger.info("💱 SHUTDOWN: No coin positions to sell (all USDT already)")
+        
+        self._current_coin = None
+        self._initial_setup_done = False
+        
+        return executed
 
     def get_summary(self) -> Dict:
         """Get allocation summary for dashboard display."""

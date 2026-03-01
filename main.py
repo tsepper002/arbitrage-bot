@@ -1713,7 +1713,7 @@ class IntegratedArbitrageBot:
             self._signal_priority_symbols.add(symbol)
     
     async def shutdown(self):
-        """Graceful shutdown."""
+        """Graceful shutdown — sells all coins back to USDT first."""
         logger.info("\n🛑 Shutting down gracefully...")
         
         # Cancel all background tasks
@@ -1724,6 +1724,17 @@ class IntegratedArbitrageBot:
         # Wait for tasks to finish
         if self.tasks:
             await asyncio.gather(*self.tasks, return_exceptions=True)
+        
+        # ========== SELL ALL COINS BACK TO USDT ==========
+        if hasattr(self, 'signal_allocator') and self.signal_allocator:
+            try:
+                price_store = getattr(self, 'engine', None) and getattr(self.engine, 'price_store', None)
+                await self.signal_allocator.sell_all_to_usdt(
+                    rest_clients=self.rest_clients,
+                    price_store=price_store,
+                )
+            except Exception as e:
+                logger.error(f"⚠️ Error selling coins during shutdown: {e}")
         
         # Print final statistics
         if self.engine:
