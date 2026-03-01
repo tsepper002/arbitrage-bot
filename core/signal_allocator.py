@@ -113,6 +113,8 @@ class SignalAllocator:
     MAX_SIGNAL_STALENESS = 120  # 2 min: alternative is stale if no recent signals
     # Signal scoring window
     INITIAL_SIGNAL_WINDOW = 30  # Use last 30 signals for initial coin selection
+    # Only CROSS_EXCHANGE signals count for coin selection (actual arb profit)
+    SCORING_STRATEGY = 'CROSS_EXCHANGE'
     # Emergency exit: if coin drops >3% in 5 minutes → immediate sell and switch
     EMERGENCY_DROP_PCT = 3.0   # percentage drop threshold
     EMERGENCY_WINDOW = 300     # seconds to measure drop over
@@ -351,9 +353,6 @@ class SignalAllocator:
         
         alternatives.sort(key=lambda x: x[1], reverse=True)
         return alternatives
-
-    # Only CROSS_EXCHANGE signals count for coin selection (actual arb profit)
-    SCORING_STRATEGY = 'CROSS_EXCHANGE'
 
     def _compute_scores(self) -> Dict[str, float]:
         """Compute weighted signal scores per symbol.
@@ -954,8 +953,10 @@ class SignalAllocator:
             'max_preposition_pct': self.MAX_PREPOSITION_PCT * 100,
         }
 
-    def has_sufficient_signals(self, min_count: int = 30) -> bool:
+    def has_sufficient_signals(self, min_count: int = 0) -> bool:
         """Check if enough CROSS_EXCHANGE signals collected for allocation."""
+        if min_count <= 0:
+            min_count = self.MIN_SIGNALS_FOR_ALLOCATION
         cross_count = sum(1 for s in self._signals if s.strategy == self.SCORING_STRATEGY)
         return cross_count >= min_count
 
