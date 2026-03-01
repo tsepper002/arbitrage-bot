@@ -386,7 +386,8 @@ class SignalAllocator:
 
             # ROI bonus: higher ROI signals get proportionally more weight
             # 0.1% ROI → 2× weight, 1.0% ROI → 11× weight
-            roi_bonus = 1.0 + sig.roi_pct * 10.0
+            # Note: roi_pct guaranteed > 0 by _is_profitable_signal() filter above
+            roi_bonus = 1.0 + max(sig.roi_pct, 0) * 10.0
 
             scores[sig.symbol] += weight * decay * roi_bonus
 
@@ -959,7 +960,7 @@ class SignalAllocator:
         }
 
     def has_sufficient_signals(self, min_count: int = 0) -> bool:
-        """Check if enough CROSS_EXCHANGE signals collected for allocation."""
+        """Check if enough positive-ROI OPPORTUNITY signals collected for allocation."""
         if min_count <= 0:
             min_count = self.MIN_SIGNALS_FOR_ALLOCATION
         profitable_count = sum(1 for s in self._signals if self._is_profitable_signal(s))
