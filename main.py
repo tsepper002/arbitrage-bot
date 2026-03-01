@@ -1222,11 +1222,12 @@ class IntegratedArbitrageBot:
         In DRY RUN: updates virtual balances.
         In LIVE: places real market buy/sell orders.
         """
-        REBALANCE_INTERVAL = 300  # Check every 5 min (pre-funded: arb naturally rebalances)
-        # No fixed delay — bot waits for 30+ OPPORTUNITY signals before buying (signal-driven, not time-driven)
+        INITIAL_POLL_INTERVAL = 10   # Check every 10s while searching for first coin
+        NORMAL_REBALANCE_INTERVAL = 300  # Check every 5 min after first coin positioned
         
         try:
-            logger.info("🔄 Inventory rebalance loop started — waiting for 30+ signals before first buy")
+            logger.info("🔄 Inventory rebalance loop started — UNLIMITED time to find first coin (polling every 10s)")
+            first_coin_found = False
             
             while True:
                 try:
@@ -1247,7 +1248,7 @@ class IntegratedArbitrageBot:
                     if has_signals or urgent:
                         allocation = self.signal_allocator.get_allocation()
                         if allocation:
-                            mode = "🔥 URGENT" if urgent else "🔄 Periodic"
+                            mode = "🔥 URGENT" if urgent else ("🎯 FIRST COIN" if not first_coin_found else "🔄 Periodic")
                             logger.info(
                                 f"{mode} rebalance — "
                                 f"{len(allocation)} target coins"
@@ -1265,15 +1266,25 @@ class IntegratedArbitrageBot:
                                         f"{order['symbol']} on {order['exchange']} "
                                         f"(${order['amount_usdt']:.2f}) — {order['reason']}"
                                     )
+                                if not first_coin_found:
+                                    first_coin_found = True
+                                    logger.info("✅ First coin positioned! Switching to normal 5-min rebalance interval")
                             else:
                                 logger.debug("Rebalance: no orders needed (inventory balanced)")
-                    else:
-                        logger.debug("Rebalance: waiting for more signal data...")
+                    elif not first_coin_found:
+                        # Still searching for first coin — log progress
+                        total_signals = sum(
+                            len([s for s in sigs if s.roi_pct > 0])
+                            for sigs in self.signal_allocator._signals.values()
+                        ) if self.signal_allocator else 0
+                        logger.info(f"🔍 Searching for first coin... {total_signals} positive-ROI signals so far (need 30+ for one coin)")
                     
                 except Exception as e:
                     logger.warning(f"⚠️ Rebalance error: {e}")
                 
-                await asyncio.sleep(REBALANCE_INTERVAL)
+                # Fast polling while searching, slow polling after first coin found
+                interval = NORMAL_REBALANCE_INTERVAL if first_coin_found else INITIAL_POLL_INTERVAL
+                await asyncio.sleep(interval)
                 
         except asyncio.CancelledError:
             return
