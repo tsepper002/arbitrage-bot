@@ -19,6 +19,7 @@ without waiting for settlement.
 """
 
 import time
+import math
 import asyncio
 import logging
 from typing import Dict, List, Optional, Tuple
@@ -858,7 +859,6 @@ class SignalAllocator:
         step = steps.get(base_coin, steps.get('_default', 0.01))
         if step <= 0:
             return qty
-        import math
         return math.floor(qty / step) * step
 
     async def _execute_buy_order(

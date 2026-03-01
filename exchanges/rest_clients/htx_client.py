@@ -167,7 +167,12 @@ class HTXRESTClient(BaseRESTClient):
         
         if order_type == "market" and side.lower() == "buy":
             # HTX buy-market: 'amount' = QUOTE amount (USDT to spend)
-            usdt_amount = quantity * price if price and price > 0 else quantity
+            # price MUST be provided by caller for correct conversion
+            if price and price > 0:
+                usdt_amount = quantity * price
+            else:
+                # Fallback: assume quantity is already USDT amount (caller should ensure this)
+                usdt_amount = quantity
             order_data["amount"] = str(round(usdt_amount, 2))
         else:
             order_data["amount"] = str(quantity)
