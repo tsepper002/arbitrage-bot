@@ -113,8 +113,7 @@ class SignalAllocator:
     MAX_SIGNAL_STALENESS = 120  # 2 min: alternative is stale if no recent signals
     # Signal scoring window
     INITIAL_SIGNAL_WINDOW = 30  # Use last 30 signals for initial coin selection
-    # Only CROSS_EXCHANGE signals count for coin selection (actual arb profit)
-    SCORING_STRATEGY = 'CROSS_EXCHANGE'
+    # Only OPPORTUNITY signals with positive ROI count (any strategy)
     # Emergency exit: if coin drops >3% in 5 minutes → immediate sell and switch
     EMERGENCY_DROP_PCT = 3.0   # percentage drop threshold
     EMERGENCY_WINDOW = 300     # seconds to measure drop over
@@ -145,6 +144,7 @@ class SignalAllocator:
         self._last_prices: Dict[str, float] = {}  # symbol → last known price
         self._coin_entry_price: float = 0.0  # price when coin was first positioned
         self._last_signal_time: Dict[str, float] = {}  # symbol → last signal timestamp
+        self._last_profitable_signal_time: Dict[str, float] = {}  # symbol → last positive-ROI signal
         self._symbol_first_seen: Dict[str, float] = {}  # symbol → first signal timestamp
 
         logger.info("✅ SignalAllocator initialized (pre-funded inventory model)")
@@ -178,6 +178,8 @@ class SignalAllocator:
         # Track signal timing per symbol
         now = time.time()
         self._last_signal_time[symbol] = now
+        if roi_pct > 0:
+            self._last_profitable_signal_time[symbol] = now
         if symbol not in self._symbol_first_seen:
             self._symbol_first_seen[symbol] = now
 
@@ -321,10 +323,10 @@ class SignalAllocator:
         now = time.time()
         alternatives = []
         
-        # Count CROSS_EXCHANGE signals per symbol (only arb signals matter)
+        # Count positive-ROI signals per symbol (any strategy)
         signal_counts: Dict[str, int] = defaultdict(int)
         for sig in self._signals:
-            if sig.strategy == self.SCORING_STRATEGY:
+            if self._is_profitable_signal(sig):
                 signal_counts[sig.symbol] += 1
         
         scores = self._compute_scores()
@@ -354,12 +356,15 @@ class SignalAllocator:
         alternatives.sort(key=lambda x: x[1], reverse=True)
         return alternatives
 
+    def _is_profitable_signal(self, sig) -> bool:
+        """Check if signal is a profitable OPPORTUNITY (positive ROI)."""
+        return sig.roi_pct > 0
+
     def _compute_scores(self) -> Dict[str, float]:
         """Compute weighted signal scores per symbol.
 
-        Only counts CROSS_EXCHANGE signals — these represent actual
-        profitable arbitrage opportunities. Other strategies (SMART_ORDER,
-        VOLATILITY, etc.) generate noise that pollutes coin selection.
+        Only counts OPPORTUNITY signals with POSITIVE ROI from ANY strategy.
+        Signals with zero or negative ROI are noise and ignored.
 
         Uses exponential decay so recent signals matter more.
         Returns dict of symbol → score.
@@ -368,8 +373,8 @@ class SignalAllocator:
         scores: Dict[str, float] = defaultdict(float)
 
         for sig in self._signals:
-            # Only count CROSS_EXCHANGE signals for coin selection
-            if sig.strategy != self.SCORING_STRATEGY:
+            # Only count signals with positive ROI (actual profitable opportunities)
+            if not self._is_profitable_signal(sig):
                 continue
 
             age = now - sig.timestamp
@@ -381,7 +386,7 @@ class SignalAllocator:
 
             # ROI bonus: higher ROI signals get proportionally more weight
             # 0.1% ROI → 2× weight, 1.0% ROI → 11× weight
-            roi_bonus = 1.0 + max(sig.roi_pct, 0) * 10.0
+            roi_bonus = 1.0 + sig.roi_pct * 10.0
 
             scores[sig.symbol] += weight * decay * roi_bonus
 
@@ -405,10 +410,10 @@ class SignalAllocator:
             self._symbol_scores = {}
             return {}
 
-        # Filter: minimum CROSS_EXCHANGE signal count
+        # Filter: minimum positive-ROI signal count (any strategy)
         signal_counts = defaultdict(int)
         for sig in self._signals:
-            if sig.strategy == self.SCORING_STRATEGY:
+            if self._is_profitable_signal(sig):
                 signal_counts[sig.symbol] += 1
 
         eligible = {
@@ -659,11 +664,12 @@ class SignalAllocator:
         time_since_position = now - self._coin_positioned_at
         
         if time_since_position > self.COIN_SWITCH_COOLDOWN and self._current_coin:
-            # Check condition 1: silence timeout for current coin
-            last_signal = self._last_signal_time.get(self._current_coin, 0)
-            if last_signal == 0:
-                pass  # No signals ever recorded — skip switch, coin just started
-            elif (now - last_signal) >= self.SILENCE_TIMEOUT:
+            # Check condition 1: no positive-ROI signals for SILENCE_TIMEOUT (10 min)
+            last_profitable = self._last_profitable_signal_time.get(self._current_coin, 0)
+            if last_profitable == 0:
+                pass  # No profitable signals ever — skip switch, coin just started
+            elif (now - last_profitable) >= self.SILENCE_TIMEOUT:
+                silence_duration = now - last_profitable
                 # Check condition 2 & 3: at least MIN_ALTERNATIVES with track record
                 alternatives = self._get_hot_alternatives(
                     self._current_coin, 
@@ -762,9 +768,8 @@ class SignalAllocator:
                                 f"({len(executed)} orders) @ ${self._coin_entry_price:.4f}"
                             )
                 else:
-                    silence_duration = now - last_signal
                     logger.debug(
-                        f"⏸️ {self._current_coin} silent {silence_duration:.0f}s but only "
+                        f"⏸️ {self._current_coin} no profit {silence_duration:.0f}s but only "
                         f"{len(alternatives)} alternatives (need {self.MIN_ALTERNATIVES})"
                     )
         
@@ -957,8 +962,8 @@ class SignalAllocator:
         """Check if enough CROSS_EXCHANGE signals collected for allocation."""
         if min_count <= 0:
             min_count = self.MIN_SIGNALS_FOR_ALLOCATION
-        cross_count = sum(1 for s in self._signals if s.strategy == self.SCORING_STRATEGY)
-        return cross_count >= min_count
+        profitable_count = sum(1 for s in self._signals if self._is_profitable_signal(s))
+        return profitable_count >= min_count
 
     def print_summary(self):
         """Print human-readable allocation summary."""
