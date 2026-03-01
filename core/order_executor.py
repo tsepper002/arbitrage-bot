@@ -37,6 +37,9 @@ class OrderExecutor:
         self.order_history: deque = deque(maxlen=10000)  # Auto-bounded
         self.trade_count_per_minute: Dict[int, int] = {}  # minute timestamp -> count
         self.last_trade_time_per_symbol: Dict[str, float] = {}  # symbol -> last trade timestamp
+        self._trade_lock = asyncio.Lock()  # Prevent concurrent trade execution
+        self._blocked_cooldown: Dict[str, float] = {}  # symbol → last blocked time
+        self.BLOCKED_COOLDOWN_SEC = 10.0  # Don't retry blocked trades for 10s
         
         if self.dry_run:
             logger.info("🔵 OrderExecutor initialized in DRY RUN mode (safe simulation)")
@@ -47,10 +50,7 @@ class OrderExecutor:
     
     def can_trade(self, symbol: str) -> Tuple[bool, Optional[str]]:
         """
-        Check if trading is allowed based on rate limits and cooldowns.
-        
-        Returns:
-            (can_trade, reason) tuple
+        Check if trading is allowed based on rate limits, cooldowns, and blocked status.
         """
         current_time = time.time()
         current_minute = int(current_time / 60)
@@ -66,6 +66,11 @@ class OrderExecutor:
         if time_since_last < settings.PER_SYMBOL_COOLDOWN_SEC:
             remaining = settings.PER_SYMBOL_COOLDOWN_SEC - time_since_last
             return False, f"Symbol cooldown: {remaining:.1f}s remaining (cooldown: {settings.PER_SYMBOL_COOLDOWN_SEC}s)"
+        
+        # Check blocked cooldown (prevents spamming failed trades)
+        last_blocked = self._blocked_cooldown.get(symbol, 0)
+        if current_time - last_blocked < self.BLOCKED_COOLDOWN_SEC:
+            return False, f"Blocked cooldown: {self.BLOCKED_COOLDOWN_SEC - (current_time - last_blocked):.0f}s"
         
         return True, None
     
@@ -93,20 +98,8 @@ class OrderExecutor:
     async def execute_arbitrage(self, opportunity: Dict) -> Dict:
         """
         Execute an arbitrage opportunity.
-        
-        Args:
-            opportunity: Dict with keys:
-                - symbol: trading pair (e.g., "BTC-USDT")
-                - buy_ex: exchange to buy from
-                - sell_ex: exchange to sell to
-                - qty: quantity to trade
-                - buy_avg: average buy price
-                - sell_avg: average sell price
-                - net: expected net profit (USDT)
-                - roi_pct: return on investment percentage
-        
-        Returns:
-            Execution result dict with status and details
+        Uses asyncio.Lock to prevent concurrent trade execution — only one
+        trade at a time across ALL callers (engine + strategy dispatcher).
         """
         symbol = opportunity['symbol']
         
@@ -120,10 +113,12 @@ class OrderExecutor:
                 'opportunity': opportunity
             }
         
-        if self.dry_run:
-            return self._execute_dry_run(opportunity)
-        else:
-            return await self._execute_live(opportunity)
+        # Serialize all trade execution through a single lock
+        async with self._trade_lock:
+            if self.dry_run:
+                return self._execute_dry_run(opportunity)
+            else:
+                return await self._execute_live(opportunity)
     
     def _execute_dry_run(self, opp: Dict) -> Dict:
         """Simulate order execution with realistic balance tracking.
@@ -166,6 +161,7 @@ class OrderExecutor:
             if adjusted_qty <= 0 or (adjusted_qty * buy_price) < self.MIN_ORDER_USDT:
                 # Not enough balance for any meaningful trade
                 if available_sell <= 0:
+                    self._blocked_cooldown[symbol] = time.time()
                     return {
                         'status': 'blocked',
                         'reason': f'No {base_currency} on {sell_ex}: have {available_sell:.6f}',
@@ -174,6 +170,7 @@ class OrderExecutor:
                         'missed_side': 'sell',
                     }
                 else:
+                    self._blocked_cooldown[symbol] = time.time()
                     return {
                         'status': 'blocked',
                         'reason': f'Insufficient USDT on {buy_ex}: have ${available_buy_usdt:.2f}',
@@ -289,6 +286,8 @@ class OrderExecutor:
                     reason = (f"Insufficient balance: {buy_ex} USDT=${available_usdt:.2f}, "
                               f"{sell_ex} {base_currency}={available_base:.6f}")
                     logger.warning(f"⚠️  {reason}")
+                    # Set blocked cooldown to prevent spamming this symbol
+                    self._blocked_cooldown[symbol] = time.time()
                     return {
                         'status': 'blocked', 'reason': reason,
                         'missed_symbol': symbol, 'missed_exchange': sell_ex,

@@ -841,7 +841,12 @@ class ArbitrageEngine:
                     if nm > 0:
                         self.strategy_dispatcher.record_engine_near_misses(nm)
                         self._near_miss_count = 0  # Reset after feeding
+                engine_trade_this_cycle = False  # ONE trade per scan cycle
                 for o in opps:
+                    # LIMIT: one trade per cycle to avoid balance race conditions
+                    if engine_trade_this_cycle:
+                        break
+                    
                     # Skip trade execution if coins not yet positioned
                     # (signals are already recorded above in scan_once)
                     if self.signal_allocator and not self.signal_allocator.is_ready_to_trade():
@@ -873,6 +878,9 @@ class ArbitrageEngine:
                         except Exception as e:
                             logger.debug(f"TWAP execution error: {e}")
                     result = await self.executor.execute_arbitrage(o)
+                    
+                    if result.get('status') in ('success', 'simulated'):
+                        engine_trade_this_cycle = True
                     
                     # PRE-FUNDED MODEL: No JIT — too expensive.
                     # Instead, record the miss so rebalancer can top up if needed.

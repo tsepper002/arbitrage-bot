@@ -1407,9 +1407,25 @@ class IntegratedArbitrageBot:
                     executable = [o for o in all_opps if self._is_executable(o)]
                     if executable:
                         logger.info(f"🎯 Strategies found {len(executable)} executable opportunities (of {len(all_opps)} signals)")
+                        trade_executed_this_cycle = False
                         for opp in executable:
+                            # LIMIT: one trade per cycle to avoid balance race conditions
+                            if trade_executed_this_cycle:
+                                break
+                            
                             trade_info = self._build_trade_from_signal(opp)
                             if trade_info:
+                                # FILTER: Only trade the pre-funded coin
+                                if (hasattr(self, 'signal_allocator') and self.signal_allocator
+                                        and self.signal_allocator._current_coin
+                                        and trade_info['symbol'] != self.signal_allocator._current_coin):
+                                    continue
+                                
+                                # GATE: Skip if coins not yet positioned
+                                if (hasattr(self, 'signal_allocator') and self.signal_allocator
+                                        and not self.signal_allocator.is_ready_to_trade()):
+                                    continue
+                                
                                 # Risk check
                                 if self.risk_manager:
                                     can_trade, reason = self.risk_manager.check_can_trade(trade_info)
@@ -1426,6 +1442,7 @@ class IntegratedArbitrageBot:
                                 # Execute via OrderExecutor
                                 result = await self.engine.executor.execute_arbitrage(trade_info)
                                 if result.get('status') in ('simulated', 'success'):
+                                    trade_executed_this_cycle = True
                                     logger.info(f"✅ {opp['strategy']} trade executed: {trade_info['symbol']} ${trade_info.get('net', 0):.4f}")
                                     # Record trade in dispatcher stats
                                     if self.strategy_dispatcher:
@@ -1540,9 +1557,12 @@ class IntegratedArbitrageBot:
         symbol = opp.get('symbol', 'BTC-USDT')
         data = opp.get('data', {})
         
-        # For pair strategies, use the first symbol
+        # For pair strategies, use the first symbol; normalize to SYMBOL-USDT format
         if '/' in symbol:
-            symbol = symbol.split('/')[0]
+            symbol = symbol.replace('/', '-')
+        # If just a base currency like "BTC", add "-USDT"
+        if '-' not in symbol and 'USDT' not in symbol:
+            symbol = f"{symbol}-USDT"
         
         store = getattr(self, 'store', None)
         if not store:
@@ -1728,7 +1748,7 @@ class IntegratedArbitrageBot:
         # ========== SELL ALL COINS BACK TO USDT ==========
         if hasattr(self, 'signal_allocator') and self.signal_allocator:
             try:
-                price_store = getattr(self, 'engine', None) and getattr(self.engine, 'price_store', None)
+                price_store = getattr(self.engine, 'store', None) if hasattr(self, 'engine') and self.engine else None
                 await self.signal_allocator.sell_all_to_usdt(
                     rest_clients=self.rest_clients,
                     price_store=price_store,
