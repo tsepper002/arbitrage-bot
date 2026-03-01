@@ -150,7 +150,11 @@ class HTXRESTClient(BaseRESTClient):
         price: Optional[float] = None,
         time_in_force: str = "GTC"
     ) -> Dict[str, Any]:
-        """Place an order on HTX."""
+        """Place an order on HTX.
+        
+        For market buy: quantity is base amount, price converts to quote amount.
+        HTX buy-market uses 'amount' as QUOTE (USDT) amount.
+        """
         account_id = await self._get_account_id()
         
         path = "/v1/order/orders/place"
@@ -159,8 +163,14 @@ class HTXRESTClient(BaseRESTClient):
             "account-id": account_id,
             "symbol": self.normalize_symbol(symbol),
             "type": f"{side.lower()}-{order_type}",  # e.g., buy-limit, sell-market
-            "amount": str(quantity)
         }
+        
+        if order_type == "market" and side.lower() == "buy":
+            # HTX buy-market: 'amount' = QUOTE amount (USDT to spend)
+            usdt_amount = quantity * price if price and price > 0 else quantity
+            order_data["amount"] = str(round(usdt_amount, 2))
+        else:
+            order_data["amount"] = str(quantity)
         
         if order_type == "limit" and price:
             order_data["price"] = str(price)

@@ -122,6 +122,23 @@ class SignalAllocator:
     MIN_COIN_PCT_FOR_TOPUP = 0.10  # Coin is <10% of total → depleted
     MIN_USDT_PCT_FOR_TOPUP = 0.80  # USDT is >80% of total → can afford top-up
 
+    # Exchange-specific quantity step sizes (LOT_SIZE) for common coins
+    # Binance rejects orders that don't match their LOT_SIZE filter
+    QTY_STEP_SIZES = {
+        'Binance': {
+            'BTC': 0.00001, 'ETH': 0.0001, 'SOL': 0.01, 'XRP': 0.1,
+            'ADA': 0.1, 'DOGE': 1.0, 'DOT': 0.01, 'AVAX': 0.01,
+            'NEAR': 0.1, 'ATOM': 0.01, 'FIL': 0.01, 'APT': 0.01,
+            'ARB': 0.1, 'OP': 0.01, 'LINK': 0.01, 'UNI': 0.01,
+            'MATIC': 0.1, 'LTC': 0.001, 'TRX': 1.0, '_default': 0.01,
+        },
+    }
+
+    # Exchange minimum order amounts in USDT
+    MIN_ORDER_USDT = {
+        'Binance': 5.0, 'HTX': 5.0, 'KuCoin': 1.0, 'Bybit': 1.0, 'MEXC': 1.0,
+    }
+
     def __init__(self, balance_manager=None):
         self.balance_manager = balance_manager
         self._signals: List[SignalRecord] = []
@@ -835,6 +852,15 @@ class SignalAllocator:
         
         return executed
 
+    def _round_qty(self, exchange: str, base_coin: str, qty: float) -> float:
+        """Round quantity to exchange LOT_SIZE step size."""
+        steps = self.QTY_STEP_SIZES.get(exchange, {})
+        step = steps.get(base_coin, steps.get('_default', 0.01))
+        if step <= 0:
+            return qty
+        import math
+        return math.floor(qty / step) * step
+
     async def _execute_buy_order(
         self, exchange: str, symbol: str, base_coin: str,
         qty: float, usdt_amount: float, price: float,
@@ -843,6 +869,17 @@ class SignalAllocator:
         """Execute a buy order (used by pre-fund, top-up, and coin switch)."""
         from core.exchange_config import EXCHANGE_PARAMS
         fee_rate = EXCHANGE_PARAMS.get(exchange, {}).get('taker', 0.001)
+        
+        # Enforce exchange minimum order amount
+        min_order = self.MIN_ORDER_USDT.get(exchange, 5.0)
+        if usdt_amount < min_order:
+            logger.debug(f"  ⏭️ {exchange}: Skip buy — ${usdt_amount:.2f} < ${min_order} minimum")
+            return None
+        
+        # Round quantity to exchange LOT_SIZE step size
+        qty = self._round_qty(exchange, base_coin, qty)
+        if qty <= 0:
+            return None
         
         order = {
             'exchange': exchange, 'symbol': symbol, 'side': 'buy',
@@ -866,10 +903,12 @@ class SignalAllocator:
         else:
             client = (rest_clients or {}).get(exchange)
             if not client or not hasattr(client, 'place_order'):
+                logger.warning(f"⚠️ {exchange}: No REST client available for buy order")
                 return None
             try:
                 result = await client.place_order(
-                    symbol=symbol, side='buy', order_type='market', quantity=qty,
+                    symbol=symbol, side='buy', order_type='market',
+                    quantity=qty, price=price,
                 )
                 self._rebalance_history[(exchange, symbol)] = time.time()
                 self.balance_manager.update_balance_optimistic(exchange, 'USDT', -usdt_amount)
@@ -890,6 +929,11 @@ class SignalAllocator:
         """Execute a sell order (used by coin switch only)."""
         from core.exchange_config import EXCHANGE_PARAMS
         fee_rate = EXCHANGE_PARAMS.get(exchange, {}).get('taker', 0.001)
+        
+        # Round quantity to exchange LOT_SIZE step size
+        qty = self._round_qty(exchange, base_coin, qty)
+        if qty <= 0:
+            return None
         
         order = {
             'exchange': exchange, 'symbol': symbol, 'side': 'sell',
@@ -913,10 +957,12 @@ class SignalAllocator:
         else:
             client = (rest_clients or {}).get(exchange)
             if not client or not hasattr(client, 'place_order'):
+                logger.warning(f"⚠️ {exchange}: No REST client available for sell order")
                 return None
             try:
                 result = await client.place_order(
-                    symbol=symbol, side='sell', order_type='market', quantity=qty,
+                    symbol=symbol, side='sell', order_type='market',
+                    quantity=qty, price=price,
                 )
                 self._rebalance_history[(exchange, symbol)] = time.time()
                 self.balance_manager.update_balance_optimistic(exchange, base_coin, -qty)
