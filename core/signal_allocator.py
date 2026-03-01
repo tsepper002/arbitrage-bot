@@ -84,7 +84,7 @@ class SignalAllocator:
     MIN_SIGNALS_FOR_ALLOCATION = 15  # Require 15+ positive-ROI signals before buying a coin
 
     # Pre-fund: use 50% of USDT for ONE coin on each exchange
-    # With $14/exchange, $2 reserve → $12 available → $6 for coin (above $5 minimum)
+    # Example: $14/exchange − $2 reserve = $12 available → $6 for coin (above $5 min)
     MAX_PREPOSITION_PCT = 0.50
 
     # Maximum allocation to any single symbol
@@ -139,7 +139,9 @@ class SignalAllocator:
 
     # Exchange minimum order amounts in USDT
     MIN_ORDER_USDT = {
-        'Binance': 5.0, 'HTX': 5.0, 'KuCoin': 0.1, 'Bybit': 5.0, 'MEXC': 5.0,
+        'Binance': 5.0, 'HTX': 5.0,
+        'KuCoin': 0.1,   # KuCoin accepts very small market orders (funds-based)
+        'Bybit': 5.0, 'MEXC': 5.0,
     }
 
     def __init__(self, balance_manager=None):
