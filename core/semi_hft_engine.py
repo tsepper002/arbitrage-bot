@@ -38,7 +38,7 @@ class LatencyStats:
     EMA_ALPHA: float = 0.3
 
     def record(self, rtt_ms: float):
-        rtt_ms = max(0.0, min(rtt_ms, 10000.0))  # Clamp
+        rtt_ms = max(0.0, min(rtt_ms, 10000.0))  # Clamp absurd values
         self.samples.append(rtt_ms)
         self.ema_ms = self.EMA_ALPHA * rtt_ms + (1 - self.EMA_ALPHA) * self.ema_ms
 
@@ -254,6 +254,7 @@ class SemiHFTEngine:
     # Stage 1: Latency thresholds
     MAX_RTT_MS = 450              # Exclude exchanges with RTT > 450ms
     MAX_ERROR_RATE = 0.03         # Exclude if > 3% error rate
+    MAX_RTT_CLAMP_MS = 10000.0   # Clamp absurd RTT values (>10s)
     TIME_SYNC_INTERVAL_SEC = 30   # Resync time every 30s
 
     # Stage 2: Per-symbol locks (instead of global)
@@ -264,12 +265,19 @@ class SemiHFTEngine:
     MAKER_MIN_FILL_PROBABILITY = 0.50  # Don't place maker if <50% fill prob
     EARLY_HEDGE_FILL_PCT = 30.0        # Start hedge at 30% fill (not 75%)
     ORDER_SLICE_COUNT = 3              # Split into 3 micro-orders
+    # Fill probability weights (sum to 1.0)
+    FILL_WEIGHT_IMBALANCE = 0.4        # Orderbook imbalance impact
+    FILL_WEIGHT_HISTORY = 0.4          # Historical fill rate impact
+    FILL_WEIGHT_DEPTH = 0.2            # Book depth impact
 
     # Stage 4: Dynamic threshold 2.0
     EXECUTION_FAILURE_BUFFER = 0.02    # +0.02% per 10% failure rate
+    FAILURE_RATE_SCALE = 10            # Multiplier for failure rate → threshold
     P95_SLIPPAGE_WEIGHT = 0.5          # Use p95 slippage in threshold
 
     # Stage 7: Kill-switches
+    KILL_SWITCH_COOLDOWN_SEC = 300     # 5 min cooldown after kill
+    FILL_RATE_COOLDOWN_SEC = 600       # 10 min cooldown for fill-rate kill
     LATENCY_SPIKE_MS = 500             # Kill if latency spike > 500ms
     SLIPPAGE_SPIKE_PCT = 0.5           # Kill if slippage spike > 0.5%
     MIN_FILL_RATE_PCT = 40.0           # Auto-disable at fill-rate < 40%
@@ -410,10 +418,13 @@ class SemiHFTEngine:
 
         # 3. Depth pressure (thinner book = easier to fill, denser = harder)
         best_depth = asks[0][1] if asks and side == 'buy' else (bids[0][1] if bids else 0)
+        # Base factor 0.5 + inverse depth scaled by 100: thin book → ~1.0, deep book → ~0.5
         depth_factor = min(1.0, 0.5 + (1.0 / max(best_depth * 100, 1)))
 
-        # Weighted combination
-        prob = 0.4 * imbalance_factor + 0.4 * hist_fill + 0.2 * depth_factor
+        # Weighted combination (weights defined as class constants)
+        prob = (self.FILL_WEIGHT_IMBALANCE * imbalance_factor +
+                self.FILL_WEIGHT_HISTORY * hist_fill +
+                self.FILL_WEIGHT_DEPTH * depth_factor)
         return max(0.0, min(1.0, prob))
 
     def should_use_maker(self, symbol: str, exchange: str,
@@ -496,7 +507,8 @@ class SemiHFTEngine:
         pair_stats = self._pair_scores.get(pair_key)
         if pair_stats and pair_stats.total >= 5:
             failure_rate = 1.0 - (pair_stats.wins / pair_stats.total)
-            base += failure_rate * self.EXECUTION_FAILURE_BUFFER * 10  # Scale appropriately
+            # Scale failure rate impact: e.g. 30% failures × 0.02 × 10 = +0.06% threshold
+            base += failure_rate * self.EXECUTION_FAILURE_BUFFER * self.FAILURE_RATE_SCALE
 
         # Volatility regime adjustment
         if self._vol_regime.regime == "TRENDING":
@@ -596,7 +608,7 @@ class SemiHFTEngine:
         if not stats:
             return False
         if stats.ema_ms > self.LATENCY_SPIKE_MS:
-            self._latency_kill_until[exchange] = time.time() + 300  # 5 min cooldown
+            self._latency_kill_until[exchange] = time.time() + self.KILL_SWITCH_COOLDOWN_SEC
             logger.warning(
                 f"🛑 LATENCY KILL: {exchange} disabled 5min "
                 f"(latency {stats.ema_ms:.0f}ms > {self.LATENCY_SPIKE_MS}ms)"
@@ -607,7 +619,7 @@ class SemiHFTEngine:
     def check_slippage_kill(self, exchange: str, slippage_pct: float) -> bool:
         """Check and trigger slippage kill-switch if spike detected."""
         if slippage_pct > self.SLIPPAGE_SPIKE_PCT:
-            self._slippage_kill_until[exchange] = time.time() + 300  # 5 min
+            self._slippage_kill_until[exchange] = time.time() + self.KILL_SWITCH_COOLDOWN_SEC
             logger.warning(
                 f"🛑 SLIPPAGE KILL: {exchange} disabled 5min "
                 f"(slippage {slippage_pct:.3f}% > {self.SLIPPAGE_SPIKE_PCT}%)"
@@ -622,7 +634,7 @@ class SemiHFTEngine:
             return False
         rate = stats.fill_rate * 100
         if rate < self.MIN_FILL_RATE_PCT:
-            self._fill_rate_kill_until[exchange] = time.time() + 600  # 10 min
+            self._fill_rate_kill_until[exchange] = time.time() + self.FILL_RATE_COOLDOWN_SEC
             logger.warning(
                 f"🛑 FILL-RATE KILL: {exchange} disabled 10min "
                 f"(fill rate {rate:.0f}% < {self.MIN_FILL_RATE_PCT}%)"

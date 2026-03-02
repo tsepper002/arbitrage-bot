@@ -497,6 +497,8 @@ class OrderExecutor:
             placement_time = time.time() - start_time
             
             # Semi-HFT: Record latency for both exchanges
+            # Note: total placement time is split equally as a reasonable approximation
+            # since individual exchange RTT is measured separately during REST pings.
             if self.semi_hft:
                 placement_ms = placement_time * 1000
                 self.semi_hft.record_latency(buy_ex, placement_ms / 2)
