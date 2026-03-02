@@ -135,8 +135,9 @@ class SignalAllocator:
         'Bybit': 5.0, 'MEXC': 5.0,
     }
 
-    def __init__(self, balance_manager=None):
+    def __init__(self, balance_manager=None, semi_hft_engine=None):
         self.balance_manager = balance_manager
+        self.semi_hft_engine = semi_hft_engine  # For filtering to top exchanges
         self._signals: List[SignalRecord] = []
         self._symbol_scores: Dict[str, float] = {}
         self._last_update = 0.0
@@ -572,6 +573,14 @@ class SignalAllocator:
         now = time.time()
         executed = []
         exchanges = list(self.balance_manager.balances.keys())
+        
+        # CRITICAL: Only pre-fund on TOP exchanges by latency, not ALL 5.
+        # This concentrates capital where it's most useful for arb execution.
+        if self.semi_hft_engine and hasattr(self.semi_hft_engine, 'get_top_exchanges'):
+            top = self.semi_hft_engine.get_top_exchanges(exchanges, n=3)
+            if len(top) >= 2:
+                logger.info(f"🏆 Pre-funding top {len(top)} exchanges: {', '.join(top)} (skipping: {', '.join(e for e in exchanges if e not in top)})")
+                exchanges = top
         
         # Determine the #1 best coin using frequency × avg_roi scoring
         # This picks the coin with BOTH frequent signals AND high average ROI

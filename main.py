@@ -432,6 +432,26 @@ class IntegratedArbitrageBot:
                             logger.warning(f"⚠️ {name} time sync failed: {result}")
                 logger.info("✅ Server time sync complete")
             
+            # SEED HFT LATENCY: Measure REST client RTT at startup so HFT dashboard
+            # shows real data immediately (not "no data" until first trade).
+            if hasattr(self, 'semi_hft_engine') and self.semi_hft_engine and self.rest_clients:
+                logger.info("📡 Measuring exchange latency (REST ping)...")
+                for name, client in self.rest_clients.items():
+                    try:
+                        t0 = time.time()
+                        if hasattr(client, 'get_balance'):
+                            await client.get_balance('USDT')
+                        rtt_ms = (time.time() - t0) * 1000
+                        self.semi_hft_engine.record_latency(name, rtt_ms)
+                        logger.info(f"  📡 {name}: {rtt_ms:.0f}ms RTT")
+                    except Exception as e:
+                        self.semi_hft_engine.record_error(name)
+                        logger.warning(f"  ⚠️ {name}: ping failed ({e})")
+                # Show which exchanges are best
+                all_names = list(self.rest_clients.keys())
+                top = self.semi_hft_engine.get_top_exchanges(all_names, n=3)
+                logger.info(f"🏆 Top exchanges by latency: {', '.join(top)}")
+            
         except Exception as e:
             logger.error(f"❌ Error initializing REST clients: {e}")
             raise
@@ -587,6 +607,9 @@ class IntegratedArbitrageBot:
             if hasattr(settings, 'SEMI_HFT_MIN_FILL_PROB'):
                 self.semi_hft_engine.MAKER_MIN_FILL_PROBABILITY = settings.SEMI_HFT_MIN_FILL_PROB
             logger.info(f"✅ Semi-HFT Engine initialized: {self.semi_hft_engine.get_summary()}")
+            
+            # Wire semi_hft_engine into signal_allocator for top-exchange filtering
+            self.signal_allocator.semi_hft_engine = self.semi_hft_engine
             
             # Professional Infrastructure
             logger.info("\n🔬 Initializing Professional Infrastructure...")

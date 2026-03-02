@@ -521,6 +521,18 @@ class ArbitrageEngine:
         if cm and not cm.is_coin_enabled(symbol):
             return res  # Coin disabled by kill-logic
 
+        # SEMI-HFT: Pre-filter to TOP N exchanges by latency + stability.
+        # This is the KEY optimization: instead of scanning 5×5=20 pairs,
+        # we scan 3×3=6 pairs (or 2×2=4 at micro level), focusing on the
+        # exchanges most likely to execute successfully.
+        hft = self.semi_hft
+        if hft and settings.SEMI_HFT_ENABLED:
+            max_exchanges = cm.level.coin_limit + 1 if cm else 3  # Level 1: 2, Level 2: 4, etc.
+            max_exchanges = max(max_exchanges, 2)  # Need at least 2 for arb
+            exchanges = hft.get_top_exchanges(exchanges, n=max_exchanges)
+            if len(exchanges) < 2:
+                return res  # Not enough healthy exchanges
+
         # BIDIRECTIONAL SCAN FIX: Check ALL directed pairs (A->B AND B->A)
         # Previous version only checked exchanges[i+1:] which missed 50% of opportunities
         for i, buy_ex in enumerate(exchanges):
@@ -986,6 +998,14 @@ class ArbitrageEngine:
                 if scan_start - last_scan >= settings.MIN_SCAN_INTERVAL_PER_SYMBOL_SEC:
                     self.last_scan_time[s] = scan_start
                     ready_symbols.append(s)
+            
+            # SYMBOL RANKING: Scan highest-signal symbols first.
+            # This ensures the most profitable symbols get processed first in each cycle.
+            if self.signal_allocator and ready_symbols:
+                ready_symbols.sort(
+                    key=lambda s: self.signal_allocator._score_symbol_recent(s, 300),
+                    reverse=True
+                )
             
             # SPEED: Scan all symbols concurrently instead of sequentially.
             # Previous: for s in symbols: await scan_once(s)  →  O(N × latency)
