@@ -1598,8 +1598,21 @@ def test_semi_hft_engine():
     hft.record_latency("MEXC", 63)
     for _ in range(10):
         hft.record_latency("HTX", 500)  # 10 samples → EMA converges well above 450ms
+    
+    # Verify that 1-2 bad pings don't exclude (need MIN_SAMPLES_FOR_EXCLUSION=3)
+    hft2 = SemiHFTEngine()
+    hft2.record_latency("BadExchange", 5000)  # Only 1 sample
+    assert not hft2.should_exclude_exchange("BadExchange"), \
+        "1 bad ping should NOT exclude (need 3+ samples)"
+    hft2.record_latency("BadExchange", 5000)  # 2 samples
+    assert not hft2.should_exclude_exchange("BadExchange"), \
+        "2 bad pings should NOT exclude (need 3+ samples)"
+    hft2.record_latency("BadExchange", 5000)  # 3 samples → NOW exclude
+    assert hft2.should_exclude_exchange("BadExchange"), \
+        "3 bad pings should exclude"
+    
     assert not hft.should_exclude_exchange("Binance"), "Binance should NOT be excluded"
-    assert hft.should_exclude_exchange("HTX"), "HTX should be excluded (>450ms)"
+    assert hft.should_exclude_exchange("HTX"), "HTX should be excluded (>450ms, 10 samples)"
     lat = hft.get_exchange_latency_ms("Binance")
     assert lat < 200, f"Binance latency should be well below 200ms, got {lat}"
     print(f"  ✅ Stage 1: Latency tracking (Binance={lat:.0f}ms, HTX excluded)")

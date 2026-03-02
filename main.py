@@ -459,10 +459,11 @@ class IntegratedArbitrageBot:
         for name, client in self.rest_clients.items():
             try:
                 t0 = time.time()
-                if hasattr(client, 'get_balance'):
-                    await client.get_balance('USDT')
-                elif hasattr(client, 'sync_server_time'):
+                # Use sync_server_time (all clients support it, lightweight)
+                if hasattr(client, 'sync_server_time'):
                     await client.sync_server_time()
+                elif hasattr(client, 'get_balance'):
+                    await client.get_balance()  # No arguments — not all clients accept them
                 rtt_ms = (time.time() - t0) * 1000
                 self.semi_hft_engine.record_latency(name, rtt_ms)
                 # Also seed ArbitrageEngine's latency for threshold calculations
@@ -470,9 +471,8 @@ class IntegratedArbitrageBot:
                     self.engine.update_exchange_latency(name, rtt_ms)
                 logger.info(f"  📡 {name}: {rtt_ms:.0f}ms RTT")
             except Exception as e:
-                self.semi_hft_engine.record_error(name)
-                self.semi_hft_engine.record_latency(name, 5000.0)
-                logger.warning(f"  ⚠️ {name}: ping failed ({e})")
+                # Don't record fatal latency on startup failure — just log and skip
+                logger.warning(f"  ⚠️ {name}: ping failed ({e}), will use default latency")
         
         all_names = list(self.rest_clients.keys())
         top = self.semi_hft_engine.get_top_exchanges(all_names, n=3)
@@ -1085,6 +1085,12 @@ class IntegratedArbitrageBot:
                 self.tasks.append(strategy_task)
                 logger.info("✅ Strategy dispatcher task started (14 strategies)")
             
+            # Periodic latency re-ping task (updates exchange latency every 60s)
+            if hasattr(self, 'semi_hft_engine') and self.semi_hft_engine and self.rest_clients:
+                latency_task = asyncio.create_task(self._latency_ping_loop())
+                self.tasks.append(latency_task)
+                logger.info("✅ Periodic latency ping task started (every 60s)")
+            
             # Main arbitrage engine task
             engine_task = asyncio.create_task(self.engine.run(symbols))
             self.tasks.append(engine_task)
@@ -1321,6 +1327,32 @@ class IntegratedArbitrageBot:
             if self.state_manager:
                 self.state_manager.save_state()  # Not async, no await needed
                 logger.info("✅ Final state saved")
+            return
+
+    LATENCY_REPING_INTERVAL_SEC = 60  # Re-ping exchanges every 60 seconds
+
+    async def _latency_ping_loop(self):
+        """Periodically re-ping ALL exchanges to update latency data.
+        
+        This allows excluded exchanges to recover if their latency improves.
+        Without this, an exchange excluded at startup stays excluded FOREVER
+        because no new latency measurements are ever recorded for it.
+        """
+        try:
+            while True:
+                await asyncio.sleep(self.LATENCY_REPING_INTERVAL_SEC)
+                for name, client in self.rest_clients.items():
+                    try:
+                        t0 = time.time()
+                        if hasattr(client, 'sync_server_time'):
+                            await client.sync_server_time()
+                        rtt_ms = (time.time() - t0) * 1000
+                        self.semi_hft_engine.record_latency(name, rtt_ms)
+                        if self.engine:
+                            self.engine.update_exchange_latency(name, rtt_ms)
+                    except Exception:
+                        pass  # Silent — don't spam logs on periodic pings
+        except asyncio.CancelledError:
             return
     
     async def _health_monitor_loop(self):

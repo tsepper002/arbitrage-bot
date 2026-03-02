@@ -311,6 +311,7 @@ class SemiHFTEngine:
         self._latency_kill_until: Dict[str, float] = {}
         self._slippage_kill_until: Dict[str, float] = {}
         self._fill_rate_kill_until: Dict[str, float] = {}
+        self._exclusion_logged: Dict[str, bool] = {}  # Track logged exclusions (avoid spam)
 
         logger.info("🚀 Semi-HFT Engine initialized")
 
@@ -328,8 +329,15 @@ class SemiHFTEngine:
         self._error_counts[exchange] = self._error_counts.get(exchange, 0) + 1
         self._request_counts[exchange] = self._request_counts.get(exchange, 0) + 1
 
+    MIN_SAMPLES_FOR_EXCLUSION = 3  # Need at least N measurements before excluding
+
     def should_exclude_exchange(self, exchange: str) -> bool:
-        """Check if exchange should be excluded due to latency or errors."""
+        """Check if exchange should be excluded due to latency or errors.
+        
+        Requires MIN_SAMPLES_FOR_EXCLUSION measurements before excluding
+        (prevents one bad ping from permanently killing an exchange).
+        Logs exclusion only once per exchange to avoid log spam.
+        """
         now = time.time()
 
         # Check kill-switch timeouts
@@ -340,18 +348,27 @@ class SemiHFTEngine:
         if self._fill_rate_kill_until.get(exchange, 0) > now:
             return True
 
-        # Check latency
+        # Check latency (only after enough samples to be reliable)
         stats = self._latency.get(exchange)
-        if stats and stats.ema_ms > self.MAX_RTT_MS:
-            logger.warning(f"⚡ {exchange} excluded: latency {stats.ema_ms:.0f}ms > {self.MAX_RTT_MS}ms")
+        if stats and len(stats.samples) >= self.MIN_SAMPLES_FOR_EXCLUSION and stats.ema_ms > self.MAX_RTT_MS:
+            if not self._exclusion_logged.get(exchange):
+                logger.warning(f"⚡ {exchange} excluded: latency {stats.ema_ms:.0f}ms > {self.MAX_RTT_MS}ms (based on {len(stats.samples)} samples)")
+                self._exclusion_logged[exchange] = True
             return True
 
-        # Check error rate
+        # Check error rate (only with enough data)
         reqs = self._request_counts.get(exchange, 0)
         errs = self._error_counts.get(exchange, 0)
         if reqs > 20 and (errs / reqs) > self.MAX_ERROR_RATE:
-            logger.warning(f"⚡ {exchange} excluded: error rate {errs / reqs:.1%} > {self.MAX_ERROR_RATE:.0%}")
+            if not self._exclusion_logged.get(exchange):
+                logger.warning(f"⚡ {exchange} excluded: error rate {errs / reqs:.1%} > {self.MAX_ERROR_RATE:.0%}")
+                self._exclusion_logged[exchange] = True
             return True
+
+        # Exchange is healthy — clear any previous exclusion log
+        if self._exclusion_logged.get(exchange):
+            logger.info(f"✅ {exchange} recovered — no longer excluded")
+            self._exclusion_logged[exchange] = False
 
         return False
 
