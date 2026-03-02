@@ -125,17 +125,8 @@ class SignalAllocator:
     MIN_COIN_PCT_FOR_TOPUP = 0.10  # Coin is <10% of total → depleted
     MIN_USDT_PCT_FOR_TOPUP = 0.80  # USDT is >80% of total → can afford top-up
 
-    # Exchange-specific quantity step sizes (LOT_SIZE) for common coins
-    # Binance rejects orders that don't match their LOT_SIZE filter
-    QTY_STEP_SIZES = {
-        'Binance': {
-            'BTC': 0.00001, 'ETH': 0.0001, 'SOL': 0.01, 'XRP': 0.1,
-            'ADA': 0.1, 'DOGE': 1.0, 'DOT': 0.01, 'AVAX': 0.01,
-            'NEAR': 0.1, 'ATOM': 0.01, 'FIL': 0.01, 'APT': 0.01,
-            'ARB': 0.1, 'OP': 0.01, 'LINK': 0.01, 'UNI': 0.01,
-            'MATIC': 0.1, 'LTC': 0.001, 'TRX': 1.0, '_default': 0.01,
-        },
-    }
+    # QTY rounding is now handled by exchange_config.round_qty()
+    # which has complete data for ALL exchanges × ALL coins
 
     # Exchange minimum order amounts in USDT
     MIN_ORDER_USDT = {
@@ -879,12 +870,10 @@ class SignalAllocator:
         return executed
 
     def _round_qty(self, exchange: str, base_coin: str, qty: float) -> float:
-        """Round quantity to exchange LOT_SIZE step size."""
-        steps = self.QTY_STEP_SIZES.get(exchange, {})
-        step = steps.get(base_coin, steps.get('_default', 0.01))
-        if step <= 0:
-            return qty
-        return math.floor(qty / step) * step
+        """Round quantity to exchange LOT_SIZE step size using exchange_config."""
+        from core.exchange_config import round_qty as ec_round_qty
+        symbol = f"{base_coin}-USDT"
+        return ec_round_qty(exchange, symbol, qty)
 
     async def _execute_buy_order(
         self, exchange: str, symbol: str, base_coin: str,
