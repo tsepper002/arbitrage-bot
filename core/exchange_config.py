@@ -1,6 +1,7 @@
 # Configuration and helpers for exchange fees and parameters.
 # You can extend this file or load values from a JSON/YAML file or environment variables.
 
+import math
 import requests
 import logging
 from typing import Dict, Any, Optional
@@ -117,14 +118,13 @@ def get_pair_rules(exchange: str, symbol: str) -> Dict[str, Any]:
     return {
         "step_size": _KNOWN_STEP_SIZES.get(base, _DEFAULT_PAIR_RULES["step_size"]),
         "tick_size": _KNOWN_TICK_SIZES.get(base, _DEFAULT_PAIR_RULES["tick_size"]),
-        "min_qty": _KNOWN_STEP_SIZES.get(base, _DEFAULT_PAIR_RULES["min_qty"]),
+        "min_qty": _DEFAULT_PAIR_RULES["min_qty"],
         "min_notional": _KNOWN_MIN_NOTIONAL.get(exchange, _DEFAULT_PAIR_RULES["min_notional"]),
     }
 
 
 def round_qty(exchange: str, symbol: str, qty: float) -> float:
     """Round quantity to exchange step_size."""
-    import math
     rules = get_pair_rules(exchange, symbol)
     step = rules["step_size"]
     if step <= 0:
@@ -138,7 +138,6 @@ def round_price(exchange: str, symbol: str, price: float) -> float:
     tick = rules["tick_size"]
     if tick <= 0:
         return price
-    import math
     return round(price / tick) * tick
 # Implemented as best-effort: networks and endpoints change over time.
 def fetch_kucoin_fees() -> Optional[Dict[str, Any]]:
