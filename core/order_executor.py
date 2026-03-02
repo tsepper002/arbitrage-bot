@@ -254,15 +254,12 @@ class OrderExecutor:
     FILL_TIMEOUT_SEC = 10.0
     # Poll interval for checking order status
     FILL_POLL_INTERVAL = 0.5
-    # Maximum allowed slippage vs expected price (per leg)
-    MAX_SLIPPAGE_PCT = 0.2  # 0.2% max deviation — tight to protect thin arb spreads
+    # Maximum allowed slippage vs expected price (per leg) — from settings.py
+    MAX_SLIPPAGE_PCT = getattr(settings, 'MAX_SLIPPAGE_PCT', 0.2)
     # Minimum order size in USDT to avoid exchange rejections
     MIN_ORDER_USDT = 5.0  # All 5 exchanges require ≥$5 notional
-    # Minimum expected net profit to execute a LIVE trade
-    # Set to $0.01 — lower than previous $0.02 because the hard fee floor in
-    # _build_trade_from_signal already ensures spread > fees. This gate catches
-    # edge cases where qty adjustment reduces expected profit after fee validation.
-    MIN_LIVE_NET_PROFIT = 0.01
+    # Minimum expected net profit to execute a LIVE trade — from settings.py
+    MIN_LIVE_NET_PROFIT = getattr(settings, 'MIN_LIVE_NET_PROFIT', 0.01)
     # Floating-point tolerance for profit comparisons (prevents rejecting
     # trades that are exactly at the threshold due to IEEE 754 rounding)
     PROFIT_TOLERANCE = 0.001

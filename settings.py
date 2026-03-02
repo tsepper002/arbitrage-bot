@@ -233,6 +233,18 @@ MAX_ORDERBOOK_AGE_MS = _get_env_int("ARB_MAX_ORDERBOOK_AGE_MS", 200)
 # min_depth_at_best >= DEPTH_MULTIPLE × planned_position
 DEPTH_MULTIPLE = _get_env_float("ARB_DEPTH_MULTIPLE", 4.0)
 
+# ============================================================================
+# ENGINE 2.0 — SLIPPAGE & PROFIT PROTECTION
+# ============================================================================
+# Maximum acceptable slippage per order leg (cancel if exceeds)
+MAX_SLIPPAGE_PCT = _get_env_float("ARB_MAX_SLIPPAGE_PCT", 0.2)
+# Minimum expected net profit in USDT to execute a trade
+MIN_LIVE_NET_PROFIT = _get_env_float("ARB_MIN_LIVE_NET_PROFIT", 0.01)
+# Maximum VWAP vs top-of-book slippage (deeper book → reject)
+MAX_VWAP_SLIPPAGE_PCT = _get_env_float("ARB_MAX_VWAP_SLIPPAGE_PCT", 0.3)
+# Reserve percentage (complement of WORKING_CAPITAL_PCT)
+RESERVE_PCT = 100.0 - WORKING_CAPITAL_PCT
+
 def get_enabled_strategies(capital_per_exchange: float = None) -> list:
     """Return list of strategy names enabled for current capital level.
     
