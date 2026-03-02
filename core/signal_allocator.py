@@ -576,9 +576,11 @@ class SignalAllocator:
         
         # CRITICAL: Only pre-fund on TOP exchanges by latency, not ALL 5.
         # This concentrates capital where it's most useful for arb execution.
+        # n=3 ensures at least 2 exchanges after potential failures.
+        MIN_PREFUND_EXCHANGES = 2
         if self.semi_hft_engine and hasattr(self.semi_hft_engine, 'get_top_exchanges'):
-            top = self.semi_hft_engine.get_top_exchanges(exchanges, n=3)
-            if len(top) >= 2:
+            top = self.semi_hft_engine.get_top_exchanges(exchanges, n=max(len(exchanges) - 1, MIN_PREFUND_EXCHANGES))
+            if len(top) >= MIN_PREFUND_EXCHANGES:
                 logger.info(f"🏆 Pre-funding top {len(top)} exchanges: {', '.join(top)} (skipping: {', '.join(e for e in exchanges if e not in top)})")
                 exchanges = top
         

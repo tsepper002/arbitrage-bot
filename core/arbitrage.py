@@ -525,12 +525,14 @@ class ArbitrageEngine:
         # This is the KEY optimization: instead of scanning 5×5=20 pairs,
         # we scan 3×3=6 pairs (or 2×2=4 at micro level), focusing on the
         # exchanges most likely to execute successfully.
+        # Level mapping: coin_limit=1 → 2 exchanges, coin_limit=3 → 4, coin_limit=5 → 6
+        MIN_EXCHANGES_FOR_ARB = 2
         hft = self.semi_hft
         if hft and settings.SEMI_HFT_ENABLED:
-            max_exchanges = cm.level.coin_limit + 1 if cm else 3  # Level 1: 2, Level 2: 4, etc.
-            max_exchanges = max(max_exchanges, 2)  # Need at least 2 for arb
+            max_exchanges = cm.level.coin_limit + 1 if cm else 3
+            max_exchanges = max(max_exchanges, MIN_EXCHANGES_FOR_ARB)
             exchanges = hft.get_top_exchanges(exchanges, n=max_exchanges)
-            if len(exchanges) < 2:
+            if len(exchanges) < MIN_EXCHANGES_FOR_ARB:
                 return res  # Not enough healthy exchanges
 
         # BIDIRECTIONAL SCAN FIX: Check ALL directed pairs (A->B AND B->A)
@@ -1001,9 +1003,10 @@ class ArbitrageEngine:
             
             # SYMBOL RANKING: Scan highest-signal symbols first.
             # This ensures the most profitable symbols get processed first in each cycle.
+            SYMBOL_RANKING_WINDOW = 300  # Score symbols based on last 5 minutes of signals
             if self.signal_allocator and ready_symbols:
                 ready_symbols.sort(
-                    key=lambda s: self.signal_allocator._score_symbol_recent(s, 300),
+                    key=lambda s: self.signal_allocator._score_symbol_recent(s, SYMBOL_RANKING_WINDOW),
                     reverse=True
                 )
             

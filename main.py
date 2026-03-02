@@ -441,11 +441,16 @@ class IntegratedArbitrageBot:
                         t0 = time.time()
                         if hasattr(client, 'get_balance'):
                             await client.get_balance('USDT')
+                        else:
+                            # Fallback: use sync_server_time as ping
+                            if hasattr(client, 'sync_server_time'):
+                                await client.sync_server_time()
                         rtt_ms = (time.time() - t0) * 1000
                         self.semi_hft_engine.record_latency(name, rtt_ms)
                         logger.info(f"  📡 {name}: {rtt_ms:.0f}ms RTT")
                     except Exception as e:
                         self.semi_hft_engine.record_error(name)
+                        self.semi_hft_engine.record_latency(name, 5000.0)  # Penalize failed pings
                         logger.warning(f"  ⚠️ {name}: ping failed ({e})")
                 # Show which exchanges are best
                 all_names = list(self.rest_clients.keys())
