@@ -1506,41 +1506,48 @@ class IntegratedArbitrageBot:
             return
     
     def _is_executable(self, opp: dict) -> bool:
-        """Check if a strategy signal has enough data to execute a trade."""
+        """Check if a strategy signal has enough data to execute a trade.
+        
+        CRITICAL: Only strategies that identify cross-exchange price discrepancies
+        are executable. Market observations (volatility, momentum, etc.) are 
+        NOT executable on their own — they need a spread to profit from.
+        """
         strategy = opp.get('strategy', '')
-        # These strategies produce actionable cross-exchange trades
-        if strategy in ('TRIANGULAR', 'FUNDING_RATE', 'INDEX_ARB'):
-            return True
-        # SMART_ORDER: wide spread = profitable cross-exchange opportunity
-        if strategy == 'SMART_ORDER' and opp.get('data', {}).get('spread_pct', 0) > 0:
-            return True
+        data = opp.get('data', {})
+        
+        # Strategies that directly produce cross-exchange trade signals
+        if strategy == 'TRIANGULAR':
+            return True  # Has complete route and profit calculation
+        if strategy == 'FUNDING_RATE' and data.get('deviation_pct', 0) > 0.1:
+            return True  # Premium/discount detected between exchanges
+        if strategy == 'INDEX_ARB' and abs(data.get('deviation_pct', 0)) > 0.1:
+            return True  # Index vs component price difference
+        
+        # SMART_ORDER: only if spread is wide enough to potentially cover fees
+        if strategy == 'SMART_ORDER':
+            spread = data.get('spread_pct', 0)
+            if spread > 0.10:  # Only if spread > 0.10% (close to fee coverage)
+                return True
+        
         # VOLATILITY_ARB: spread width difference between exchanges
-        if strategy == 'VOLATILITY_ARB' and opp.get('data', {}):
-            return True
-        # MARKET_MAKING signals with spread data can execute
-        if strategy == 'MARKET_MAKING' and opp.get('data', {}).get('spread_pct', 0) > 0:
-            return True
-        # DCA buy signals
-        if strategy == 'DCA' and opp.get('data', {}).get('dip_pct', 0) > 0:
-            return True
-        # PAIRS_TRADING z-score signals
-        if strategy == 'PAIRS_TRADING' and abs(opp.get('data', {}).get('z_score', 0)) > 0:
-            return True
-        # SPREAD_BETTING z-score signals
-        if strategy == 'SPREAD_BETTING' and abs(opp.get('data', {}).get('z_score', 0)) > 0:
-            return True
-        # MOMENTUM with strong signal
-        if strategy == 'MOMENTUM' and opp.get('data', {}).get('strength', 0) > 0.6:
-            return True
-        # BREAKOUT detected
-        if strategy == 'BREAKOUT' and opp.get('data', {}):
-            return True
-        # VOLATILITY: high volatility = spread opportunities
-        if strategy == 'VOLATILITY' and opp.get('data', {}).get('volatility_pct', 0) > 0:
-            return True
-        # GRID_TRADING: price deviation from center
-        if strategy == 'GRID_TRADING' and opp.get('data', {}).get('deviation_pct', 0) > 0:
-            return True
+        if strategy == 'VOLATILITY_ARB':
+            spread_diff = data.get('spread_diff_pct', data.get('spread_pct', 0))
+            if spread_diff > 0.10:
+                return True
+        
+        # PAIRS_TRADING/SPREAD_BETTING: only extreme z-scores (statistical edge)
+        if strategy in ('PAIRS_TRADING', 'SPREAD_BETTING'):
+            z = abs(data.get('z_score', 0))
+            if z > 2.0:  # Only execute on strong statistical signals
+                return True
+        
+        # These are MARKET OBSERVATIONS, not executable trades:
+        # VOLATILITY — just says coin is volatile, no trade direction
+        # MOMENTUM — trend signal, not cross-exchange arb
+        # BREAKOUT — price breakout, no exchange-pair trade
+        # DCA — buy-the-dip signal, not cross-exchange
+        # GRID_TRADING — grid position signal, not cross-exchange
+        # MARKET_MAKING — spread observation, not a cross-exchange trade
         return False
     
     def _build_trade_from_signal(self, opp: dict) -> dict:
@@ -1638,12 +1645,23 @@ class IntegratedArbitrageBot:
         roi_pct = (net / invested) * 100 if invested > 0 else 0
         
         # Signal confidence reduces required ROI threshold:
-        # High-confidence signals (z>2.0, RSI extreme) add statistical
-        # edge on top of the spread, so we lower the bar by up to 80%.
+        # High-confidence signals add statistical edge, so we lower the bar
+        # by up to 50% (NEVER more — must always cover fees).
         confidence = self._signal_confidence(strategy, data)
-        min_roi = settings.MIN_NET_ROI_PCT * (1.0 - 0.8 * confidence)
+        min_roi = settings.MIN_NET_ROI_PCT * (1.0 - 0.5 * confidence)
         
-        # Only return if profitable after fees (with confidence-adjusted threshold)
+        # HARD FLOOR: spread MUST exceed total fees — no exceptions.
+        # Without this, "confidence" could push min_roi below 0 → guaranteed loss.
+        total_fee_pct = (buy_fee + sell_fee) * 100
+        spread_pct_raw = ((best_sell_price - best_buy_price) / best_buy_price) * 100 if best_buy_price > 0 else 0
+        if spread_pct_raw < total_fee_pct:
+            # Spread doesn't cover fees — trade will LOSE money regardless of confidence
+            gap = total_fee_pct - spread_pct_raw
+            reason = f"spread<fees ({spread_pct_raw:.3f}%<{total_fee_pct:.2f}%, gap={gap:.3f}%)"
+            self._track_rejection(reason, strategy, symbol, best_buy_ex, best_sell_ex, spread_pct_raw, total_fee_pct)
+            return None
+        
+        # Only return if net profit is positive with sufficient margin
         if net <= 0 or roi_pct < min_roi:
             spread_pct = ((best_sell_price - best_buy_price) / best_buy_price) * 100
             fee_pct = (buy_fee + sell_fee) * 100
@@ -1671,41 +1689,24 @@ class IntegratedArbitrageBot:
         
         Higher confidence = lower ROI threshold needed for execution.
         Returns 0.0 for strategies without statistical edge (pure spread).
+        
+        IMPORTANT: Max confidence discount is 50% (see _build_trade_from_signal).
+        This means even with confidence=1.0, min_roi is still ≥ 50% of MIN_NET_ROI_PCT.
+        The trade MUST ALWAYS have spread > total fees regardless of confidence.
         """
         if strategy in ('PAIRS_TRADING', 'SPREAD_BETTING'):
-            # z-score > 2.0 = high confidence, > 3.0 = very high
             z = abs(data.get('z_score', 0))
-            return min(z / 4.0, 1.0) if z > 2.0 else 0.0  # Raised from 1.5 to match scanner
-        elif strategy == 'MOMENTUM':
-            # RSI < 25 or > 75 = high confidence (extreme overbought/oversold)
-            rsi = data.get('rsi', 50)
-            # Normalized distance from RSI=50, range [0.0, 1.0]
-            extremity = min(abs(rsi - 50) / 50.0, 1.0)
-            return extremity if extremity > 0.4 else 0.0
+            return min(z / 4.0, 1.0) if z > 2.0 else 0.0
         elif strategy == 'FUNDING_RATE':
-            # Scanner sends 'deviation_pct'; accept both keys for robustness
             premium = abs(data.get('deviation_pct', data.get('premium_pct', 0)))
             return min(premium / 1.0, 1.0) if premium > 0.2 else 0.0
         elif strategy == 'INDEX_ARB':
             deviation = abs(data.get('deviation_pct', 0))
             return min(deviation / 0.5, 1.0) if deviation > 0.1 else 0.0
         elif strategy == 'VOLATILITY_ARB':
-            return 0.3  # Moderate base confidence for vol differences
-        elif strategy == 'DCA':
-            dip = data.get('dip_pct', 0)
-            return min(dip / 5.0, 1.0) if dip > 1.0 else 0.0
-        elif strategy == 'BREAKOUT':
-            return 0.5  # Breakout signals have moderate confidence
-        elif strategy == 'MARKET_MAKING':
-            spread = data.get('spread_pct', 0)
-            return min(spread / 1.0, 1.0) if spread > 0.1 else 0.0
-        elif strategy in ('SMART_ORDER', 'VOLATILITY'):
-            return 0.3  # Moderate confidence for market condition signals
-        elif strategy == 'GRID_TRADING':
-            # Higher deviation = higher confidence
-            dev = data.get('deviation_pct', 0)
-            return min(dev / 2.0, 1.0) if dev > 0.3 else 0.0  # Only >0.3% deviation
-        # Pure spread strategies: no additional statistical edge
+            return 0.2  # Small confidence bonus
+        # All other strategies: NO confidence bonus
+        # They don't provide statistical edge that justifies reduced ROI threshold
         return 0.0
     
     def _track_rejection(self, reason: str, strategy: str = "", symbol: str = "",

@@ -148,10 +148,17 @@ class OrderExecutor:
         base_currency = symbol.split('-')[0] if '-' in symbol else symbol.replace('USDT', '')
         quote_currency = 'USDT'
         
+        # PROFIT GATE (same as live mode for consistent simulation)
+        if net_profit < (self.MIN_LIVE_NET_PROFIT - 0.001) and net_profit >= 0:
+            logger.debug(f"[DRY] ⛔ {symbol}: Profit ${net_profit:.4f} < ${self.MIN_LIVE_NET_PROFIT} minimum")
+            return {'status': 'blocked', 'reason': f'Too thin: ${net_profit:.4f} < ${self.MIN_LIVE_NET_PROFIT}'}
+        
         # Check virtual balances before executing (realistic simulation)
         if self.balance_manager:
             # Fee buffer: max taker fee is 0.2% (HTX), round up to 0.2% for safety
             FEE_BUFFER = 1.002
+            # Use lower min order in dry-run since no exchange API call
+            min_order = 1.0
             
             # Auto-adjust qty to available balance (prevents precision rounding issues)
             available_sell = self.balance_manager.get_balance(sell_ex, base_currency)
@@ -161,7 +168,7 @@ class OrderExecutor:
             # Use the minimum of requested qty, available to sell, and available to buy
             adjusted_qty = min(qty, available_sell, max_qty_from_usdt)
             
-            if adjusted_qty <= 0 or (adjusted_qty * buy_price) < self.MIN_ORDER_USDT:
+            if adjusted_qty <= 0 or (adjusted_qty * buy_price) < min_order:
                 # Not enough balance for any meaningful trade
                 if available_sell <= 0:
                     self._blocked_cooldown[symbol] = time.time()
@@ -234,11 +241,13 @@ class OrderExecutor:
     # Poll interval for checking order status
     FILL_POLL_INTERVAL = 0.5
     # Maximum allowed slippage vs expected price (per leg)
-    MAX_SLIPPAGE_PCT = 0.3  # 0.3% max deviation — tighter to protect thin arb spreads
+    MAX_SLIPPAGE_PCT = 0.2  # 0.2% max deviation — tight to protect thin arb spreads
     # Minimum order size in USDT to avoid exchange rejections
     MIN_ORDER_USDT = 5.0  # All 5 exchanges require ≥$5 notional
     # Minimum expected net profit to execute a LIVE trade (protects against slippage eating spread)
-    MIN_LIVE_NET_PROFIT = 0.02  # $0.02 minimum expected profit
+    MIN_LIVE_NET_PROFIT = 0.01  # $0.01 minimum expected profit
+    # Minimum ROI to execute a LIVE trade (must always exceed total fees)
+    MIN_LIVE_ROI_PCT = 0.01  # 0.01% minimum ROI — redundant with fee check but extra safety
     # Minimum ratio of adjusted qty vs requested qty to proceed
     QTY_ADJUST_THRESHOLD = 0.95  # Proceed if ≥95% of requested qty available
 
@@ -276,6 +285,11 @@ class OrderExecutor:
                       f"(ROI={expected_roi:.3f}%) — too thin for live execution")
             logger.debug(f"⛔ {symbol}: {reason}")
             return {'status': 'blocked', 'reason': reason}
+        if expected_roi < self.MIN_LIVE_ROI_PCT:
+            reason = (f"Expected ROI {expected_roi:.3f}% < {self.MIN_LIVE_ROI_PCT}% minimum "
+                      f"(net=${expected_net:.4f}) — slippage would likely eat profit")
+            logger.debug(f"⛔ {symbol}: {reason}")
+            return {'status': 'blocked', 'reason': reason}
         
         logger.info(
             f"🔴 LIVE EXECUTION: {symbol} | "
@@ -294,11 +308,14 @@ class OrderExecutor:
                 logger.error(f"❌ {error_msg}")
                 return {'status': 'error', 'reason': error_msg}
             
-            # Step 2: Auto-adjust qty to available balance
+            # Step 2: Auto-adjust qty to available balance (with fee buffer)
             if self.balance_manager:
+                # Use has_sufficient_balance for proper safety margin checks
                 available_usdt = self.balance_manager.get_balance(buy_ex, quote_currency)
                 available_base = self.balance_manager.get_balance(sell_ex, base_currency)
-                max_qty_buy = available_usdt / (buy_price * 1.003) if buy_price > 0 else 0
+                # Fee buffer: 0.3% covers max taker fee (HTX 0.2%) + slippage
+                FEE_BUFFER = 1.003
+                max_qty_buy = available_usdt / (buy_price * FEE_BUFFER) if buy_price > 0 else 0
                 adjusted_qty = min(qty, available_base, max_qty_buy)
                 
                 if adjusted_qty <= 0 or adjusted_qty * buy_price < self.MIN_ORDER_USDT:
