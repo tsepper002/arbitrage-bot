@@ -395,6 +395,11 @@ def test_e2e_arbitrage():
         bids_levels=[(3000.0, 10.0)], asks_levels=[(3000.0, 10.0)]))
     loop.run_until_complete(store.update_levels("MEXC", "ETH-USDT",
         bids_levels=[(3010.0, 10.0)], asks_levels=[(3010.0, 10.0)]))
+    # First scan records the spread (persistence filter), second scan finds it
+    loop.run_until_complete(engine.scan_once("ETH-USDT"))
+    # Backdate spread first-seen time so second scan passes persistence check
+    for k in list(engine._spread_first_seen.keys()):
+        engine._spread_first_seen[k] -= engine.MIN_SPREAD_HOLD_MS + 100
     opps = loop.run_until_complete(engine.scan_once("ETH-USDT"))
     assert len(opps) > 0
     result = loop.run_until_complete(executor.execute_arbitrage(opps[0]))
