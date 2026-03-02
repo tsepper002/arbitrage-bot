@@ -255,11 +255,11 @@ class OrderExecutor:
     # Poll interval for checking order status
     FILL_POLL_INTERVAL = 0.5
     # Maximum allowed slippage vs expected price (per leg) — from settings.py
-    MAX_SLIPPAGE_PCT = getattr(settings, 'MAX_SLIPPAGE_PCT', 0.2)
+    MAX_SLIPPAGE_PCT = settings.MAX_SLIPPAGE_PCT
     # Minimum order size in USDT to avoid exchange rejections
     MIN_ORDER_USDT = 5.0  # All 5 exchanges require ≥$5 notional
     # Minimum expected net profit to execute a LIVE trade — from settings.py
-    MIN_LIVE_NET_PROFIT = getattr(settings, 'MIN_LIVE_NET_PROFIT', 0.01)
+    MIN_LIVE_NET_PROFIT = settings.MIN_LIVE_NET_PROFIT
     # Floating-point tolerance for profit comparisons (prevents rejecting
     # trades that are exactly at the threshold due to IEEE 754 rounding)
     PROFIT_TOLERANCE = 0.001

@@ -172,7 +172,7 @@ class ArbitrageEngine:
         self.MAX_COMBINED_LATENCY_MS = 1000  # Skip if combined latency > 1s
         self.DEFAULT_EXCHANGE_LATENCY_MS = 200  # Assumed latency when no data available
         self.LATENCY_EMA_ALPHA = 0.3  # Smoothing factor for latency EMA
-        self.MAX_VWAP_SLIPPAGE_PCT = getattr(settings, 'MAX_VWAP_SLIPPAGE_PCT', 0.3)
+        self.MAX_VWAP_SLIPPAGE_PCT = settings.MAX_VWAP_SLIPPAGE_PCT
         
         logger.info(f"ArbitrageEngine initialized: min_roi={self.min_net_pct}%, max_exposure=${self.max_exposure_usdt}, safety_factor={self.safety_factor}")
 
