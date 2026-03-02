@@ -73,19 +73,46 @@ class StateManager:
     
     def load_state(self) -> bool:
         """
-        Load state from disk.
+        Load state from disk with validation.
         
         Returns:
             True if loaded successfully, False otherwise
         """
         try:
             with open(self.state_file, 'r') as f:
-                self.state = json.load(f)
+                loaded = json.load(f)
+            
+            # Validate: must be a dict with required fields
+            if not isinstance(loaded, dict):
+                logger.error("State file is not a valid JSON object, starting fresh")
+                return False
+            
+            # Merge with defaults to fill any missing fields
+            default = self._get_default_state()
+            for key, default_val in default.items():
+                if key not in loaded:
+                    loaded[key] = default_val
+                    logger.warning(f"   ⚠️ Missing state field '{key}', using default")
+            
+            self.state = loaded
+            
+            # Check for stale daily counters (reset if from yesterday)
+            last_reset = self.state.get("daily_reset_timestamp", 0.0)
+            if last_reset > 0 and time.time() - last_reset > 86400:
+                logger.info("   🔄 Daily counters are stale (>24h), resetting")
+                self.state["daily_pnl"] = 0.0
+                self.state["total_trades_today"] = 0
+                self.state["consecutive_losses"] = 0
+                self.state["hourly_pnl"] = 0.0
             
             logger.info(f"✅ State loaded from {self.state_file}")
             logger.info(f"   Daily P&L: ${self.state.get('daily_pnl', 0):.2f}")
             logger.info(f"   Trades today: {self.state.get('total_trades_today', 0)}")
-            logger.info(f"   Pending orders: {len(self.state.get('pending_orders', []))}")
+            logger.info(f"   Lifetime P&L: ${self.state.get('total_lifetime_pnl', 0):.2f}")
+            logger.info(f"   Lifetime trades: {self.state.get('total_lifetime_trades', 0)}")
+            pending = self.state.get('pending_orders', [])
+            if pending:
+                logger.warning(f"   ⚠️ {len(pending)} pending orders from previous session!")
             logger.info(f"   Last updated: {time.ctime(self.state.get('last_updated', 0))}")
             
             return True
@@ -96,6 +123,16 @@ class StateManager:
         
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse state file: {e}")
+            # Try backup
+            backup = f"{self.state_file}.bak"
+            if os.path.exists(backup):
+                try:
+                    with open(backup, 'r') as f:
+                        self.state = json.load(f)
+                    logger.info(f"✅ Recovered from backup state file")
+                    return True
+                except Exception:
+                    pass
             logger.info("Starting with clean state")
             return False
         
@@ -119,11 +156,15 @@ class StateManager:
             with open(temp_file, 'w') as f:
                 json.dump(self.state, f, indent=2)
             
-            # Atomic rename
+            # Backup existing state before overwriting
             if os.path.exists(self.state_file):
-                os.replace(temp_file, self.state_file)
-            else:
-                os.rename(temp_file, self.state_file)
+                try:
+                    os.replace(self.state_file, f"{self.state_file}.bak")
+                except Exception:
+                    pass
+            
+            # Atomic rename
+            os.replace(temp_file, self.state_file)
             
             self.last_save_time = time.time()
             logger.debug(f"State saved to {self.state_file}")

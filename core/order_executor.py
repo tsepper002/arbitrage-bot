@@ -23,7 +23,7 @@ class OrderExecutor:
     - live: Real order placement with parallel execution and balance management
     """
     
-    def __init__(self, dry_run: Optional[bool] = None, rest_clients: Optional[Dict] = None, balance_manager=None, capital_manager=None):
+    def __init__(self, dry_run: Optional[bool] = None, rest_clients: Optional[Dict] = None, balance_manager=None, capital_manager=None, state_manager=None):
         """
         Initialize order executor.
         
@@ -32,11 +32,13 @@ class OrderExecutor:
             rest_clients: Dict of {exchange_name: REST_client} for live trading
             balance_manager: BalanceManager instance for balance tracking
             capital_manager: CapitalManager instance for Engine 2.0 kill-logic + quality ranking
+            state_manager: StateManager instance for persistent order tracking
         """
         self.dry_run = dry_run if dry_run is not None else settings.DRY_RUN
         self.rest_clients = rest_clients or {}
         self.balance_manager = balance_manager
         self.capital_manager = capital_manager
+        self.state_manager = state_manager
         self.order_history: deque = deque(maxlen=10000)  # Auto-bounded
         self.trade_count_per_minute: Dict[int, int] = {}  # minute timestamp -> count
         self.last_trade_time_per_symbol: Dict[str, float] = {}  # symbol -> last trade timestamp
@@ -389,6 +391,13 @@ class OrderExecutor:
                     logger.info(f"📏 Adjusted qty: {qty:.6f} → {adjusted_qty:.6f} (balance limited)")
                     qty = adjusted_qty
             
+            # Step 2b: Final volume sanity check before any order placement
+            if qty <= 0:
+                return {'status': 'blocked', 'reason': 'Zero quantity after adjustments'}
+            order_value_usdt = qty * (buy_price if buy_price else 0)
+            if order_value_usdt < self.MIN_ORDER_USDT:
+                return {'status': 'blocked', 'reason': f'Order value ${order_value_usdt:.2f} < minimum ${self.MIN_ORDER_USDT}'}
+            
             # Step 3: Place orders — Maker-First model or Parallel Market orders
             # Engine 2.0: Maker-First reduces fees by using limit buy + market sell
             # (saves 0.05-0.10% on buy side = significant for thin spreads)
@@ -418,6 +427,9 @@ class OrderExecutor:
                 buy_order_id = self._extract_order_id(buy_result)
                 open_order = {'exchange': buy_ex, 'symbol': symbol, 'order_id': buy_order_id, 'side': 'buy'}
                 self._open_orders.append(open_order)
+                # Persist to state for crash recovery
+                if self.state_manager:
+                    self.state_manager.add_pending_order(open_order)
                 
                 # Wait for fill (up to MAKER_FILL_TIMEOUT_MS)
                 fill_timeout_sec = settings.MAKER_FILL_TIMEOUT_MS / 1000.0
@@ -427,6 +439,8 @@ class OrderExecutor:
                 # Remove from open orders (filled or about to cancel)
                 if open_order in self._open_orders:
                     self._open_orders.remove(open_order)
+                if self.state_manager and buy_order_id:
+                    self.state_manager.remove_pending_order(buy_order_id)
                 
                 if buy_filled_pct < settings.MAKER_MIN_FILL_PCT:
                     # Not enough fill — cancel and abort

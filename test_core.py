@@ -1514,6 +1514,71 @@ def test_dry_run_balance_tracking():
     print(f"  ✅ Capital ${20}/exchange → pre-position {coins} coin(s)")
 
 
+def test_state_recovery():
+    """TEST: State Manager crash recovery"""
+    print("\n" + "=" * 60)
+    print("TEST: State Manager Crash Recovery")
+    print("=" * 60)
+    import json, tempfile
+    from core.state_manager import StateManager
+    
+    # Create a state file simulating a previous session
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, dir='/tmp') as f:
+        state_file = f.name
+        json.dump({
+            "version": "1.0",
+            "last_updated": time.time() - 60,
+            "daily_pnl": -0.15,
+            "total_trades_today": 5,
+            "total_lifetime_pnl": 2.34,
+            "total_lifetime_trades": 47,
+            "consecutive_losses": 2,
+            "pending_orders": [
+                {"exchange": "Bybit", "symbol": "NEAR-USDT", "order_id": "test123", "side": "buy", "added_at": time.time() - 300},
+            ],
+        }, f)
+    
+    # Load state
+    sm = StateManager(state_file=state_file)
+    result = sm.load_state()
+    assert result, "State should load successfully"
+    assert sm.state["daily_pnl"] == -0.15, f"daily_pnl should be -0.15, got {sm.state['daily_pnl']}"
+    assert sm.state["total_lifetime_pnl"] == 2.34, "lifetime pnl should be restored"
+    assert sm.state["consecutive_losses"] == 2, "consecutive losses should be restored"
+    print("  ✅ State loaded: daily_pnl, lifetime_pnl, consecutive_losses restored")
+    
+    # Verify missing fields are filled with defaults
+    assert "balances" in sm.state, "Missing 'balances' should be added from defaults"
+    assert "symbol_pnl" in sm.state, "Missing 'symbol_pnl' should be added from defaults"
+    print("  ✅ Missing fields filled with defaults")
+    
+    # Verify pending orders are accessible
+    pending = sm.get_pending_orders()
+    assert len(pending) == 1, f"Should have 1 pending order, got {len(pending)}"
+    assert pending[0]["order_id"] == "test123"
+    print("  ✅ Pending orders recovered: 1 orphaned order found")
+    
+    # Test save creates backup
+    sm.save_state()
+    assert os.path.exists(f"{state_file}.bak"), "Backup file should be created"
+    print("  ✅ State save creates .bak backup")
+    
+    # Test corrupt JSON recovery from backup
+    with open(state_file, 'w') as f:
+        f.write("{corrupt json!!!}")
+    sm2 = StateManager(state_file=state_file)
+    result2 = sm2.load_state()
+    assert result2, "Should recover from backup"
+    assert sm2.state.get("total_lifetime_pnl") == 2.34, "Backup should have correct data"
+    print("  ✅ Corrupt state → recovered from .bak backup")
+    
+    # Cleanup
+    for f in [state_file, f"{state_file}.bak", f"{state_file}.tmp"]:
+        if os.path.exists(f):
+            os.unlink(f)
+    print("  ✅ State recovery test complete")
+
+
 if __name__ == "__main__":
     tests = [
         test_settings, test_price_store, test_exchange_config, test_order_executor,
@@ -1531,6 +1596,7 @@ if __name__ == "__main__":
         test_cross_exchange_and_triangular_signals,
         test_scaling_and_e2e_pipeline,
         test_dry_run_balance_tracking,
+        test_state_recovery,
     ]
     passed = failed = 0
     for t in tests:

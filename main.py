@@ -20,6 +20,7 @@ import asyncio
 import argparse
 import logging
 import os
+import time
 from typing import List, Dict, Optional
 
 # CRITICAL: Load .env file BEFORE importing settings
@@ -396,6 +397,73 @@ class IntegratedArbitrageBot:
             logger.error(f"❌ Error initializing REST clients: {e}")
             raise
     
+    async def _recover_pending_orders(self):
+        """Process orphaned pending orders from a previous session (crash recovery)."""
+        if not self.state_manager or not self.rest_clients:
+            return
+        
+        pending = self.state_manager.get_pending_orders()
+        if not pending:
+            return
+        
+        logger.warning(f"🔄 RECOVERY: Found {len(pending)} pending orders from previous session")
+        
+        for order in list(pending):
+            exchange = order.get('exchange', '')
+            symbol = order.get('symbol', '')
+            order_id = order.get('order_id', '')
+            side = order.get('side', '')
+            age_sec = time.time() - order.get('added_at', 0)
+            
+            client = self.rest_clients.get(exchange)
+            if not client:
+                logger.warning(f"   ⚠️ No client for {exchange}, removing stale order {order_id}")
+                self.state_manager.remove_pending_order(order_id)
+                continue
+            
+            try:
+                # Try to check order status
+                status = await client.get_order_status(symbol, order_id)
+                if isinstance(status, Exception):
+                    logger.warning(f"   ⚠️ Cannot check order {order_id} on {exchange}: {status}")
+                    # If order is very old (>5 min), it's likely dead — remove
+                    if age_sec > 300:
+                        logger.info(f"   🗑️ Removing stale order {order_id} (age: {age_sec:.0f}s)")
+                        self.state_manager.remove_pending_order(order_id)
+                    continue
+                
+                order_status = ''
+                if isinstance(status, dict):
+                    order_status = str(status.get('status', status.get('ordStatus', ''))).lower()
+                
+                if order_status in ('filled', 'closed', 'done', 'cancelled', 'canceled', 'expired'):
+                    logger.info(f"   ✅ Order {order_id} on {exchange}: {order_status} — removing")
+                    self.state_manager.remove_pending_order(order_id)
+                elif order_status in ('new', 'open', 'partially_filled', 'active'):
+                    # Cancel stale open orders to prevent unexpected fills
+                    logger.warning(f"   🧹 Cancelling stale open order {order_id} on {exchange} ({symbol} {side})")
+                    try:
+                        await client.cancel_order(symbol, order_id)
+                        logger.info(f"   ✅ Cancelled {order_id}")
+                    except Exception as ce:
+                        logger.warning(f"   ⚠️ Cancel failed: {ce}")
+                    self.state_manager.remove_pending_order(order_id)
+                else:
+                    # Unknown status, remove if old
+                    if age_sec > 300:
+                        self.state_manager.remove_pending_order(order_id)
+                    
+            except Exception as e:
+                logger.warning(f"   ⚠️ Error recovering order {order_id}: {e}")
+                if age_sec > 300:
+                    self.state_manager.remove_pending_order(order_id)
+        
+        remaining = len(self.state_manager.get_pending_orders())
+        if remaining == 0:
+            logger.info("🔄 RECOVERY: All pending orders processed ✅")
+        else:
+            logger.warning(f"🔄 RECOVERY: {remaining} orders still pending (will retry)")
+
     async def _initialize_managers(self):
         """Initialize all manager components."""
         try:
@@ -414,11 +482,16 @@ class IntegratedArbitrageBot:
             else:
                 logger.warning("⚠️  No REST clients available, Balance Manager in limited mode")
             
+            # Process orphaned pending orders from previous session
+            await self._recover_pending_orders()
+            
             # Risk Manager
             self.risk_manager = get_risk_manager()
             # Restore daily stats from state
             if self.state_manager.state.get("daily_pnl"):
                 self.risk_manager.daily_pnl = self.state_manager.state["daily_pnl"]
+            if self.state_manager.state.get("consecutive_losses"):
+                self.risk_manager.consecutive_losses = self.state_manager.state["consecutive_losses"]
             logger.info("✅ Risk Manager initialized")
             
             # Telegram Bot
@@ -831,6 +904,7 @@ class IntegratedArbitrageBot:
                 rest_clients=self.rest_clients,
                 balance_manager=self.balance_manager,
                 capital_manager=self.capital_manager,
+                state_manager=self.state_manager,
             )
             self.executor = executor
             

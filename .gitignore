@@ -36,6 +36,8 @@ secrets.py
 
 # Bot runtime data (preserved across updates)
 bot_state.json
+bot_state.json.bak
+bot_state.json.tmp
 trades.csv
 models/
 
