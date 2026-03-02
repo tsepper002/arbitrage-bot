@@ -23,7 +23,7 @@ class OrderExecutor:
     - live: Real order placement with parallel execution and balance management
     """
     
-    def __init__(self, dry_run: Optional[bool] = None, rest_clients: Optional[Dict] = None, balance_manager=None, capital_manager=None, state_manager=None):
+    def __init__(self, dry_run: Optional[bool] = None, rest_clients: Optional[Dict] = None, balance_manager=None, capital_manager=None, state_manager=None, semi_hft_engine=None):
         """
         Initialize order executor.
         
@@ -33,12 +33,14 @@ class OrderExecutor:
             balance_manager: BalanceManager instance for balance tracking
             capital_manager: CapitalManager instance for Engine 2.0 kill-logic + quality ranking
             state_manager: StateManager instance for persistent order tracking
+            semi_hft_engine: SemiHFTEngine for predictive maker model + kill-switches
         """
         self.dry_run = dry_run if dry_run is not None else settings.DRY_RUN
         self.rest_clients = rest_clients or {}
         self.balance_manager = balance_manager
         self.capital_manager = capital_manager
         self.state_manager = state_manager
+        self.semi_hft = semi_hft_engine
         self.order_history: deque = deque(maxlen=10000)  # Auto-bounded
         self.trade_count_per_minute: Dict[int, int] = {}  # minute timestamp -> count
         self.last_trade_time_per_symbol: Dict[str, float] = {}  # symbol -> last trade timestamp
@@ -411,6 +413,20 @@ class OrderExecutor:
                 and sell_price > buy_price
             )
             
+            # Semi-HFT: Use predictive model to decide maker vs market-market
+            # In PANIC regime or low fill probability → skip maker, go market-market
+            if use_maker_first and self.semi_hft and settings.SEMI_HFT_ENABLED:
+                # Get orderbook data for fill probability prediction
+                asks_data = opportunity.get('asks_levels', [])
+                bids_data = opportunity.get('bids_levels', [])
+                if asks_data and bids_data:
+                    if not self.semi_hft.should_use_maker(
+                        symbol, buy_ex, bids_data, asks_data, 
+                        (sell_price / buy_price - 1) * 100 if buy_price > 0 else 0
+                    ):
+                        use_maker_first = False
+                        logger.debug(f"🔄 Semi-HFT: Switching to market-market (low fill prob or panic)")
+            
             if use_maker_first:
                 # Maker-first: limit buy, wait for fill, THEN market sell
                 spread = sell_price - buy_price
@@ -442,13 +458,24 @@ class OrderExecutor:
                 if self.state_manager and buy_order_id:
                     self.state_manager.remove_pending_order(buy_order_id)
                 
-                if buy_filled_pct < settings.MAKER_MIN_FILL_PCT:
+                # Semi-HFT: Use early hedge threshold (30%) instead of conservative (75%)
+                min_fill_pct = settings.MAKER_MIN_FILL_PCT
+                if self.semi_hft and settings.SEMI_HFT_ENABLED:
+                    min_fill_pct = settings.SEMI_HFT_EARLY_HEDGE_PCT
+                
+                if buy_filled_pct < min_fill_pct:
                     # Not enough fill — cancel and abort
                     await self._safe_cancel(buy_client, symbol, buy_order_id, 'buy')
-                    logger.info(f"📭 Maker buy only {buy_filled_pct:.0f}% filled (need {settings.MAKER_MIN_FILL_PCT}%) — cancelled")
+                    logger.info(f"📭 Maker buy only {buy_filled_pct:.0f}% filled (need {min_fill_pct}%) — cancelled")
+                    # Semi-HFT: Record failed fill for fill-rate tracking
+                    if self.semi_hft:
+                        self.semi_hft.record_fill(buy_ex, filled=False, partial=buy_filled_pct > 0)
                     return {'status': 'blocked', 'reason': f'Maker buy fill too low: {buy_filled_pct:.0f}%'}
                 
                 # Buy filled ≥ min_fill_pct → place market sell
+                # Semi-HFT: Record successful fill
+                if self.semi_hft:
+                    self.semi_hft.record_fill(buy_ex, filled=True, partial=buy_filled_pct < 95)
                 sell_qty = round_qty(sell_ex, symbol, buy_fill.get('filled_qty', qty))
                 sell_result = await sell_client.place_order(symbol, 'sell', 'market', sell_qty, sell_price)
                 if isinstance(sell_result, Exception):
@@ -468,6 +495,12 @@ class OrderExecutor:
             results = [buy_result_final, sell_result_final]
             buy_result, sell_result = results
             placement_time = time.time() - start_time
+            
+            # Semi-HFT: Record latency for both exchanges
+            if self.semi_hft:
+                placement_ms = placement_time * 1000
+                self.semi_hft.record_latency(buy_ex, placement_ms / 2)
+                self.semi_hft.record_latency(sell_ex, placement_ms / 2)
             
             # Step 4: Handle placement failures
             if isinstance(buy_result, Exception):

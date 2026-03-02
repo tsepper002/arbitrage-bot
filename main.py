@@ -50,6 +50,7 @@ from core.exchange_config import EXCHANGE_PARAMS
 from core.strategy_dispatcher import StrategyDispatcher  # NEW: All 14 strategies!
 from core.signal_allocator import SignalAllocator  # Signal-based inventory management
 from core.capital_manager import CapitalManager  # Engine 2.0: capital-level mode selection
+from core.semi_hft_engine import SemiHFTEngine  # Semi-HFT: professional execution layer
 
 # Professional Infrastructure
 from infrastructure.health_monitor import HealthMonitor
@@ -534,6 +535,21 @@ class IntegratedArbitrageBot:
             self.capital_manager = CapitalManager(initial_equity=initial_equity)
             logger.info(f"✅ Capital Manager initialized: {self.capital_manager.get_summary()}")
             
+            # Semi-HFT Engine
+            self.semi_hft_engine = SemiHFTEngine()
+            # Configure from settings
+            if hasattr(settings, 'SEMI_HFT_MAX_RTT_MS'):
+                self.semi_hft_engine.MAX_RTT_MS = settings.SEMI_HFT_MAX_RTT_MS
+            if hasattr(settings, 'SEMI_HFT_LATENCY_KILL_MS'):
+                self.semi_hft_engine.LATENCY_SPIKE_MS = settings.SEMI_HFT_LATENCY_KILL_MS
+            if hasattr(settings, 'SEMI_HFT_SLIPPAGE_KILL_PCT'):
+                self.semi_hft_engine.SLIPPAGE_SPIKE_PCT = settings.SEMI_HFT_SLIPPAGE_KILL_PCT
+            if hasattr(settings, 'SEMI_HFT_MIN_FILL_RATE_PCT'):
+                self.semi_hft_engine.MIN_FILL_RATE_PCT = settings.SEMI_HFT_MIN_FILL_RATE_PCT
+            if hasattr(settings, 'SEMI_HFT_MIN_FILL_PROB'):
+                self.semi_hft_engine.MAKER_MIN_FILL_PROBABILITY = settings.SEMI_HFT_MIN_FILL_PROB
+            logger.info(f"✅ Semi-HFT Engine initialized: {self.semi_hft_engine.get_summary()}")
+            
             # Professional Infrastructure
             logger.info("\n🔬 Initializing Professional Infrastructure...")
             
@@ -907,6 +923,7 @@ class IntegratedArbitrageBot:
                 balance_manager=self.balance_manager,
                 capital_manager=self.capital_manager,
                 state_manager=self.state_manager,
+                semi_hft_engine=self.semi_hft_engine,
             )
             self.executor = executor
             
@@ -942,6 +959,7 @@ class IntegratedArbitrageBot:
                 signal_allocator=getattr(self, 'signal_allocator', None),
                 state_manager=self.state_manager,
                 capital_manager=self.capital_manager,
+                semi_hft_engine=self.semi_hft_engine,
             )
             # Provide REST clients for JIT inventory acquisition in live mode
             self.engine._rest_clients = self.rest_clients
@@ -1149,6 +1167,10 @@ class IntegratedArbitrageBot:
                 # Engine 2.0: Capital Manager status
                 if self.capital_manager:
                     print(f" 🏦 {self.capital_manager.get_summary()}")
+                
+                # Semi-HFT Engine status
+                if hasattr(self, 'semi_hft_engine') and self.semi_hft_engine:
+                    print(f" 🚀 HFT: {self.semi_hft_engine.get_summary()}")
                 
                 # ML module status — comprehensive line
                 ml_parts = []

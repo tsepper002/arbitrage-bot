@@ -71,7 +71,8 @@ class ArbitrageEngine:
                  twap_engine = None,
                  signal_allocator = None,
                  state_manager = None,
-                 capital_manager = None):
+                 capital_manager = None,
+                 semi_hft_engine = None):
         self.store = store
         self.params = EXCHANGE_PARAMS
         
@@ -129,6 +130,7 @@ class ArbitrageEngine:
         self.signal_allocator = signal_allocator
         self.state_manager = state_manager
         self.capital_manager = capital_manager
+        self.semi_hft = semi_hft_engine  # Semi-HFT engine for professional execution
 
         # Event-driven scanning state
         self.updated_symbols: Set[str] = set()
@@ -525,6 +527,10 @@ class ArbitrageEngine:
             # Engine 2.0: Skip disabled exchanges
             if cm and not cm.is_exchange_enabled(buy_ex):
                 continue
+            # Semi-HFT: Skip excluded exchanges (latency/error/kill-switch)
+            hft = self.semi_hft
+            if hft and hft.should_exclude_exchange(buy_ex):
+                continue
 
             # Check this exchange as buy against ALL other exchanges as sell
             for j, sell_ex in enumerate(exchanges):
@@ -533,6 +539,9 @@ class ArbitrageEngine:
                 
                 # Engine 2.0: Skip disabled exchanges
                 if cm and not cm.is_exchange_enabled(sell_ex):
+                    continue
+                # Semi-HFT: Skip excluded exchanges
+                if hft and hft.should_exclude_exchange(sell_ex):
                     continue
                     
                 buy = exmap.get(buy_ex, {})
@@ -586,7 +595,17 @@ class ArbitrageEngine:
                 
                 # Engine 2.0: Dynamic threshold replaces static fee prefilter
                 # threshold = fees + level cushion + latency_risk + volatility_buffer
-                if cm:
+                # Semi-HFT: Enhanced with p95 slippage + execution failure rate + vol regime
+                if hft and settings.SEMI_HFT_ENABLED:
+                    dynamic_min_spread = hft.dynamic_threshold_v2(
+                        sum_fees_pct, buy_ex, sell_ex, cm
+                    )
+                    # Feed volatility data
+                    hft.update_volatility(gross_spread_pct)
+                    # HTX filter: higher latency → only use for wide spreads
+                    if ('HTX' in (buy_ex, sell_ex)) and cm and not cm.should_use_htx(gross_spread_pct):
+                        continue
+                elif cm:
                     avg_latency = (
                         self._exchange_latency_ms.get(buy_ex, self.DEFAULT_EXCHANGE_LATENCY_MS) +
                         self._exchange_latency_ms.get(sell_ex, self.DEFAULT_EXCHANGE_LATENCY_MS)
@@ -637,6 +656,13 @@ class ArbitrageEngine:
 
                 buy_avg, buy_filled = simulate_execution_from_book(asks, qty)
                 sell_avg, sell_filled = simulate_execution_from_book(bids, qty)
+
+                # Semi-HFT: Collect microstructure data (orderbook imbalance + lead-lag)
+                if hft:
+                    hft.update_orderbook_imbalance(symbol, buy_ex, bids, asks)
+                    if top_bid > 0 and top_ask > 0:
+                        hft.record_mid_price(buy_ex, symbol, (top_bid + top_ask) / 2)
+                        hft.record_mid_price(sell_ex, symbol, (top_bid + top_ask) / 2)
 
                 # VWAP SLIPPAGE CHECK: If VWAP price deviates >0.2% from top-of-book,
                 # the order will eat deep into the book — reduce expected ROI
@@ -1073,6 +1099,16 @@ class ArbitrageEngine:
                                 sell_exchange=o.get('sell_ex', ''),
                                 net_profit_pct=o.get('roi_pct', 0),
                                 slippage_pct=_est_slippage,
+                            )
+                        # Semi-HFT: Record trade result for pair scoring + kill-switches
+                        if self.semi_hft:
+                            self.semi_hft.record_trade_result(
+                                buy_ex=o.get('buy_ex', ''),
+                                sell_ex=o.get('sell_ex', ''),
+                                symbol=o.get('symbol', ''),
+                                net_profit_pct=o.get('roi_pct', 0),
+                                slippage_pct=_est_slippage,
+                                latency_ms=result.get('trade_info', {}).get('placement_time_ms', 200),
                             )
                     
                     # PROFESSIONAL ANALYTICS: Record trade details

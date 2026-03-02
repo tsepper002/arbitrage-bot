@@ -256,6 +256,31 @@ MAX_VWAP_SLIPPAGE_PCT = _get_env_float("ARB_MAX_VWAP_SLIPPAGE_PCT", 0.3)
 # Reserve percentage (complement of WORKING_CAPITAL_PCT)
 RESERVE_PCT = 100.0 - WORKING_CAPITAL_PCT
 
+# ============================================================================
+# SEMI-HFT ENGINE — Professional execution layer
+# ============================================================================
+# Enable semi-HFT features (per-symbol locks, event-driven, predictive maker)
+SEMI_HFT_ENABLED = _get_env_bool("ARB_SEMI_HFT", True)
+
+# Stage 1: Maximum exchange RTT before exclusion (ms)
+SEMI_HFT_MAX_RTT_MS = _get_env_float("ARB_HFT_MAX_RTT_MS", 450.0)
+
+# Stage 2: Spread change trigger for event-driven rescan (%)
+SEMI_HFT_SPREAD_TRIGGER_PCT = _get_env_float("ARB_HFT_SPREAD_TRIGGER", 0.02)
+
+# Stage 3: Minimum fill probability to use maker model (0-1)
+SEMI_HFT_MIN_FILL_PROB = _get_env_float("ARB_HFT_MIN_FILL_PROB", 0.50)
+# Start proportional hedge at this fill % (default: 30% instead of 75%)
+SEMI_HFT_EARLY_HEDGE_PCT = _get_env_float("ARB_HFT_EARLY_HEDGE_PCT", 30.0)
+# Split orders into N micro-slices
+SEMI_HFT_ORDER_SLICES = _get_env_int("ARB_HFT_ORDER_SLICES", 3)
+
+# Stage 7: Kill-switch thresholds
+SEMI_HFT_LATENCY_KILL_MS = _get_env_float("ARB_HFT_LATENCY_KILL_MS", 500.0)
+SEMI_HFT_SLIPPAGE_KILL_PCT = _get_env_float("ARB_HFT_SLIPPAGE_KILL_PCT", 0.5)
+SEMI_HFT_MIN_FILL_RATE_PCT = _get_env_float("ARB_HFT_MIN_FILL_RATE_PCT", 40.0)
+SEMI_HFT_MAX_INVENTORY_SKEW_PCT = _get_env_float("ARB_HFT_MAX_INVENTORY_SKEW_PCT", 60.0)
+
 def get_enabled_strategies(capital_per_exchange: float = None) -> list:
     """Return list of strategy names enabled for current capital level.
     

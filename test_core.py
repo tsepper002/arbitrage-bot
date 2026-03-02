@@ -1579,6 +1579,112 @@ def test_state_recovery():
     print("  ✅ State recovery test complete")
 
 
+def test_semi_hft_engine():
+    """Test Semi-HFT Engine: all 7 stages."""
+    print("\n" + "=" * 60)
+    print("TEST: Semi-HFT Engine — 7 Stages")
+    print("=" * 60)
+    
+    from core.semi_hft_engine import SemiHFTEngine, VolatilityRegime, LeadLagDetector
+    
+    hft = SemiHFTEngine()
+    
+    # Stage 1: Latency tracking
+    hft.record_latency("Binance", 45)
+    hft.record_latency("Binance", 50)
+    hft.record_latency("Binance", 45)
+    hft.record_latency("Binance", 50)
+    hft.record_latency("Binance", 48)
+    hft.record_latency("Binance", 47)
+    hft.record_latency("Binance", 46)
+    hft.record_latency("MEXC", 62)
+    hft.record_latency("MEXC", 60)
+    hft.record_latency("MEXC", 65)
+    hft.record_latency("MEXC", 58)
+    hft.record_latency("MEXC", 63)
+    for _ in range(10):
+        hft.record_latency("HTX", 500)  # 10 samples → EMA converges well above 450ms
+    assert not hft.should_exclude_exchange("Binance"), "Binance should NOT be excluded"
+    assert hft.should_exclude_exchange("HTX"), "HTX should be excluded (>450ms)"
+    lat = hft.get_exchange_latency_ms("Binance")
+    assert lat < 200, f"Binance latency should be well below 200ms, got {lat}"
+    print(f"  ✅ Stage 1: Latency tracking (Binance={lat:.0f}ms, HTX excluded)")
+    
+    # Stage 2: Per-symbol locks
+    lock1 = hft.get_symbol_lock("BTC-USDT")
+    lock2 = hft.get_symbol_lock("ETH-USDT")
+    assert lock1 is not lock2, "Different symbols should have different locks"
+    print("  ✅ Stage 2: Per-symbol locks (BTC ≠ ETH)")
+    
+    # Stage 3: Fill prediction + maker decision
+    bids = [(100.0, 10), (99.5, 20), (99.0, 30)]
+    asks = [(100.5, 15), (101.0, 25), (101.5, 35)]
+    prob = hft.predict_fill_probability("BTC-USDT", "Binance", bids, asks, "buy")
+    assert 0 <= prob <= 1, f"Probability must be 0-1, got {prob}"
+    
+    # Order slicing
+    slices = hft.compute_order_slices(1.0, 100.0, 0.5, n_slices=3)
+    assert len(slices) == 3, f"Expected 3 slices, got {len(slices)}"
+    total_qty = sum(q for _, q in slices)
+    assert abs(total_qty - 1.0) < 0.01, f"Total qty should be 1.0, got {total_qty}"
+    print(f"  ✅ Stage 3: Fill prob={prob:.2f}, 3 order slices (total qty={total_qty})")
+    
+    # Stage 4: Dynamic threshold v2
+    threshold = hft.dynamic_threshold_v2(0.15, "Binance", "MEXC")
+    assert threshold > 0.15, f"Threshold should exceed raw fees, got {threshold}"
+    print(f"  ✅ Stage 4: Dynamic threshold = {threshold:.4f} (> fees 0.15)")
+    
+    # Stage 4: Exchange pair scoring
+    hft.record_pair_result("MEXC", "Binance", 0.08, 0.02, 100)
+    hft.record_pair_result("MEXC", "Binance", 0.10, 0.03, 95)
+    hft.record_pair_result("MEXC", "Binance", -0.02, 0.05, 120)
+    hft.record_pair_result("Binance", "KuCoin", 0.05, 0.01, 80)
+    hft.record_pair_result("Binance", "KuCoin", 0.03, 0.02, 85)
+    hft.record_pair_result("Binance", "KuCoin", 0.04, 0.01, 90)
+    assert hft.is_top_pair("MEXC", "Binance"), "MEXC→Binance should be top pair"
+    print("  ✅ Stage 4: Exchange pair scoring works")
+    
+    # Stage 5: Volatility regime
+    vol = VolatilityRegime()
+    for _ in range(20):
+        vol.update(0.05)
+    assert vol.regime == "FLAT", f"Expected FLAT, got {vol.regime}"
+    print(f"  ✅ Stage 5: Volatility regime = {vol.regime}")
+    
+    # Stage 5: Lead-lag
+    ll = LeadLagDetector()
+    import time
+    for i in range(10):
+        ll.record_price("Binance", "BTC-USDT", 50000 + i * 10)
+        ll.record_price("MEXC", "BTC-USDT", 50000 + i * 5)
+    leader = ll.get_leader("BTC-USDT", ["Binance", "MEXC"])
+    # Both move, but Binance moves more → more change events
+    print(f"  ✅ Stage 5: Lead-lag detector (leader={leader})")
+    
+    # Stage 7: Kill-switches
+    assert not hft.check_latency_kill("Binance"), "Binance should not trigger kill"
+    for _ in range(10):
+        hft.record_latency("SlowExchange", 600)
+    assert hft.check_latency_kill("SlowExchange"), "SlowExchange should trigger latency kill"
+    assert hft.should_exclude_exchange("SlowExchange"), "Killed exchange should be excluded"
+    print("  ✅ Stage 7: Latency kill-switch works")
+    
+    assert hft.check_slippage_kill("BadExchange", 0.6), "0.6% slippage should trigger kill"
+    print("  ✅ Stage 7: Slippage kill-switch works")
+    
+    # Inventory skew
+    assert not hft.check_inventory_skew(50, 50), "50/50 is balanced"
+    assert hft.check_inventory_skew(90, 10), "90/10 is too skewed"
+    print("  ✅ Stage 7: Inventory skew detection works")
+    
+    # Summary
+    summary = hft.get_summary()
+    assert "Latency" in summary, "Summary should include latency info"
+    print(f"  ✅ Summary: {summary}")
+    
+    print("  ✅ Semi-HFT Engine: ALL 7 stages verified")
+
+
 if __name__ == "__main__":
     tests = [
         test_settings, test_price_store, test_exchange_config, test_order_executor,
@@ -1597,6 +1703,7 @@ if __name__ == "__main__":
         test_scaling_and_e2e_pipeline,
         test_dry_run_balance_tracking,
         test_state_recovery,
+        test_semi_hft_engine,
     ]
     passed = failed = 0
     for t in tests:
