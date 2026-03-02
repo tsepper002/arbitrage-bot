@@ -209,9 +209,10 @@ MAX_INVENTORY_SKEW_USDT = _get_env_float("ARB_MAX_INVENTORY_SKEW_USDT", 20.0)
 # GLOBAL SLIPPAGE BUFFER
 # ============================================================================
 # Applied to ALL strategy ROI calculations before trade execution.
-# Accounts for: market order slippage, latency decay, hidden spread costs.
-# 0.07% per leg × 2 legs = 0.14% total deducted from expected ROI.
-GLOBAL_SLIPPAGE_PER_LEG_PCT = _get_env_float("ARB_SLIPPAGE_PER_LEG_PCT", 0.07)
+# With maker-first execution: buy side (limit) has ~0 slippage.
+# Only sell side (market) carries slippage risk: ~0.03% per leg.
+# 0.03% per leg × 2 legs = 0.06% total (but buy-side is ~0 for maker).
+GLOBAL_SLIPPAGE_PER_LEG_PCT = _get_env_float("ARB_SLIPPAGE_PER_LEG_PCT", 0.03)
 
 # ============================================================================
 # ENGINE 2.0 — MAKER-FIRST EXECUTION MODEL
@@ -250,7 +251,9 @@ DEPTH_MULTIPLE = _get_env_float("ARB_DEPTH_MULTIPLE", 4.0)
 # Maximum acceptable slippage per order leg (cancel if exceeds)
 MAX_SLIPPAGE_PCT = _get_env_float("ARB_MAX_SLIPPAGE_PCT", 0.2)
 # Minimum expected net profit in USDT to execute a trade
-MIN_LIVE_NET_PROFIT = _get_env_float("ARB_MIN_LIVE_NET_PROFIT", 0.01)
+# At $72 capital: position ~$5, 0.08% edge = $0.004.
+# Must be below smallest expected profit to avoid blocking all trades.
+MIN_LIVE_NET_PROFIT = _get_env_float("ARB_MIN_LIVE_NET_PROFIT", 0.001)
 # Maximum VWAP vs top-of-book slippage (deeper book → reject)
 MAX_VWAP_SLIPPAGE_PCT = _get_env_float("ARB_MAX_VWAP_SLIPPAGE_PCT", 0.3)
 # Reserve percentage (complement of WORKING_CAPITAL_PCT)

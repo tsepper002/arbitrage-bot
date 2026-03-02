@@ -696,10 +696,9 @@ class ArbitrageEngine:
                 fees = (buy_avg * filled) * buy_fee + (sell_avg * filled) * sell_fee
 
                 # GLOBAL SLIPPAGE BUFFER: deduct estimated slippage from ALL trades
-                # Real execution rarely matches order book snapshot due to:
-                # - Market order slippage (~0.05% per leg)
-                # - Latency between scan and execution (~0.02% per leg)
-                # Total buffer: 0.07% × 2 legs = 0.14% deducted
+                # With maker-first: buy side (limit) has ~0 slippage.
+                # Only sell side (market) carries slippage: ~0.03% per leg.
+                # Total buffer: 0.03% × 2 legs = 0.06% (conservative since buy is ~0)
                 slippage_per_leg = settings.GLOBAL_SLIPPAGE_PER_LEG_PCT
                 slippage_cost = (buy_avg * filled) * (slippage_per_leg * 2 / 100)
 
