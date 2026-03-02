@@ -571,13 +571,13 @@ class OrderExecutor:
             
             # Engine 2.0: Report to CapitalManager for kill-logic + quality ranking
             if self.capital_manager:
-                max_slippage = max(buy_slippage, sell_slippage)
+                worst_slippage = max(buy_slippage, sell_slippage)
                 self.capital_manager.record_trade_result(
                     symbol=symbol,
                     buy_exchange=buy_ex,
                     sell_exchange=sell_ex,
                     net_profit_pct=actual_roi,
-                    slippage_pct=max_slippage,
+                    slippage_pct=worst_slippage,
                 )
             
             logger.info(

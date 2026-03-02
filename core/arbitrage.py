@@ -137,6 +137,7 @@ class ArbitrageEngine:
         # Spread analytics — track best spread seen each cycle
         self._best_spread_pct = 0.0
         self._best_spread_info = ""
+        self._best_spread_fees_pct = 0.0
         self._near_miss_count = 0
         self._total_pairs_analyzed = 0
 
@@ -174,6 +175,11 @@ class ArbitrageEngine:
         self.MAX_VWAP_SLIPPAGE_PCT = 0.3  # Max acceptable VWAP vs top-of-book slippage
         
         logger.info(f"ArbitrageEngine initialized: min_roi={self.min_net_pct}%, max_exposure=${self.max_exposure_usdt}, safety_factor={self.safety_factor}")
+
+    @property
+    def best_spread_pct(self) -> float:
+        """Public access to best observed spread (for CapitalManager volatility proxy)."""
+        return self._best_spread_pct
 
     def _fee_rate(self, exchange: str, side: str = "taker") -> float:
         p = self.params.get(exchange, {})
@@ -399,8 +405,9 @@ class ArbitrageEngine:
 
         # Engine 2.0: Use CapitalManager for adaptive position sizing
         if self.capital_manager and buy_price and buy_price > 0:
-            # Depth in USDT at best levels
-            depth_usdt = allowed_by_liquidity * buy_price if allowed_by_liquidity > 0 else 999999
+            # Depth in USDT at best levels (use large fallback when no liquidity data)
+            UNLIMITED_DEPTH_USDT = 1e9
+            depth_usdt = allowed_by_liquidity * buy_price if allowed_by_liquidity > 0 else UNLIMITED_DEPTH_USDT
             # Get adaptive position size from CapitalManager
             position_usdt = self.capital_manager.compute_position_usdt(
                 exchange_balance_usdt=self.max_exposure_usdt,

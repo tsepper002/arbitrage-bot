@@ -1064,10 +1064,10 @@ class IntegratedArbitrageBot:
                     if self.capital_manager:
                         self.capital_manager.update_equity(total_bal)
                         # Update volatility from engine's spread tracking
-                        if self.engine and hasattr(self.engine, '_best_spread_pct'):
+                        if self.engine and hasattr(self.engine, 'best_spread_pct'):
                             # Use best observed spread as proxy for market volatility
                             # A high spread = high volatility; low spread = low volatility
-                            vol_pct = max(self.engine._best_spread_pct * 2.0, 0.01)
+                            vol_pct = max(self.engine.best_spread_pct * 2.0, 0.01)
                             self.capital_manager.update_volatility(vol_pct)
                 
                 # Engine 2.0: Capital Manager status
@@ -1519,15 +1519,15 @@ class IntegratedArbitrageBot:
                                         self.state_manager.increment_trades()
                                     # Engine 2.0: Report to CapitalManager (kill-logic + quality ranking)
                                     if self.capital_manager:
-                                        _ti = result.get('trade_info', trade_info)
-                                        _roi = _ti.get('roi_pct', trade_info.get('roi_pct', 0))
-                                        _slip = _ti.get('buy_slippage_pct', 0) + _ti.get('sell_slippage_pct', 0)
+                                        trade_result = result.get('trade_info', trade_info)
+                                        roi_pct = trade_result.get('roi_pct', trade_info.get('roi_pct', 0))
+                                        total_slippage = trade_result.get('buy_slippage_pct', 0) + trade_result.get('sell_slippage_pct', 0)
                                         self.capital_manager.record_trade_result(
                                             symbol=trade_info['symbol'],
                                             buy_exchange=trade_info.get('buy_ex', ''),
                                             sell_exchange=trade_info.get('sell_ex', ''),
-                                            net_profit_pct=float(_roi) if _roi else 0.0,
-                                            slippage_pct=float(_slip) if _slip else 0.0,
+                                            net_profit_pct=float(roi_pct),
+                                            slippage_pct=float(total_slippage),
                                         )
                                     # Telegram notification
                                     if self.telegram_bot:
