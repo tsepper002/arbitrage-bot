@@ -657,7 +657,7 @@ class IntegratedArbitrageBot:
                 self.fee_optimizer, self.auto_parameter_optimizer, self.volatility_forecaster,
                 self.nn_predictor, self.rl_agent, self.slippage_predictor, self.auto_parameter_tuner,
                 self.pattern_recognition, self.market_adaptive_strategy, self.ml_model_trainer] if x is not None)
-            logger.info(f"{'✅' if _ml_count >= 9 else '⚠️'} ML Modules: {_ml_count}/12 initialized")
+            logger.info(f"{'✅' if _ml_count == 12 else '⚠️'} ML Modules: {_ml_count}/12 initialized")
             
             logger.info("\n🎯 All professional components initialized successfully!")
             
