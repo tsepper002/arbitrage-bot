@@ -367,7 +367,10 @@ class SemiHFTEngine:
 
         # Exchange is healthy — clear any previous exclusion log
         if self._exclusion_logged.get(exchange):
-            logger.info(f"✅ {exchange} recovered — no longer excluded")
+            stats = self._latency.get(exchange)
+            latency_str = f"{stats.ema_ms:.0f}ms" if stats else "unknown"
+            samples = len(stats.samples) if stats else 0
+            logger.info(f"✅ {exchange} recovered — latency {latency_str} ({samples} samples)")
             self._exclusion_logged[exchange] = False
 
         return False

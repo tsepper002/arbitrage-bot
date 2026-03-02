@@ -459,11 +459,8 @@ class IntegratedArbitrageBot:
         for name, client in self.rest_clients.items():
             try:
                 t0 = time.time()
-                # Use sync_server_time (all clients support it, lightweight)
-                if hasattr(client, 'sync_server_time'):
-                    await client.sync_server_time()
-                elif hasattr(client, 'get_balance'):
-                    await client.get_balance()  # No arguments — not all clients accept them
+                # Use sync_server_time — all 5 clients support it, no args needed
+                await client.sync_server_time()
                 rtt_ms = (time.time() - t0) * 1000
                 self.semi_hft_engine.record_latency(name, rtt_ms)
                 # Also seed ArbitrageEngine's latency for threshold calculations
@@ -1350,8 +1347,8 @@ class IntegratedArbitrageBot:
                         self.semi_hft_engine.record_latency(name, rtt_ms)
                         if self.engine:
                             self.engine.update_exchange_latency(name, rtt_ms)
-                    except Exception:
-                        pass  # Silent — don't spam logs on periodic pings
+                    except Exception as e:
+                        logger.debug(f"Periodic ping failed for {name}: {e}")
         except asyncio.CancelledError:
             return
     
