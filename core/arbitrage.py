@@ -1032,12 +1032,17 @@ class ArbitrageEngine:
                         
                         # Engine 2.0: Record to CapitalManager for kill-logic + quality ranking
                         if self.capital_manager and result['status'] in ('success', 'simulated'):
+                            # Estimate slippage from VWAP diff vs top-of-book
+                            _buy_vwap_slip = abs(o.get('buy_avg', 0) - o.get('buy_price', o.get('buy_avg', 0)))
+                            _sell_vwap_slip = abs(o.get('sell_price', o.get('sell_avg', 0)) - o.get('sell_avg', 0))
+                            _top_ask = o.get('buy_price', o.get('buy_avg', 1))
+                            _est_slippage = ((_buy_vwap_slip + _sell_vwap_slip) / max(_top_ask, 0.01)) * 100
                             self.capital_manager.record_trade_result(
                                 symbol=o.get('symbol', ''),
                                 buy_exchange=o.get('buy_ex', ''),
                                 sell_exchange=o.get('sell_ex', ''),
                                 net_profit_pct=o.get('roi_pct', 0),
-                                slippage_pct=0.0,  # estimated from VWAP diff
+                                slippage_pct=_est_slippage,
                             )
                     
                     # PROFESSIONAL ANALYTICS: Record trade details

@@ -157,12 +157,17 @@ class CapitalManager:
     EXCHANGE_DISABLE_SECONDS = 3600   # 1 hour
     EXCHANGE_RANK_EVERY_N = 100       # re-rank every N trades
 
+    # Latency-to-risk conversion: 100ms → 0.001% price risk
+    # Empirically derived: ~0.001% price movement per 100ms in crypto markets
+    LATENCY_RISK_FACTOR = 0.00001
+
     # Adaptive scaling
     COMPOUND_EQUITY_STEP_PCT = 10.0   # Every +10% equity → scale up
     COMPOUND_SCALE_FACTOR = 1.05      # +5% per step
+    MAX_COMPOUND_MULTIPLIER = 2.0     # Cap at 2× base position size
 
     # Overtrading control
-    OVERTRADING_WINDOW = 10           # last N trades
+    OVERTRADING_WINDOW = 10           # Last N trades to check
     OVERTRADING_MIN_AVG_PROFIT = 0.20 # 0.20%
     OVERTRADING_THRESHOLD_BUMP = 0.05 # +0.05% when overtrading detected
 
@@ -193,7 +198,7 @@ class CapitalManager:
         self._current_volatility_pct = 0.0
 
         self._select_level()
-        logger.info(f"💰 CapitalManager initialised: ${initial_equity:.2f} → {self._current_level.name}")
+        logger.info(f"💰 CapitalManager initialized: ${initial_equity:.2f} → {self._current_level.name}")
 
     # ------------------------------------------------------------------
     # LEVEL SELECTION
@@ -238,7 +243,7 @@ class CapitalManager:
                   + overtrading_bump
         """
         lvl = self._current_level
-        latency_risk = avg_latency_ms * 0.00001   # 100ms → 0.001%
+        latency_risk = avg_latency_ms * self.LATENCY_RISK_FACTOR
         volatility_buffer = self._current_volatility_pct * 0.20 if self._current_volatility_pct > 0 else 0.0
         threshold = (
             total_fee_pct
@@ -289,7 +294,7 @@ class CapitalManager:
         if growth_pct <= 0:
             return 1.0
         steps = growth_pct / self.COMPOUND_EQUITY_STEP_PCT
-        return min(self.COMPOUND_SCALE_FACTOR ** steps, 2.0)  # cap at 2×
+        return min(self.COMPOUND_SCALE_FACTOR ** steps, self.MAX_COMPOUND_MULTIPLIER)
 
     def _volatility_size_adjustment(self) -> float:
         """Reduce position size in high-volatility regime."""

@@ -392,16 +392,46 @@ class OrderExecutor:
             )
             
             if use_maker_first:
-                # Maker-first: limit buy at best_bid + 20% of spread, then market sell
+                # Maker-first: limit buy, wait for fill, THEN market sell
                 spread = sell_price - buy_price
                 maker_buy_price = buy_price + spread * (settings.MAKER_PRICE_OFFSET_PCT / 100.0)
-                buy_task = buy_client.place_order(symbol, 'buy', 'limit', qty, maker_buy_price)
-                sell_task = sell_client.place_order(symbol, 'sell', 'market', qty, sell_price)
+                
+                # Place limit buy first
+                buy_result = await buy_client.place_order(symbol, 'buy', 'limit', qty, maker_buy_price)
+                if isinstance(buy_result, Exception):
+                    logger.error(f"❌ Maker buy failed: {buy_result}")
+                    return {'status': 'error', 'reason': f'Maker buy failed: {buy_result}'}
+                
+                # Wait for fill (up to MAKER_FILL_TIMEOUT_MS)
+                buy_order_id = self._extract_order_id(buy_result)
+                fill_timeout_sec = settings.MAKER_FILL_TIMEOUT_MS / 1000.0
+                buy_fill = await self._verify_fill(buy_client, symbol, buy_order_id, 'buy', maker_buy_price, qty)
+                buy_filled_pct = (buy_fill.get('filled_qty', 0) / qty * 100) if qty > 0 else 0
+                
+                if buy_filled_pct < settings.MAKER_MIN_FILL_PCT:
+                    # Not enough fill — cancel and abort
+                    await self._safe_cancel(buy_client, symbol, buy_order_id, 'buy')
+                    logger.info(f"📭 Maker buy only {buy_filled_pct:.0f}% filled (need {settings.MAKER_MIN_FILL_PCT}%) — cancelled")
+                    return {'status': 'blocked', 'reason': f'Maker buy fill too low: {buy_filled_pct:.0f}%'}
+                
+                # Buy filled ≥ min_fill_pct → place market sell
+                sell_qty = buy_fill.get('filled_qty', qty)
+                sell_result = await sell_client.place_order(symbol, 'sell', 'market', sell_qty, sell_price)
+                if isinstance(sell_result, Exception):
+                    logger.error(f"❌ Sell after maker buy failed: {sell_result}")
+                    await self._emergency_close(buy_ex, symbol, 'sell', sell_qty, sell_price, buy_client)
+                    return {'status': 'error', 'reason': f'Sell after maker buy failed: {sell_result}'}
+                
+                buy_result_final = buy_result
+                sell_result_final = sell_result
             else:
+                # Standard parallel market orders
                 buy_task = buy_client.place_order(symbol, 'buy', 'market', qty, buy_price)
                 sell_task = sell_client.place_order(symbol, 'sell', 'market', qty, sell_price)
+                results = await asyncio.gather(buy_task, sell_task, return_exceptions=True)
+                buy_result_final, sell_result_final = results
             
-            results = await asyncio.gather(buy_task, sell_task, return_exceptions=True)
+            results = [buy_result_final, sell_result_final]
             buy_result, sell_result = results
             placement_time = time.time() - start_time
             
