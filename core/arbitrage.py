@@ -675,7 +675,7 @@ class ArbitrageEngine:
                     all_exchanges = list(exmap.keys())
                     if hft.is_lead_lag_opportunity(symbol, buy_ex, sell_ex, all_exchanges):
                         # Favorable timing: sell exchange led the move, buy is still cheap
-                        lead_lag_boost = 0.02  # +0.02% ROI boost for favorable timing
+                        lead_lag_boost = settings.SEMI_HFT_LEAD_LAG_BOOST_PCT
 
                 # VWAP SLIPPAGE CHECK: If VWAP price deviates >0.2% from top-of-book,
                 # the order will eat deep into the book — reduce expected ROI

@@ -280,6 +280,8 @@ SEMI_HFT_LATENCY_KILL_MS = _get_env_float("ARB_HFT_LATENCY_KILL_MS", 500.0)
 SEMI_HFT_SLIPPAGE_KILL_PCT = _get_env_float("ARB_HFT_SLIPPAGE_KILL_PCT", 0.5)
 SEMI_HFT_MIN_FILL_RATE_PCT = _get_env_float("ARB_HFT_MIN_FILL_RATE_PCT", 40.0)
 SEMI_HFT_MAX_INVENTORY_SKEW_PCT = _get_env_float("ARB_HFT_MAX_INVENTORY_SKEW_PCT", 60.0)
+# Lead-lag ROI boost when timing is favorable (buy on lagger, sell on leader)
+SEMI_HFT_LEAD_LAG_BOOST_PCT = _get_env_float("ARB_HFT_LEAD_LAG_BOOST_PCT", 0.02)
 
 def get_enabled_strategies(capital_per_exchange: float = None) -> list:
     """Return list of strategy names enabled for current capital level.

@@ -65,8 +65,8 @@ class PriceStore:
         if self._on_update_callback:
             try:
                 self._on_update_callback(symbol)
-            except Exception:
-                pass  # Non-critical: don't break data pipeline
+            except (TypeError, ValueError, AttributeError) as e:
+                logger.debug(f"PriceStore on_update callback error: {e}")
         
         logger.debug(f"PriceStore.update (top) {exchange} {symbol} bid={rec.get('bid')} ask={rec.get('ask')}")
     
