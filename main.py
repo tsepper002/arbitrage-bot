@@ -59,21 +59,29 @@ from infrastructure.rate_limiter import RateLimiter
 from infrastructure.circuit_breaker_enhanced import CircuitBreakerEnhanced
 from infrastructure.metrics_collector import MetricsCollector
 
-# Professional Analytics
-from analytics.trade_journal import TradeJournal
-from analytics.performance_tracker import PerformanceTracker
-from analytics.profit_attribution import ProfitAttributionAnalyzer
-from analytics.risk_analytics import RiskAnalytics
-from analytics.backtest_engine import BacktestEngine
-from analytics.market_intelligence import MarketIntelligence
-from analytics.realtime_analytics import RealtimeAnalytics
-from analytics.correlation_analyzer import CorrelationAnalyzer
-from analytics.custom_dashboard import CustomDashboard
+# Professional Analytics (optional — require numpy)
+try:
+    from analytics.trade_journal import TradeJournal
+    from analytics.performance_tracker import PerformanceTracker
+    from analytics.profit_attribution import ProfitAttributionAnalyzer
+    from analytics.risk_analytics import RiskAnalytics
+    from analytics.backtest_engine import BacktestEngine
+    from analytics.market_intelligence import MarketIntelligence
+    from analytics.realtime_analytics import RealtimeAnalytics
+    from analytics.correlation_analyzer import CorrelationAnalyzer
+    from analytics.custom_dashboard import CustomDashboard
+except (ImportError, ModuleNotFoundError):
+    TradeJournal = PerformanceTracker = ProfitAttributionAnalyzer = None
+    RiskAnalytics = BacktestEngine = MarketIntelligence = None
+    RealtimeAnalytics = CorrelationAnalyzer = CustomDashboard = None
 
-# Professional Features
-from professional_features.flash_crash_protector import FlashCrashProtector
-from professional_features.wash_trading_filter import WashTradingFilter
-from professional_features.orderbook_imbalance_detector import OrderBookImbalanceDetector
+# Professional Features (optional — require numpy)
+try:
+    from professional_features.flash_crash_protector import FlashCrashProtector
+    from professional_features.wash_trading_filter import WashTradingFilter
+    from professional_features.orderbook_imbalance_detector import OrderBookImbalanceDetector
+except (ImportError, ModuleNotFoundError):
+    FlashCrashProtector = WashTradingFilter = OrderBookImbalanceDetector = None
 
 # Trading Strategies (Phase 4)
 from core.strategies.grid_trading import GridTradingStrategy
@@ -87,36 +95,66 @@ from core.strategies.spread_betting import SpreadBettingStrategy
 from strategies.momentum_strategy import MomentumStrategy
 from strategies.breakout_strategy import BreakoutStrategy
 
-# Professional Execution (Phase 5)
-from professional_features.twap_engine import TWAPEngine
-from professional_features.vwap_engine import VWAPEngine
-from professional_features.iceberg_order_detector import IcebergOrderDetector
-from professional_features.order_flow_tracker import OrderFlowTracker
+# Professional Execution (optional — require numpy)
+try:
+    from professional_features.twap_engine import TWAPEngine
+    from professional_features.vwap_engine import VWAPEngine
+    from professional_features.iceberg_order_detector import IcebergOrderDetector
+    from professional_features.order_flow_tracker import OrderFlowTracker
+except (ImportError, ModuleNotFoundError):
+    TWAPEngine = VWAPEngine = IcebergOrderDetector = OrderFlowTracker = None
 
-# ML modules
-from ml.market_regime_detector import MarketRegimeDetector
-from ml.ml_spread_predictor import MLSpreadPredictor
-from ml.auto_parameter_optimizer import AutoParameterOptimizer
-from ml.volatility_forecaster import VolatilityForecaster
-from ml.neural_network_predictor import NeuralNetworkPredictor
-from ml.reinforcement_learning_agent import ReinforcementLearningAgent
-from ml.slippage_predictor import SlippagePredictor
-from ml.auto_parameter_tuner import AutoParameterTuner
+# ML modules (optional — require numpy/pandas)
+try:
+    from ml.market_regime_detector import MarketRegimeDetector
+except (ImportError, ModuleNotFoundError):
+    MarketRegimeDetector = None
+try:
+    from ml.ml_spread_predictor import MLSpreadPredictor
+except (ImportError, ModuleNotFoundError):
+    MLSpreadPredictor = None
+try:
+    from ml.auto_parameter_optimizer import AutoParameterOptimizer
+except (ImportError, ModuleNotFoundError):
+    AutoParameterOptimizer = None
+try:
+    from ml.volatility_forecaster import VolatilityForecaster
+except (ImportError, ModuleNotFoundError):
+    VolatilityForecaster = None
+try:
+    from ml.neural_network_predictor import NeuralNetworkPredictor
+except (ImportError, ModuleNotFoundError):
+    NeuralNetworkPredictor = None
+try:
+    from ml.reinforcement_learning_agent import ReinforcementLearningAgent
+except (ImportError, ModuleNotFoundError):
+    ReinforcementLearningAgent = None
+try:
+    from ml.slippage_predictor import SlippagePredictor
+except (ImportError, ModuleNotFoundError):
+    SlippagePredictor = None
+try:
+    from ml.auto_parameter_tuner import AutoParameterTuner
+except (ImportError, ModuleNotFoundError):
+    AutoParameterTuner = None
 try:
     from ml.pattern_recognition import PatternRecognition
-except ImportError:
+except (ImportError, ModuleNotFoundError):
     PatternRecognition = None
 try:
     from ml.market_adaptive_strategy import MarketAdaptiveStrategy
-except ImportError:
+except (ImportError, ModuleNotFoundError):
     MarketAdaptiveStrategy = None
 try:
     from ml.ml_model_trainer import MLModelTrainer
-except ImportError:
+except (ImportError, ModuleNotFoundError):
     MLModelTrainer = None
 
-# Fee optimization
-from core.fee_optimizer import FeeOptimizer
+# Fee optimization (optional — requires numpy)
+try:
+    from core.fee_optimizer import FeeOptimizer
+except (ImportError, ModuleNotFoundError):
+    FeeOptimizer = None
 
 # Exchange modules
 from exchanges.bybit_ws import BybitWS
@@ -576,90 +614,50 @@ class IntegratedArbitrageBot:
             # Professional Analytics
             logger.info("\n📊 Initializing Professional Analytics...")
             
-            # Trade Journal
-            self.trade_journal = TradeJournal()
-            logger.info("✅ Trade Journal initialized")
+            # Analytics modules (optional — require numpy)
+            self.trade_journal = TradeJournal() if TradeJournal else None
+            self.performance_tracker = PerformanceTracker() if PerformanceTracker else None
+            self.profit_attribution = ProfitAttributionAnalyzer() if ProfitAttributionAnalyzer else None
+            self.risk_analytics = RiskAnalytics() if RiskAnalytics else None
+            self.backtest_engine = BacktestEngine(initial_capital=10000) if BacktestEngine else None
+            self.market_intelligence = MarketIntelligence() if MarketIntelligence else None
+            self.realtime_analytics = RealtimeAnalytics() if RealtimeAnalytics else None
+            self.correlation_analyzer = CorrelationAnalyzer() if CorrelationAnalyzer else None
+            self.custom_dashboard = CustomDashboard() if CustomDashboard else None
+            _analytics_count = sum(1 for x in [self.trade_journal, self.performance_tracker,
+                self.profit_attribution, self.risk_analytics, self.backtest_engine,
+                self.market_intelligence, self.realtime_analytics, self.correlation_analyzer,
+                self.custom_dashboard] if x is not None)
+            logger.info(f"{'✅' if _analytics_count == 9 else '⚠️'} Analytics: {_analytics_count}/9 initialized")
             
-            # Performance Tracker
-            self.performance_tracker = PerformanceTracker()
-            logger.info("✅ Performance Tracker initialized")
-            
-            # Profit Attribution
-            self.profit_attribution = ProfitAttributionAnalyzer()
-            logger.info("✅ Profit Attribution initialized")
-            
-            # Risk Analytics
-            self.risk_analytics = RiskAnalytics()
-            logger.info("✅ Risk Analytics initialized")
-            
-            # Phase 6: Additional Analytics Modules (5 modules)
-            logger.info("\n📊 Initializing Additional Analytics...")
-            
-            # Backtest Engine
-            self.backtest_engine = BacktestEngine(
-                initial_capital=10000  # Default backtest capital
-            )
-            logger.info("✅ Backtest Engine initialized")
-            
-            # Market Intelligence
-            self.market_intelligence = MarketIntelligence()
-            logger.info("✅ Market Intelligence initialized")
-            
-            # Realtime Analytics
-            self.realtime_analytics = RealtimeAnalytics()
-            logger.info("✅ Realtime Analytics initialized")
-            
-            # Correlation Analyzer
-            self.correlation_analyzer = CorrelationAnalyzer()
-            logger.info("✅ Correlation Analyzer initialized")
-            
-            # Custom Dashboard
-            self.custom_dashboard = CustomDashboard()
-            logger.info("✅ Custom Dashboard initialized")
-            
-            logger.info("✅ All 5 Additional Analytics Modules initialized!")
-            
-            # Professional Features
+            # Professional Features (optional — require numpy)
             logger.info("\n🛡️  Initializing Professional Risk Features...")
+            self.flash_crash_protector = FlashCrashProtector() if FlashCrashProtector else None
+            self.wash_trading_filter = WashTradingFilter() if WashTradingFilter else None
+            self.orderbook_imbalance_detector = OrderBookImbalanceDetector() if OrderBookImbalanceDetector else None
+            _risk_count = sum(1 for x in [self.flash_crash_protector, self.wash_trading_filter,
+                self.orderbook_imbalance_detector] if x is not None)
+            logger.info(f"{'✅' if _risk_count == 3 else '⚠️'} Risk Features: {_risk_count}/3 initialized")
             
-            # Flash Crash Protector
-            self.flash_crash_protector = FlashCrashProtector()
-            logger.info("✅ Flash Crash Protector initialized")
-            
-            # Wash Trading Filter
-            self.wash_trading_filter = WashTradingFilter()
-            logger.info("✅ Wash Trading Filter initialized")
-            
-            # Orderbook Imbalance Detector
-            self.orderbook_imbalance_detector = OrderBookImbalanceDetector()
-            logger.info("✅ Orderbook Imbalance Detector initialized")
-            
-            # ML Modules
+            # ML Modules (optional — require numpy/pandas)
             logger.info("\n🧠 Initializing ML Modules...")
-            self.market_regime_detector = MarketRegimeDetector()
-            logger.info("✅ Market Regime Detector initialized")
-            self.ml_spread_predictor = MLSpreadPredictor()
-            logger.info("✅ ML Spread Predictor initialized")
-            self.fee_optimizer = FeeOptimizer()
-            logger.info("✅ Fee Optimizer initialized")
-            self.auto_parameter_optimizer = AutoParameterOptimizer()
-            logger.info("✅ Auto Parameter Optimizer initialized")
-            self.volatility_forecaster = VolatilityForecaster()
-            logger.info("✅ Volatility Forecaster initialized")
-            self.nn_predictor = NeuralNetworkPredictor()
-            logger.info("✅ Neural Network Predictor initialized")
-            self.rl_agent = ReinforcementLearningAgent()
-            logger.info("✅ Reinforcement Learning Agent initialized")
-            self.slippage_predictor = SlippagePredictor()
-            logger.info("✅ Slippage Predictor initialized")
-            self.auto_parameter_tuner = AutoParameterTuner()
-            logger.info("✅ Auto Parameter Tuner initialized")
+            self.market_regime_detector = MarketRegimeDetector() if MarketRegimeDetector else None
+            self.ml_spread_predictor = MLSpreadPredictor() if MLSpreadPredictor else None
+            self.fee_optimizer = FeeOptimizer() if FeeOptimizer else None
+            self.auto_parameter_optimizer = AutoParameterOptimizer() if AutoParameterOptimizer else None
+            self.volatility_forecaster = VolatilityForecaster() if VolatilityForecaster else None
+            self.nn_predictor = NeuralNetworkPredictor() if NeuralNetworkPredictor else None
+            self.rl_agent = ReinforcementLearningAgent() if ReinforcementLearningAgent else None
+            self.slippage_predictor = SlippagePredictor() if SlippagePredictor else None
+            self.auto_parameter_tuner = AutoParameterTuner() if AutoParameterTuner else None
             self.pattern_recognition = PatternRecognition() if PatternRecognition else None
-            logger.info(f"{'✅' if self.pattern_recognition else '⚠️'} Pattern Recognition {'initialized' if self.pattern_recognition else 'unavailable (numpy)'}")
             self.market_adaptive_strategy = MarketAdaptiveStrategy() if MarketAdaptiveStrategy else None
-            logger.info(f"{'✅' if self.market_adaptive_strategy else '⚠️'} Market Adaptive Strategy {'initialized' if self.market_adaptive_strategy else 'unavailable (numpy)'}")
             self.ml_model_trainer = MLModelTrainer() if MLModelTrainer else None
-            logger.info(f"{'✅' if self.ml_model_trainer else '⚠️'} ML Model Trainer {'initialized' if self.ml_model_trainer else 'unavailable (numpy)'}")
+            _ml_count = sum(1 for x in [self.market_regime_detector, self.ml_spread_predictor,
+                self.fee_optimizer, self.auto_parameter_optimizer, self.volatility_forecaster,
+                self.nn_predictor, self.rl_agent, self.slippage_predictor, self.auto_parameter_tuner,
+                self.pattern_recognition, self.market_adaptive_strategy, self.ml_model_trainer] if x is not None)
+            logger.info(f"{'✅' if _ml_count >= 9 else '⚠️'} ML Modules: {_ml_count}/12 initialized")
             
             logger.info("\n🎯 All professional components initialized successfully!")
             
@@ -870,26 +868,15 @@ class IntegratedArbitrageBot:
             
             logger.info("✅ All 10 Trading Strategies initialized successfully!")
             
-            # Phase 5: Professional Execution Modules (4 modules)
+            # Phase 5: Professional Execution Modules (optional — require numpy)
             logger.info("\n🎯 Initializing Professional Execution Modules...")
-            
-            # 1. TWAP Engine (Time-Weighted Average Price)
-            self.twap_engine = TWAPEngine()
-            logger.info("✅ TWAP Engine initialized")
-            
-            # 2. VWAP Engine (Volume-Weighted Average Price)
-            self.vwap_engine = VWAPEngine()
-            logger.info("✅ VWAP Engine initialized")
-            
-            # 3. Iceberg Order Detector
-            self.iceberg_detector = IcebergOrderDetector()
-            logger.info("✅ Iceberg Order Detector initialized")
-            
-            # 4. Order Flow Tracker
-            self.order_flow_tracker = OrderFlowTracker()
-            logger.info("✅ Order Flow Tracker initialized")
-            
-            logger.info("✅ All 4 Professional Execution Modules initialized!")
+            self.twap_engine = TWAPEngine() if TWAPEngine else None
+            self.vwap_engine = VWAPEngine() if VWAPEngine else None
+            self.iceberg_detector = IcebergOrderDetector() if IcebergOrderDetector else None
+            self.order_flow_tracker = OrderFlowTracker() if OrderFlowTracker else None
+            _exec_count = sum(1 for x in [self.twap_engine, self.vwap_engine,
+                self.iceberg_detector, self.order_flow_tracker] if x is not None)
+            logger.info(f"{'✅' if _exec_count == 4 else '⚠️'} Execution Modules: {_exec_count}/4 initialized")
             
             # Initialize Strategy Dispatcher (NEW: Manages all 14 strategies!)
             logger.info("\n🎯 Initializing Strategy Dispatcher (All 14 Strategies)...")
