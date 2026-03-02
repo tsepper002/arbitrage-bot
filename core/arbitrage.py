@@ -387,7 +387,7 @@ class ArbitrageEngine:
     def _choose_qty(self, buy_levels, sell_levels, buy_price) -> float:
         """
         Choose qty based on available liquidity across topK levels, safety factor and exposure cap.
-        Includes compound reinvestment: profits grow trade size up to 2× base.
+        Engine 2.0: Uses CapitalManager.compute_position_usdt() for adaptive sizing.
         """
         # total available at topK (base asset)
         avail_buy = sum(s for p, s in buy_levels[:self.topk]) if buy_levels else 0.0
@@ -397,15 +397,25 @@ class ArbitrageEngine:
         # limit by safety factor
         allowed_by_liquidity = total_avail * self.safety_factor
 
-        # Compound reinvestment: only reinvested portion (70%) grows exposure
-        compound_exposure = min(self._base_exposure + self._reinvested_profit, self._compound_max)
-        effective_exposure = max(compound_exposure, self._base_exposure)
-        
-        # Target exposure: use compound-adjusted exposure to determine trade size
-        if buy_price and buy_price > 0:
-            target_qty = effective_exposure / buy_price
+        # Engine 2.0: Use CapitalManager for adaptive position sizing
+        if self.capital_manager and buy_price and buy_price > 0:
+            # Depth in USDT at best levels
+            depth_usdt = allowed_by_liquidity * buy_price if allowed_by_liquidity > 0 else 999999
+            # Get adaptive position size from CapitalManager
+            position_usdt = self.capital_manager.compute_position_usdt(
+                exchange_balance_usdt=self.max_exposure_usdt,
+                depth_best_usdt=depth_usdt,
+                exposure_limit_usdt=self.max_exposure_usdt,
+            )
+            target_qty = position_usdt / buy_price if position_usdt > 0 else self.default_qty
         else:
-            target_qty = self.default_qty  # fallback
+            # Fallback: legacy compound logic
+            compound_exposure = min(self._base_exposure + self._reinvested_profit, self._compound_max)
+            effective_exposure = max(compound_exposure, self._base_exposure)
+            if buy_price and buy_price > 0:
+                target_qty = effective_exposure / buy_price
+            else:
+                target_qty = self.default_qty
 
         # final qty: min of target and liquidity (don't exceed what's available)
         if allowed_by_liquidity > 0:

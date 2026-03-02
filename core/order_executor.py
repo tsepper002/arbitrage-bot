@@ -22,7 +22,7 @@ class OrderExecutor:
     - live: Real order placement with parallel execution and balance management
     """
     
-    def __init__(self, dry_run: Optional[bool] = None, rest_clients: Optional[Dict] = None, balance_manager=None):
+    def __init__(self, dry_run: Optional[bool] = None, rest_clients: Optional[Dict] = None, balance_manager=None, capital_manager=None):
         """
         Initialize order executor.
         
@@ -30,10 +30,12 @@ class OrderExecutor:
             dry_run: If True, simulate orders. If None, uses settings.DRY_RUN
             rest_clients: Dict of {exchange_name: REST_client} for live trading
             balance_manager: BalanceManager instance for balance tracking
+            capital_manager: CapitalManager instance for Engine 2.0 kill-logic + quality ranking
         """
         self.dry_run = dry_run if dry_run is not None else settings.DRY_RUN
         self.rest_clients = rest_clients or {}
         self.balance_manager = balance_manager
+        self.capital_manager = capital_manager
         self.order_history: deque = deque(maxlen=10000)  # Auto-bounded
         self.trade_count_per_minute: Dict[int, int] = {}  # minute timestamp -> count
         self.last_trade_time_per_symbol: Dict[str, float] = {}  # symbol -> last trade timestamp
@@ -229,6 +231,16 @@ class OrderExecutor:
         }
         
         self._record_trade(symbol, order_info)
+        
+        # Engine 2.0: Report to CapitalManager (works in dry-run too for kill-logic testing)
+        if self.capital_manager:
+            self.capital_manager.record_trade_result(
+                symbol=symbol,
+                buy_exchange=buy_ex,
+                sell_exchange=sell_ex,
+                net_profit_pct=roi_pct,
+                slippage_pct=0.0,  # No slippage in dry-run
+            )
         
         return {
             'status': 'simulated',
@@ -556,6 +568,17 @@ class OrderExecutor:
             }
             
             self._record_trade(symbol, trade_info)
+            
+            # Engine 2.0: Report to CapitalManager for kill-logic + quality ranking
+            if self.capital_manager:
+                max_slippage = max(buy_slippage, sell_slippage)
+                self.capital_manager.record_trade_result(
+                    symbol=symbol,
+                    buy_exchange=buy_ex,
+                    sell_exchange=sell_ex,
+                    net_profit_pct=actual_roi,
+                    slippage_pct=max_slippage,
+                )
             
             logger.info(
                 f"💰 LIVE TRADE COMPLETED: {symbol} "

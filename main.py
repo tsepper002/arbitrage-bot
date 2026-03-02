@@ -829,7 +829,8 @@ class IntegratedArbitrageBot:
             executor = OrderExecutor(
                 dry_run=settings.DRY_RUN,
                 rest_clients=self.rest_clients,
-                balance_manager=self.balance_manager
+                balance_manager=self.balance_manager,
+                capital_manager=self.capital_manager,
             )
             self.executor = executor
             
@@ -1062,6 +1063,12 @@ class IntegratedArbitrageBot:
                     # Update CapitalManager with current equity
                     if self.capital_manager:
                         self.capital_manager.update_equity(total_bal)
+                        # Update volatility from engine's spread tracking
+                        if self.engine and hasattr(self.engine, '_best_spread_pct'):
+                            # Use best observed spread as proxy for market volatility
+                            # A high spread = high volatility; low spread = low volatility
+                            vol_pct = max(self.engine._best_spread_pct * 2.0, 0.01)
+                            self.capital_manager.update_volatility(vol_pct)
                 
                 # Engine 2.0: Capital Manager status
                 if self.capital_manager:
@@ -1453,6 +1460,20 @@ class IntegratedArbitrageBot:
                                         and not self.signal_allocator.is_ready_to_trade()):
                                     continue
                                 
+                                # Engine 2.0: Kill-logic checks (same as main engine)
+                                if self.capital_manager:
+                                    if not self.capital_manager.is_coin_enabled(trade_info['symbol']):
+                                        logger.debug(f"CapitalManager: coin {trade_info['symbol']} disabled (kill-logic)")
+                                        continue
+                                    _buy_ex = trade_info.get('buy_ex', '')
+                                    _sell_ex = trade_info.get('sell_ex', '')
+                                    if _buy_ex and not self.capital_manager.is_exchange_enabled(_buy_ex):
+                                        logger.debug(f"CapitalManager: exchange {_buy_ex} disabled (kill-logic)")
+                                        continue
+                                    if _sell_ex and not self.capital_manager.is_exchange_enabled(_sell_ex):
+                                        logger.debug(f"CapitalManager: exchange {_sell_ex} disabled (kill-logic)")
+                                        continue
+                                
                                 # Risk check
                                 if self.risk_manager:
                                     can_trade, reason = self.risk_manager.check_can_trade(trade_info)
@@ -1496,6 +1517,18 @@ class IntegratedArbitrageBot:
                                         self.state_manager.record_trade_detail(trade_info)
                                         self.state_manager.add_to_daily_pnl(trade_info.get('net', 0))
                                         self.state_manager.increment_trades()
+                                    # Engine 2.0: Report to CapitalManager (kill-logic + quality ranking)
+                                    if self.capital_manager:
+                                        _ti = result.get('trade_info', trade_info)
+                                        _roi = _ti.get('roi_pct', trade_info.get('roi_pct', 0))
+                                        _slip = _ti.get('buy_slippage_pct', 0) + _ti.get('sell_slippage_pct', 0)
+                                        self.capital_manager.record_trade_result(
+                                            symbol=trade_info['symbol'],
+                                            buy_exchange=trade_info.get('buy_ex', ''),
+                                            sell_exchange=trade_info.get('sell_ex', ''),
+                                            net_profit_pct=float(_roi) if _roi else 0.0,
+                                            slippage_pct=float(_slip) if _slip else 0.0,
+                                        )
                                     # Telegram notification
                                     if self.telegram_bot:
                                         try:
