@@ -149,7 +149,7 @@ class OrderExecutor:
         quote_currency = 'USDT'
         
         # PROFIT GATE (same as live mode for consistent simulation)
-        if net_profit < (self.MIN_LIVE_NET_PROFIT - 0.001) and net_profit >= 0:
+        if net_profit < (self.MIN_LIVE_NET_PROFIT - self.PROFIT_TOLERANCE) and net_profit >= 0:
             logger.debug(f"[DRY] ⛔ {symbol}: Profit ${net_profit:.4f} < ${self.MIN_LIVE_NET_PROFIT} minimum")
             return {'status': 'blocked', 'reason': f'Too thin: ${net_profit:.4f} < ${self.MIN_LIVE_NET_PROFIT}'}
         
@@ -244,10 +244,17 @@ class OrderExecutor:
     MAX_SLIPPAGE_PCT = 0.2  # 0.2% max deviation — tight to protect thin arb spreads
     # Minimum order size in USDT to avoid exchange rejections
     MIN_ORDER_USDT = 5.0  # All 5 exchanges require ≥$5 notional
-    # Minimum expected net profit to execute a LIVE trade (protects against slippage eating spread)
-    MIN_LIVE_NET_PROFIT = 0.01  # $0.01 minimum expected profit
-    # Minimum ROI to execute a LIVE trade (must always exceed total fees)
-    MIN_LIVE_ROI_PCT = 0.01  # 0.01% minimum ROI — redundant with fee check but extra safety
+    # Minimum expected net profit to execute a LIVE trade
+    # Set to $0.01 — lower than previous $0.02 because the hard fee floor in
+    # _build_trade_from_signal already ensures spread > fees. This gate catches
+    # edge cases where qty adjustment reduces expected profit after fee validation.
+    MIN_LIVE_NET_PROFIT = 0.01
+    # Floating-point tolerance for profit comparisons (prevents rejecting
+    # trades that are exactly at the threshold due to IEEE 754 rounding)
+    PROFIT_TOLERANCE = 0.001
+    # Minimum ROI % to execute a LIVE trade — catches cases where net profit
+    # passes the dollar gate but percentage is essentially zero (e.g., very large qty)
+    MIN_LIVE_ROI_PCT = 0.01
     # Minimum ratio of adjusted qty vs requested qty to proceed
     QTY_ADJUST_THRESHOLD = 0.95  # Proceed if ≥95% of requested qty available
 

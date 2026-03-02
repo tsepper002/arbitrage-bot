@@ -1654,10 +1654,10 @@ class IntegratedArbitrageBot:
         # Without this, "confidence" could push min_roi below 0 → guaranteed loss.
         total_fee_pct = (buy_fee + sell_fee) * 100
         spread_pct_raw = ((best_sell_price - best_buy_price) / best_buy_price) * 100 if best_buy_price > 0 else 0
-        if spread_pct_raw < total_fee_pct:
+        if spread_pct_raw <= total_fee_pct:
             # Spread doesn't cover fees — trade will LOSE money regardless of confidence
             gap = total_fee_pct - spread_pct_raw
-            reason = f"spread<fees ({spread_pct_raw:.3f}%<{total_fee_pct:.2f}%, gap={gap:.3f}%)"
+            reason = f"spread<fees ({spread_pct_raw:.3f}%<{total_fee_pct:.3f}%, gap={gap:.3f}%)"
             self._track_rejection(reason, strategy, symbol, best_buy_ex, best_sell_ex, spread_pct_raw, total_fee_pct)
             return None
         
