@@ -169,6 +169,31 @@ STRATEGY_PRIORITY = {
     'TRIANGULAR':      {'min_capital': 100,  'priority': 14, 'edge_pct': 0.15},
 }
 
+# ============================================================================
+# STRATEGY CLASSIFICATION — separates arb from directional strategies
+# ============================================================================
+# Market-neutral strategies: can execute in arb mode (hedge both sides)
+ARB_STRATEGIES = {'CROSS_EXCHANGE', 'TRIANGULAR', 'SMART_ORDER', 'FUNDING_RATE', 
+                  'INDEX_ARB', 'VOLATILITY_ARB', 'SPREAD_BETTING', 'PAIRS_TRADING'}
+
+# Directional strategies: ONLY generate signals, NEVER execute trades
+# (they require position holding which conflicts with arb hedging)
+DIRECTIONAL_STRATEGIES = {'VOLATILITY', 'MOMENTUM', 'BREAKOUT', 'DCA', 
+                          'GRID_TRADING', 'MARKET_MAKING'}
+
+# ============================================================================
+# EXPOSURE CAPS — per-coin and per-exchange limits
+# ============================================================================
+# Maximum percentage of total capital in any single coin
+MAX_EXPOSURE_PER_COIN_PCT = _get_env_float("ARB_MAX_EXPOSURE_PER_COIN_PCT", 15.0)
+
+# Maximum percentage of total capital on any single exchange  
+MAX_EXPOSURE_PER_EXCHANGE_PCT = _get_env_float("ARB_MAX_EXPOSURE_PER_EXCHANGE_PCT", 30.0)
+
+# Maximum inventory imbalance per coin across exchanges (USDT equivalent)
+# If imbalance exceeds this, stop trading that direction
+MAX_INVENTORY_SKEW_USDT = _get_env_float("ARB_MAX_INVENTORY_SKEW_USDT", 20.0)
+
 def get_enabled_strategies(capital_per_exchange: float = None) -> list:
     """Return list of strategy names enabled for current capital level.
     

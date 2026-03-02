@@ -298,6 +298,24 @@ class OrderExecutor:
             logger.debug(f"⛔ {symbol}: {reason}")
             return {'status': 'blocked', 'reason': reason}
         
+        # EXPOSURE CAP: Refuse trade if it would exceed per-exchange exposure limit
+        if self.balance_manager:
+            total_capital = sum(
+                self.balance_manager.get_balance(ex, 'USDT')
+                for ex in self.balance_manager.balances.keys()
+            )
+            if total_capital <= 0:
+                logger.warning("⚠️  Exposure cap: total USDT capital is 0 — balance manager may not be initialized")
+                total_capital = 1.0
+            max_per_exchange = total_capital * (settings.MAX_EXPOSURE_PER_EXCHANGE_PCT / 100.0)
+            buy_exchange_exposure = qty * buy_price
+            if buy_exchange_exposure > max_per_exchange:
+                old_qty = qty
+                qty = max_per_exchange / buy_price if buy_price > 0 else 0
+                if qty * buy_price < self.MIN_ORDER_USDT:
+                    return {'status': 'blocked', 'reason': f'Exposure cap: would exceed {settings.MAX_EXPOSURE_PER_EXCHANGE_PCT}% on {buy_ex}'}
+                logger.info(f"📏 Exposure cap: {old_qty:.6f} → {qty:.6f} ({settings.MAX_EXPOSURE_PER_EXCHANGE_PCT}% limit)")
+
         logger.info(
             f"🔴 LIVE EXECUTION: {symbol} | "
             f"Buy {qty} @ ${buy_price:.4f} on {buy_ex} | "

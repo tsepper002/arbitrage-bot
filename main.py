@@ -1560,6 +1560,11 @@ class IntegratedArbitrageBot:
         RSI extreme, etc.), the required ROI threshold is reduced by up to
         50% because the statistical edge combines with the spread opportunity.
         """
+        # STRATEGY SEPARATION: Directional strategies only generate signals, never trades
+        strategy_name = opp.get('strategy', opp.get('data', {}).get('strategy', ''))
+        if strategy_name in settings.DIRECTIONAL_STRATEGIES:
+            return None  # Signal-only strategy, no trade execution
+
         strategy = opp.get('strategy', '')
         symbol = opp.get('symbol', 'BTC-USDT')
         data = opp.get('data', {})
