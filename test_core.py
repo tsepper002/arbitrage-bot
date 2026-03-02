@@ -14,6 +14,30 @@ except ImportError:
 
 import settings
 
+
+def _scan_with_persistence(engine, symbol):
+    """Helper: scan with strong-spread bypass + persistence fallback.
+    
+    Strong spreads (>3× cushion) now pass on first scan.
+    If not, backdate persistence timestamps and retry.
+    """
+    opps = loop.run_until_complete(engine.scan_once(symbol))
+    if not opps:
+        for k in engine._spread_first_seen:
+            engine._spread_first_seen[k] -= engine.MIN_SPREAD_HOLD_MS
+        opps = loop.run_until_complete(engine.scan_once(symbol))
+    return opps
+
+
+async def _async_scan_with_persistence(engine, symbol):
+    """Async helper: scan with strong-spread bypass + persistence fallback."""
+    opps = await engine.scan_once(symbol)
+    if not opps:
+        for k in engine._spread_first_seen:
+            engine._spread_first_seen[k] -= engine.MIN_SPREAD_HOLD_MS
+        opps = await engine.scan_once(symbol)
+    return opps
+
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
@@ -94,12 +118,7 @@ def test_arbitrage_engine():
     loop.run_until_complete(store.update_levels("KuCoin", "BTC-USDT",
         bids_levels=[(50200.0, 1.0)], asks_levels=[(50200.0, 1.0)]))
     engine = ArbitrageEngine(store, min_net_pct=0.01)
-    # First scan registers spreads; second scan (after persistence window) detects them
-    loop.run_until_complete(engine.scan_once("BTC-USDT"))
-    # Backdate spread timestamps so persistence check passes on next scan
-    for k in engine._spread_first_seen:
-        engine._spread_first_seen[k] -= engine.MIN_SPREAD_HOLD_MS
-    opps = loop.run_until_complete(engine.scan_once("BTC-USDT"))
+    opps = _scan_with_persistence(engine, "BTC-USDT")
     assert len(opps) > 0
     best = opps[0]
     assert best['net'] > 0
@@ -175,11 +194,7 @@ def test_all_symbols():
             loop.run_until_complete(store.update_levels(ex, symbol,
                 bids_levels=[(price, 10.0)], asks_levels=[(price, 10.0)]))
         engine = ArbitrageEngine(store, min_net_pct=0.01)
-        # First scan registers spreads; backdate for persistence check
-        loop.run_until_complete(engine.scan_once(symbol))
-        for k in engine._spread_first_seen:
-            engine._spread_first_seen[k] -= engine.MIN_SPREAD_HOLD_MS
-        opps = loop.run_until_complete(engine.scan_once(symbol))
+        opps = _scan_with_persistence(engine, symbol)
         if opps:
             detected += 1
     assert detected >= 5
@@ -397,12 +412,7 @@ def test_e2e_arbitrage():
         bids_levels=[(3000.0, 10.0)], asks_levels=[(3000.0, 10.0)]))
     loop.run_until_complete(store.update_levels("MEXC", "ETH-USDT",
         bids_levels=[(3030.0, 10.0)], asks_levels=[(3030.0, 10.0)]))
-    # First scan records the spread (persistence filter), second scan finds it
-    loop.run_until_complete(engine.scan_once("ETH-USDT"))
-    # Backdate spread first-seen time so second scan passes persistence check
-    for k in list(engine._spread_first_seen.keys()):
-        engine._spread_first_seen[k] -= engine.MIN_SPREAD_HOLD_MS + 100
-    opps = loop.run_until_complete(engine.scan_once("ETH-USDT"))
+    opps = _scan_with_persistence(engine, "ETH-USDT")
     assert len(opps) > 0
     result = loop.run_until_complete(executor.execute_arbitrage(opps[0]))
     assert result['status'] == 'simulated'
@@ -608,11 +618,7 @@ def test_engine_feeds_dispatcher():
         bids_levels=[(100.5, 50.0)], asks_levels=[(100.5, 50.0)]))
 
     before = dispatcher.strategy_stats['CROSS_EXCHANGE']['opportunities']
-    # First scan registers spreads; backdate for persistence check
-    loop.run_until_complete(engine.scan_once("SOL-USDT"))
-    for k in engine._spread_first_seen:
-        engine._spread_first_seen[k] -= engine.MIN_SPREAD_HOLD_MS
-    opps = loop.run_until_complete(engine.scan_once("SOL-USDT"))
+    opps = _scan_with_persistence(engine, "SOL-USDT")
     # Manually call record (normally done in engine.run() loop)
     if opps:
         dispatcher.record_engine_opportunities(len(opps))
@@ -946,11 +952,7 @@ def test_flash_crash_protector_no_keyerror():
     executor = OrderExecutor(dry_run=True)
     engine = ArbitrageEngine(store, executor=executor, flash_crash_protector=fcp)
 
-    # First scan registers spreads; backdate for persistence check
-    loop.run_until_complete(engine.scan_once('DOT-USDT'))
-    for k in engine._spread_first_seen:
-        engine._spread_first_seen[k] -= engine.MIN_SPREAD_HOLD_MS
-    result = loop.run_until_complete(engine.scan_once('DOT-USDT'))
+    result = _scan_with_persistence(engine, 'DOT-USDT')
     assert len(result) >= 1, f"Expected >=1 opp with 0.4% spread, got {len(result)}"
     print(f"  ✅ scan_once with FlashCrashProtector: {len(result)} opportunity (was crashing with KeyError)")
 
@@ -993,11 +995,7 @@ def test_dry_run_records_success():
 
     # Run the full scan+execute pipeline
     async def run_scan():
-        # First scan registers spreads; backdate for persistence check
-        await engine.scan_once('DOT-USDT')
-        for k in engine._spread_first_seen:
-            engine._spread_first_seen[k] -= engine.MIN_SPREAD_HOLD_MS
-        opps = await engine.scan_once('DOT-USDT')
+        opps = await _async_scan_with_persistence(engine, 'DOT-USDT')
         assert len(opps) >= 1, f"Expected >=1 opp, got {len(opps)}"
         for o in opps:
             result = await executor.execute_arbitrage(o)
@@ -1397,11 +1395,7 @@ def test_scaling_and_e2e_pipeline():
         await store.update_levels('Binance', 'APT-USDT', [(8.27, 500)], [(8.28, 500)])
         await store.update_levels('KuCoin', 'APT-USDT', [(8.26, 500)], [(8.27, 500)])
 
-        opps = await engine.scan_once('APT-USDT')
-        # First scan registers spreads; backdate for persistence check
-        for k in engine._spread_first_seen:
-            engine._spread_first_seen[k] -= engine.MIN_SPREAD_HOLD_MS
-        opps = await engine.scan_once('APT-USDT')
+        opps = await _async_scan_with_persistence(engine, 'APT-USDT')
         assert len(opps) >= 1, f"Expected ≥1 opportunity, got {len(opps)}"
         print(f"  ✅ Found {len(opps)} opportunities")
 

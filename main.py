@@ -362,6 +362,10 @@ class IntegratedArbitrageBot:
         logger.info("\n🎯 Phase 6: Initializing Trading Strategies...")
         await self._initialize_strategies()
         
+        # Phase 7: Seed HFT latency data (MUST be after Phase 6 which creates SemiHFTEngine)
+        logger.info("\n📡 Phase 7: Seeding exchange latency data...")
+        await self._seed_hft_latency()
+        
         logger.info("\n✅ All components initialized successfully!")
         return True
     
@@ -432,34 +436,47 @@ class IntegratedArbitrageBot:
                             logger.warning(f"⚠️ {name} time sync failed: {result}")
                 logger.info("✅ Server time sync complete")
             
-            # SEED HFT LATENCY: Measure REST client RTT at startup so HFT dashboard
-            # shows real data immediately (not "no data" until first trade).
-            if hasattr(self, 'semi_hft_engine') and self.semi_hft_engine and self.rest_clients:
-                logger.info("📡 Measuring exchange latency (REST ping)...")
-                for name, client in self.rest_clients.items():
-                    try:
-                        t0 = time.time()
-                        if hasattr(client, 'get_balance'):
-                            await client.get_balance('USDT')
-                        else:
-                            # Fallback: use sync_server_time as ping
-                            if hasattr(client, 'sync_server_time'):
-                                await client.sync_server_time()
-                        rtt_ms = (time.time() - t0) * 1000
-                        self.semi_hft_engine.record_latency(name, rtt_ms)
-                        logger.info(f"  📡 {name}: {rtt_ms:.0f}ms RTT")
-                    except Exception as e:
-                        self.semi_hft_engine.record_error(name)
-                        self.semi_hft_engine.record_latency(name, 5000.0)  # Penalize failed pings
-                        logger.warning(f"  ⚠️ {name}: ping failed ({e})")
-                # Show which exchanges are best
-                all_names = list(self.rest_clients.keys())
-                top = self.semi_hft_engine.get_top_exchanges(all_names, n=3)
-                logger.info(f"🏆 Top exchanges by latency: {', '.join(top)}")
+            # NOTE: HFT latency seeding moved to Phase 7 (_seed_hft_latency)
+            # because SemiHFTEngine is created in Phase 6, AFTER this method runs.
             
         except Exception as e:
             logger.error(f"❌ Error initializing REST clients: {e}")
             raise
+    
+    async def _seed_hft_latency(self):
+        """Measure REST client RTT at startup — seeds HFT with REAL latency data.
+        
+        MUST run AFTER Phase 6 (SemiHFTEngine creation).
+        Without this, HFT dashboard shows "no data" and exchange filtering
+        uses default 200ms for all exchanges → no intelligent selection.
+        Also seeds ArbitrageEngine's _exchange_latency_ms for threshold calculations.
+        """
+        if not hasattr(self, 'semi_hft_engine') or not self.semi_hft_engine or not self.rest_clients:
+            logger.info("ℹ️ HFT latency seeding skipped (no HFT engine or REST clients)")
+            return
+        
+        logger.info("📡 Measuring exchange latency (REST ping)...")
+        for name, client in self.rest_clients.items():
+            try:
+                t0 = time.time()
+                if hasattr(client, 'get_balance'):
+                    await client.get_balance('USDT')
+                elif hasattr(client, 'sync_server_time'):
+                    await client.sync_server_time()
+                rtt_ms = (time.time() - t0) * 1000
+                self.semi_hft_engine.record_latency(name, rtt_ms)
+                # Also seed ArbitrageEngine's latency for threshold calculations
+                if self.engine:
+                    self.engine.update_exchange_latency(name, rtt_ms)
+                logger.info(f"  📡 {name}: {rtt_ms:.0f}ms RTT")
+            except Exception as e:
+                self.semi_hft_engine.record_error(name)
+                self.semi_hft_engine.record_latency(name, 5000.0)
+                logger.warning(f"  ⚠️ {name}: ping failed ({e})")
+        
+        all_names = list(self.rest_clients.keys())
+        top = self.semi_hft_engine.get_top_exchanges(all_names, n=3)
+        logger.info(f"🏆 Top exchanges by latency: {', '.join(top)}")
     
     async def _recover_pending_orders(self):
         """Process orphaned pending orders from a previous session (crash recovery)."""
@@ -1180,9 +1197,10 @@ class IntegratedArbitrageBot:
                         self.capital_manager.update_equity(total_bal)
                         # Update volatility from engine's spread tracking
                         if self.engine and hasattr(self.engine, 'best_spread_pct'):
-                            # Use best observed spread as proxy for market volatility
-                            # A high spread = high volatility; low spread = low volatility
-                            vol_pct = max(self.engine.best_spread_pct * 2.0, 0.01)
+                            # FIX: Use spread/10 as vol proxy (was ×2 → inflated threshold)
+                            # best_spread 0.19% → vol 0.019% → buffer 0.019%*0.20 = 0.004%
+                            # (Before: 0.19%×2 = 0.38% → buffer 0.076% → threshold += 0.076%!)
+                            vol_pct = max(self.engine.best_spread_pct * 0.1, 0.001)
                             self.capital_manager.update_volatility(vol_pct)
                 
                 # Engine 2.0: Capital Manager status

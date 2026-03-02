@@ -664,14 +664,22 @@ class ArbitrageEngine:
 
                 # SPREAD PERSISTENCE: Only trade spreads that have persisted long enough
                 # Engine 2.0: Uses level-specific persistence from CapitalManager
+                # EXCEPTION: Skip persistence check for strong spreads (>3× cushion above fees)
+                # These are almost certainly real and will disappear if we wait.
                 min_hold_ms = cm.level.spread_persistence_ms if cm else self.MIN_SPREAD_HOLD_MS
-                spread_key = f"{symbol}:{buy_ex}->{sell_ex}"
-                now_ms = time.time() * 1000
-                if spread_key not in self._spread_first_seen:
-                    self._spread_first_seen[spread_key] = now_ms
-                    continue  # First time seeing this spread — wait for confirmation
-                elif now_ms - self._spread_first_seen[spread_key] < min_hold_ms:
-                    continue  # Spread hasn't persisted long enough
+                spread_excess = gross_spread_pct - dynamic_min_spread
+                STRONG_SPREAD_MULTIPLIER = 3.0  # spread > 3× above threshold = strong
+                strong_cushion = (cm.level.spread_threshold_above_fees * STRONG_SPREAD_MULTIPLIER) if cm else 0.18
+                is_strong_spread = spread_excess > strong_cushion
+                
+                if not is_strong_spread:
+                    spread_key = f"{symbol}:{buy_ex}->{sell_ex}"
+                    now_ms = time.time() * 1000
+                    if spread_key not in self._spread_first_seen:
+                        self._spread_first_seen[spread_key] = now_ms
+                        continue  # First time seeing this spread — wait for confirmation
+                    elif now_ms - self._spread_first_seen[spread_key] < min_hold_ms:
+                        continue  # Spread hasn't persisted long enough
 
                 # LATENCY CHECK: Skip if combined exchange latency exceeds spread lifetime
                 buy_latency = self._exchange_latency_ms.get(buy_ex, self.DEFAULT_EXCHANGE_LATENCY_MS)
