@@ -399,6 +399,8 @@ class IntegratedArbitrageBot:
     
     async def _recover_pending_orders(self):
         """Process orphaned pending orders from a previous session (crash recovery)."""
+        STALE_ORDER_TIMEOUT_SEC = 300  # 5 minutes — orders older than this are considered stale
+        
         if not self.state_manager or not self.rest_clients:
             return
         
@@ -426,8 +428,8 @@ class IntegratedArbitrageBot:
                 status = await client.get_order_status(symbol, order_id)
                 if isinstance(status, Exception):
                     logger.warning(f"   ⚠️ Cannot check order {order_id} on {exchange}: {status}")
-                    # If order is very old (>5 min), it's likely dead — remove
-                    if age_sec > 300:
+                    # If order is very old, it's likely dead — remove
+                    if age_sec > STALE_ORDER_TIMEOUT_SEC:
                         logger.info(f"   🗑️ Removing stale order {order_id} (age: {age_sec:.0f}s)")
                         self.state_manager.remove_pending_order(order_id)
                     continue
@@ -450,12 +452,12 @@ class IntegratedArbitrageBot:
                     self.state_manager.remove_pending_order(order_id)
                 else:
                     # Unknown status, remove if old
-                    if age_sec > 300:
+                    if age_sec > STALE_ORDER_TIMEOUT_SEC:
                         self.state_manager.remove_pending_order(order_id)
                     
             except Exception as e:
                 logger.warning(f"   ⚠️ Error recovering order {order_id}: {e}")
-                if age_sec > 300:
+                if age_sec > STALE_ORDER_TIMEOUT_SEC:
                     self.state_manager.remove_pending_order(order_id)
         
         remaining = len(self.state_manager.get_pending_orders())

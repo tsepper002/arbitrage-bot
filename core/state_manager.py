@@ -14,6 +14,8 @@ import settings
 
 logger = logging.getLogger("state_manager")
 
+SECONDS_PER_DAY = 86400
+
 
 class StateManager:
     """
@@ -98,7 +100,7 @@ class StateManager:
             
             # Check for stale daily counters (reset if from yesterday)
             last_reset = self.state.get("daily_reset_timestamp", 0.0)
-            if last_reset > 0 and time.time() - last_reset > 86400:
+            if last_reset > 0 and time.time() - last_reset > SECONDS_PER_DAY:
                 logger.info("   🔄 Daily counters are stale (>24h), resetting")
                 self.state["daily_pnl"] = 0.0
                 self.state["total_trades_today"] = 0

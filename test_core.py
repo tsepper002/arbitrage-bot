@@ -1523,7 +1523,7 @@ def test_state_recovery():
     from core.state_manager import StateManager
     
     # Create a state file simulating a previous session
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, dir='/tmp') as f:
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, dir=tempfile.gettempdir()) as f:
         state_file = f.name
         json.dump({
             "version": "1.0",
