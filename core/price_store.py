@@ -25,6 +25,12 @@ class PriceStore:
         #   "bids_levels": [(p,s),...], "asks_levels": [(p,s),...], "ts": float }
         self._data: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
         # No lock needed - atomic dict reference swap
+        # §4 Event-driven: optional callback when symbol data changes
+        self._on_update_callback = None
+
+    def set_on_update(self, callback):
+        """Set callback(symbol) to trigger event-driven scanning."""
+        self._on_update_callback = callback
     
     async def update(self, exchange: str, symbol: str,
                      bid: Optional[float], bid_size: Optional[float],
@@ -54,6 +60,13 @@ class PriceStore:
         # Atomic swap
         current_exmap[exchange] = rec
         self._data[symbol] = current_exmap
+        
+        # §4 Event-driven: notify engine that this symbol has new data
+        if self._on_update_callback:
+            try:
+                self._on_update_callback(symbol)
+            except Exception:
+                pass  # Non-critical: don't break data pipeline
         
         logger.debug(f"PriceStore.update (top) {exchange} {symbol} bid={rec.get('bid')} ask={rec.get('ask')}")
     

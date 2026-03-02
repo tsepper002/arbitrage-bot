@@ -1685,6 +1685,62 @@ def test_semi_hft_engine():
     print("  ✅ Semi-HFT Engine: ALL 7 stages verified")
 
 
+def test_event_driven_and_wiring():
+    """Test that event-driven scanning, pair scoring, lead-lag, and order slicing are properly wired."""
+    print("\n" + "=" * 60)
+    print("TEST: Event-Driven Wiring + Pair Scoring + Lead-Lag + Slicing")
+    print("=" * 60)
+
+    # 1. PriceStore callback wiring
+    from core.price_store import PriceStore
+    updated_symbols = []
+    store = PriceStore()
+    store.set_on_update(lambda sym: updated_symbols.append(sym))
+    loop.run_until_complete(store.update("Binance", "BTC-USDT", 50000, 1.0, 50010, 1.0))
+    assert "BTC-USDT" in updated_symbols, "Callback should fire on update"
+    print("  ✅ PriceStore event-driven callback fires correctly")
+
+    # 2. ArbitrageEngine marks symbol updated
+    from core.arbitrage import ArbitrageEngine
+    settings.EVENT_DRIVEN_SCAN = True
+    engine = ArbitrageEngine(store=store, executor=None)
+    engine.mark_symbol_updated("ETH-USDT")
+    assert "ETH-USDT" in engine.updated_symbols, "Symbol should be marked updated"
+    print("  ✅ ArbitrageEngine.mark_symbol_updated works")
+
+    # 3. SemiHFT pair scoring filter
+    from core.semi_hft_engine import SemiHFTEngine
+    hft = SemiHFTEngine()
+    # Before 20 trades, all pairs allowed
+    assert hft.is_top_pair("HTX", "MEXC"), "Before 20 trades, all pairs allowed"
+    # After 20+ trades, filter kicks in
+    for _ in range(25):
+        hft.record_pair_result("MEXC", "Binance", 0.10, 0.02, 80)
+    assert hft.is_top_pair("MEXC", "Binance"), "Top pair should be allowed"
+    print("  ✅ Pair scoring filter works")
+
+    # 4. Lead-lag opportunity detection
+    for i in range(10):
+        hft.record_mid_price("Binance", "BTC-USDT", 50000 + i * 10)
+        hft.record_mid_price("MEXC", "BTC-USDT", 50000 + i * 5)
+    # Test that function runs without error
+    result = hft.is_lead_lag_opportunity("BTC-USDT", "MEXC", "Binance", ["Binance", "MEXC"])
+    assert isinstance(result, bool), "is_lead_lag_opportunity should return bool"
+    print(f"  ✅ Lead-lag opportunity check works (result={result})")
+
+    # 5. Order slicing in execution
+    slices = hft.compute_order_slices(10.0, 1.50, 0.02, n_slices=3)
+    assert len(slices) == 3, f"Expected 3 slices, got {len(slices)}"
+    total_qty = sum(q for _, q in slices)
+    assert abs(total_qty - 10.0) < 0.01, f"Total qty should be 10.0, got {total_qty}"
+    # Prices should be ascending within the spread
+    prices = [p for p, _ in slices]
+    assert prices == sorted(prices), "Slice prices should be ascending"
+    print(f"  ✅ Order slicing: {len(slices)} slices, prices={[f'{p:.4f}' for p in prices]}")
+
+    print("  ✅ ALL event-driven wiring verified")
+
+
 if __name__ == "__main__":
     tests = [
         test_settings, test_price_store, test_exchange_config, test_order_executor,
@@ -1704,6 +1760,7 @@ if __name__ == "__main__":
         test_dry_run_balance_tracking,
         test_state_recovery,
         test_semi_hft_engine,
+        test_event_driven_and_wiring,
     ]
     passed = failed = 0
     for t in tests:

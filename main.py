@@ -963,6 +963,12 @@ class IntegratedArbitrageBot:
             )
             # Provide REST clients for JIT inventory acquisition in live mode
             self.engine._rest_clients = self.rest_clients
+            
+            # §4 Event-driven: Wire PriceStore → Engine symbol update notifications
+            if settings.EVENT_DRIVEN_SCAN:
+                self.store.set_on_update(self.engine.mark_symbol_updated)
+                logger.info("⚡ Event-driven scanning enabled (trigger on price change)")
+            
             logger.info("✅ Main Arbitrage Engine initialized with professional components + ML")
             
         except Exception as e:

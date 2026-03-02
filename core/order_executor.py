@@ -430,33 +430,55 @@ class OrderExecutor:
             if use_maker_first:
                 # Maker-first: limit buy, wait for fill, THEN market sell
                 spread = sell_price - buy_price
-                maker_buy_price = round_price(buy_ex, symbol, buy_price + spread * (settings.MAKER_PRICE_OFFSET_PCT / 100.0))
                 qty = round_qty(buy_ex, symbol, qty)
                 
-                # Place limit buy first
-                buy_result = await buy_client.place_order(symbol, 'buy', 'limit', qty, maker_buy_price)
-                if isinstance(buy_result, Exception):
-                    logger.error(f"❌ Maker buy failed: {buy_result}")
-                    return {'status': 'error', 'reason': f'Maker buy failed: {buy_result}'}
+                # §7 SMART ORDER SLICING: Split into micro-orders if semi-HFT enabled
+                if self.semi_hft and settings.SEMI_HFT_ENABLED and qty > 0 and spread > 0:
+                    slices = self.semi_hft.compute_order_slices(qty, buy_price, spread)
+                else:
+                    # Single order at optimal maker price
+                    maker_buy_price = round_price(buy_ex, symbol, buy_price + spread * (settings.MAKER_PRICE_OFFSET_PCT / 100.0))
+                    slices = [(maker_buy_price, qty)]
                 
-                # Track open order for shutdown cancellation
-                buy_order_id = self._extract_order_id(buy_result)
-                open_order = {'exchange': buy_ex, 'symbol': symbol, 'order_id': buy_order_id, 'side': 'buy'}
-                self._open_orders.append(open_order)
-                # Persist to state for crash recovery
-                if self.state_manager:
-                    self.state_manager.add_pending_order(open_order)
+                # Place all slice orders
+                buy_results = []
+                slice_order_ids = []
+                total_slice_filled = 0.0
+                for slice_price, slice_qty in slices:
+                    slice_price = round_price(buy_ex, symbol, slice_price)
+                    slice_qty = round_qty(buy_ex, symbol, slice_qty)
+                    if slice_qty <= 0:
+                        continue
+                    result = await buy_client.place_order(symbol, 'buy', 'limit', slice_qty, slice_price)
+                    if isinstance(result, Exception):
+                        logger.debug(f"Slice order failed: {result}")
+                        continue
+                    buy_results.append(result)
+                    oid = self._extract_order_id(result)
+                    slice_order_ids.append(oid)
+                    open_order = {'exchange': buy_ex, 'symbol': symbol, 'order_id': oid, 'side': 'buy'}
+                    self._open_orders.append(open_order)
+                    if self.state_manager:
+                        self.state_manager.add_pending_order(open_order)
                 
-                # Wait for fill (up to MAKER_FILL_TIMEOUT_MS)
+                if not buy_results:
+                    logger.error(f"❌ All maker buy slices failed")
+                    return {'status': 'error', 'reason': 'All maker buy slices failed'}
+                
+                buy_result = buy_results[0]  # Primary result for tracking
+                buy_order_id = slice_order_ids[0] if slice_order_ids else None
+                
+                # Wait for fill (up to MAKER_FILL_TIMEOUT_MS) — check primary order
                 fill_timeout_sec = settings.MAKER_FILL_TIMEOUT_MS / 1000.0
+                maker_buy_price = slices[0][0] if slices else buy_price
                 buy_fill = await self._verify_fill(buy_client, symbol, buy_order_id, 'buy', maker_buy_price, qty)
                 buy_filled_pct = (buy_fill.get('filled_qty', 0) / qty * 100) if qty > 0 else 0
                 
-                # Remove from open orders (filled or about to cancel)
-                if open_order in self._open_orders:
-                    self._open_orders.remove(open_order)
-                if self.state_manager and buy_order_id:
-                    self.state_manager.remove_pending_order(buy_order_id)
+                # Remove ALL slice orders from open orders tracking
+                for oid in slice_order_ids:
+                    self._open_orders = [o for o in self._open_orders if o.get('order_id') != oid]
+                    if self.state_manager:
+                        self.state_manager.remove_pending_order(oid)
                 
                 # Semi-HFT: Use early hedge threshold (30%) instead of conservative (75%)
                 min_fill_pct = settings.MAKER_MIN_FILL_PCT
@@ -464,9 +486,10 @@ class OrderExecutor:
                     min_fill_pct = settings.SEMI_HFT_EARLY_HEDGE_PCT
                 
                 if buy_filled_pct < min_fill_pct:
-                    # Not enough fill — cancel and abort
-                    await self._safe_cancel(buy_client, symbol, buy_order_id, 'buy')
-                    logger.info(f"📭 Maker buy only {buy_filled_pct:.0f}% filled (need {min_fill_pct}%) — cancelled")
+                    # Not enough fill — cancel ALL slice orders and abort
+                    for oid in slice_order_ids:
+                        await self._safe_cancel(buy_client, symbol, oid, 'buy')
+                    logger.info(f"📭 Maker buy only {buy_filled_pct:.0f}% filled (need {min_fill_pct}%) — cancelled {len(slice_order_ids)} slices")
                     # Semi-HFT: Record failed fill for fill-rate tracking
                     if self.semi_hft:
                         self.semi_hft.record_fill(buy_ex, filled=False, partial=buy_filled_pct > 0)

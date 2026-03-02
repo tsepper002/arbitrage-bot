@@ -654,6 +654,11 @@ class ArbitrageEngine:
                 if combined_latency > self.MAX_COMBINED_LATENCY_MS:
                     continue
 
+                # §11 PAIR SCORING: Only trade top-scoring exchange pairs (after 20+ trades)
+                if hft and settings.SEMI_HFT_ENABLED:
+                    if not hft.is_top_pair(buy_ex, sell_ex):
+                        continue  # Not a top-scoring pair, skip
+
                 buy_avg, buy_filled = simulate_execution_from_book(asks, qty)
                 sell_avg, sell_filled = simulate_execution_from_book(bids, qty)
 
@@ -663,6 +668,14 @@ class ArbitrageEngine:
                     if top_bid > 0 and top_ask > 0:
                         hft.record_mid_price(buy_ex, symbol, (top_bid + top_ask) / 2)
                         hft.record_mid_price(sell_ex, symbol, (top_bid + top_ask) / 2)
+
+                # §12 LEAD-LAG: Boost opportunities where buy is on lagging exchange
+                lead_lag_boost = 0.0
+                if hft and settings.SEMI_HFT_ENABLED:
+                    all_exchanges = list(exmap.keys())
+                    if hft.is_lead_lag_opportunity(symbol, buy_ex, sell_ex, all_exchanges):
+                        # Favorable timing: sell exchange led the move, buy is still cheap
+                        lead_lag_boost = 0.02  # +0.02% ROI boost for favorable timing
 
                 # VWAP SLIPPAGE CHECK: If VWAP price deviates >0.2% from top-of-book,
                 # the order will eat deep into the book — reduce expected ROI
@@ -695,6 +708,8 @@ class ArbitrageEngine:
 
                 invested = buy_avg * filled
                 roi_pct = (net / invested) * 100 if invested else 0.0
+                # §12: Apply lead-lag timing boost
+                roi_pct += lead_lag_boost
                 
                 # PROFESSIONAL RISK CHECKS
                 # P1: Flash Crash Protection - Check if market is safe to trade
@@ -882,6 +897,8 @@ class ArbitrageEngine:
                     "fees": fees,
                     "net": net,
                     "roi_pct": roi_pct,
+                    "asks_levels": asks[:10],  # For order slicing in executor
+                    "bids_levels": bids[:10],
                 }
 
                 # Record EVERY positive-ROI finding to signal allocator BEFORE dedup
