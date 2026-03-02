@@ -1565,6 +1565,21 @@ class IntegratedArbitrageBot:
         if strategy_name in settings.DIRECTIONAL_STRATEGIES:
             return None  # Signal-only strategy, no trade execution
 
+        # SLIPPAGE BUFFER: Reduce expected profit by estimated market impact
+        # This accounts for the gap between simulation and actual execution
+        SLIPPAGE_PER_LEG_PCT = 0.05  # 0.05% slippage per leg, applied to both legs
+        roi_pct = opp.get('roi_pct', opp.get('data', {}).get('roi_pct', 0))
+        if roi_pct is not None and roi_pct > 0:
+            adjusted_roi = roi_pct - SLIPPAGE_PER_LEG_PCT * 2  # Both legs
+            if adjusted_roi <= 0:
+                return None  # Not profitable after slippage estimate
+            # Adjust net profit proportionally in the opportunity data
+            net = opp.get('net', opp.get('data', {}).get('net', 0))
+            if net and net > 0:
+                opp_data = opp.get('data', opp)
+                opp_data['net'] = net * (adjusted_roi / roi_pct)
+                opp_data['roi_pct'] = adjusted_roi
+
         strategy = opp.get('strategy', '')
         symbol = opp.get('symbol', 'BTC-USDT')
         data = opp.get('data', {})

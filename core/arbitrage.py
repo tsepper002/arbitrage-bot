@@ -574,6 +574,19 @@ class ArbitrageEngine:
 
                 buy_avg, buy_filled = simulate_execution_from_book(asks, qty)
                 sell_avg, sell_filled = simulate_execution_from_book(bids, qty)
+
+                # VWAP SLIPPAGE CHECK: If VWAP price deviates >0.2% from top-of-book,
+                # the order will eat deep into the book — reduce expected ROI
+                buy_vwap_slippage = (buy_avg - top_ask) / top_ask * 100 if top_ask > 0 else 0
+                sell_vwap_slippage = (top_bid - sell_avg) / top_bid * 100 if top_bid > 0 else 0
+                total_book_slippage = buy_vwap_slippage + sell_vwap_slippage
+                if total_book_slippage > 0.3:  # >0.3% cumulative VWAP slippage (buy + sell)
+                    logger.debug(
+                        f"📖 {symbol} {buy_ex}→{sell_ex}: Book slippage {total_book_slippage:.3f}% "
+                        f"(buy VWAP +{buy_vwap_slippage:.3f}%, sell VWAP -{sell_vwap_slippage:.3f}%)"
+                    )
+                    continue  # Too much book depth erosion
+
                 filled = min(buy_filled, sell_filled)
                 if filled <= 0:
                     continue

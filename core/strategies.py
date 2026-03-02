@@ -220,7 +220,10 @@ class SmartOrderStrategy:
                         # Determine order type
                         if ratio >= self.LIMIT_THRESHOLD:
                             order_type = "limit"
-                            # Limit orders can capture maker rebate
+                            # Limit orders can capture maker rebate.
+                            # NOTE: in live execution, limit orders may not fill
+                            # immediately — treat this as optimistic; taker fees
+                            # are the conservative baseline.
                             effective_fee = (_fee(buy_ex, "maker") + _fee(sell_ex, "maker")) * 100
                         else:
                             order_type = "market"
@@ -461,6 +464,8 @@ class GridTradingStrategy:
                         qty = settings.MAX_EXPOSURE_USDT / actual_price
 
                     net = profit_per_unit * qty * (1 - _fee(best_ex) * 2)
+                    if net <= 0:
+                        continue
 
                     results.append({
                         "symbol": symbol,
