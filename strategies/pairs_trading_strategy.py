@@ -229,7 +229,7 @@ class PairsTradingStrategy:
         
         return beta[1]
 
-    def rolling_correlation(self, symbol1: str, symbol2: str) -> float:
+    def rolling_correlation(self, symbol1: str, symbol2: str) -> Optional[float]:
         """
         Calculate rolling correlation over recent window to detect regime shifts.
         
@@ -237,14 +237,14 @@ class PairsTradingStrategy:
         may have broken — signals should be ignored to avoid regime-shift losses.
         
         Returns:
-            Rolling correlation coefficient (0.0 if insufficient data)
+            Rolling correlation coefficient, or None if insufficient data
         """
         prices1 = self.price_history.get(symbol1, [])
         prices2 = self.price_history.get(symbol2, [])
         
         window = self.rolling_corr_window
         if len(prices1) < window or len(prices2) < window:
-            return 0.0
+            return None
         
         # Use only the last `window` prices
         recent1 = prices1[-window:]
@@ -273,8 +273,9 @@ class PairsTradingStrategy:
         
         # ROLLING CORRELATION CHECK: detect regime shifts
         # If correlation has broken down recently, skip signals — pair may no longer revert
+        # Pairs trading requires POSITIVE correlation (not just strong negative)
         rolling_corr = self.rolling_correlation(symbol1, symbol2)
-        if rolling_corr != 0.0 and abs(rolling_corr) < self.min_rolling_corr:
+        if rolling_corr is not None and rolling_corr < self.min_rolling_corr:
             logger.debug(f"Pairs {pair_key}: rolling correlation {rolling_corr:.3f} < {self.min_rolling_corr} — regime shift, skipping")
             return None
         
