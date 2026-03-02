@@ -1326,7 +1326,7 @@ class IntegratedArbitrageBot:
                 logger.info("✅ Final state saved")
             return
 
-    LATENCY_REPING_INTERVAL_SEC = 60  # Re-ping exchanges every 60 seconds
+    LATENCY_REPING_INTERVAL_SEC = 30  # Re-ping exchanges every 30 seconds (also re-syncs time)
 
     async def _latency_ping_loop(self):
         """Periodically re-ping ALL exchanges to update latency data.

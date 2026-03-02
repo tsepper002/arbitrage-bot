@@ -525,16 +525,16 @@ class ArbitrageEngine:
         if cm and not cm.is_coin_enabled(symbol):
             return res  # Coin disabled by kill-logic
 
-        # SEMI-HFT: Pre-filter to TOP N exchanges by latency + stability.
-        # This is the KEY optimization: instead of scanning 5×5=20 pairs,
-        # we scan 3×3=6 pairs (or 2×2=4 at micro level), focusing on the
-        # exchanges most likely to execute successfully.
-        # Level mapping: coin_limit=1 → 2 exchanges, coin_limit=3 → 4, coin_limit=5 → 6
+        # SEMI-HFT: Pre-filter exchanges by latency + stability.
+        # IMPORTANT: For cross-exchange arbitrage, we need MANY exchange pairs
+        # to find profitable spreads. Tightly-aligned exchanges (e.g. MEXC+Binance)
+        # rarely have spreads > fees. We need 4-5 exchanges for good spread diversity.
+        # coin_limit controls how many COINS to trade, NOT how many exchanges to scan.
         MIN_EXCHANGES_FOR_ARB = 2
+        MIN_EXCHANGES_TO_SCAN = 4  # Need diverse exchanges for profitable spreads
         hft = self.semi_hft
         if hft and settings.SEMI_HFT_ENABLED:
-            max_exchanges = cm.level.coin_limit + 1 if cm else 3
-            max_exchanges = max(max_exchanges, MIN_EXCHANGES_FOR_ARB)
+            max_exchanges = max(MIN_EXCHANGES_TO_SCAN, len(exchanges))
             exchanges = hft.get_top_exchanges(exchanges, n=max_exchanges)
             if len(exchanges) < MIN_EXCHANGES_FOR_ARB:
                 return res  # Not enough healthy exchanges

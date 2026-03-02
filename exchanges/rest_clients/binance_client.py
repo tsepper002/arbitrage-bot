@@ -100,7 +100,7 @@ class BinanceRESTClient(BaseRESTClient):
             "side": side.upper(),
             "type": "MARKET" if order_type == "market" else "LIMIT",
             "timestamp": self._synced_ts(),
-            "recvWindow": 5000
+            "recvWindow": 10000
         }
 
         if order_type == "market" and side.upper() == "BUY":
@@ -144,7 +144,7 @@ class BinanceRESTClient(BaseRESTClient):
             "symbol": self.normalize_symbol(symbol),
             "orderId": order_id,
             "timestamp": self._synced_ts(),
-            "recvWindow": 5000
+            "recvWindow": 10000
         }
         query = self._build_signed_query(params)
         headers = self._get_headers()
@@ -164,7 +164,7 @@ class BinanceRESTClient(BaseRESTClient):
             "symbol": self.normalize_symbol(symbol),
             "orderId": order_id,
             "timestamp": self._synced_ts(),
-            "recvWindow": 5000
+            "recvWindow": 10000
         }
         query = self._build_signed_query(params)
         headers = self._get_headers()
@@ -186,7 +186,7 @@ class BinanceRESTClient(BaseRESTClient):
 
         params = {
             "timestamp": self._synced_ts(),
-            "recvWindow": 5000
+            "recvWindow": 10000
         }
         query = self._build_signed_query(params)
         headers = self._get_headers()
@@ -247,7 +247,7 @@ class BinanceRESTClient(BaseRESTClient):
             "amount": str(amount),
             "address": address,
             "timestamp": self._synced_ts(),
-            "recvWindow": 5000
+            "recvWindow": 10000
         }
         if network:
             params["network"] = network
@@ -271,7 +271,7 @@ class BinanceRESTClient(BaseRESTClient):
         params = {
             "coin": currency,
             "timestamp": self._synced_ts(),
-            "recvWindow": 5000
+            "recvWindow": 10000
         }
         if network:
             params["network"] = network
@@ -331,7 +331,7 @@ class BinanceRESTClient(BaseRESTClient):
             url = f"{self.BASE_URL}/api/v3/account"
             params = {
                 "timestamp": self._synced_ts(),
-                "recvWindow": 5000
+                "recvWindow": 10000
             }
             query = self._build_signed_query(params)
             headers = self._get_headers()

@@ -111,6 +111,7 @@ class MEXCRESTClient(BaseRESTClient):
             "side": side.upper(),
             "type": "MARKET" if order_type == "market" else "LIMIT",
             "timestamp": str(self._synced_ts()),
+            "recvWindow": "10000",
         }
         
         if order_type == "market" and side.upper() == "BUY" and price:
@@ -145,7 +146,8 @@ class MEXCRESTClient(BaseRESTClient):
         params = {
             "symbol": self.normalize_symbol(symbol),
             "orderId": str(order_id),
-            "timestamp": str(self._synced_ts())
+            "timestamp": str(self._synced_ts()),
+            "recvWindow": "10000"
         }
         full_qs = self._build_signed_qs(params)
         url = f"{self.BASE_URL}{path}?{full_qs}"
@@ -168,7 +170,8 @@ class MEXCRESTClient(BaseRESTClient):
         params = {
             "symbol": self.normalize_symbol(symbol),
             "orderId": str(order_id),
-            "timestamp": str(self._synced_ts())
+            "timestamp": str(self._synced_ts()),
+            "recvWindow": "10000"
         }
         full_qs = self._build_signed_qs(params)
         url = f"{self.BASE_URL}{path}?{full_qs}"
@@ -186,7 +189,8 @@ class MEXCRESTClient(BaseRESTClient):
         """Get account balances from MEXC."""
         path = "/api/v3/account"
         params = {
-            "timestamp": str(self._synced_ts())
+            "timestamp": str(self._synced_ts()),
+            "recvWindow": "10000"
         }
         full_qs = self._build_signed_qs(params)
         url = f"{self.BASE_URL}{path}?{full_qs}"
@@ -225,7 +229,8 @@ class MEXCRESTClient(BaseRESTClient):
             "address": address,
             "amount": str(amount),
             "network": network,
-            "timestamp": str(self._synced_ts())
+            "timestamp": str(self._synced_ts()),
+            "recvWindow": "10000"
         }
         
         if memo:
@@ -257,7 +262,8 @@ class MEXCRESTClient(BaseRESTClient):
             path = "/api/v3/capital/deposit/address"
             params = {
                 "coin": currency,
-                "timestamp": str(self._synced_ts())
+                "timestamp": str(self._synced_ts()),
+                "recvWindow": "10000"
             }
             full_qs = self._build_signed_qs(params)
             url = f"{self.BASE_URL}{path}?{full_qs}"
