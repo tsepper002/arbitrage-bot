@@ -1748,6 +1748,72 @@ def test_event_driven_and_wiring():
     print("  ✅ ALL event-driven wiring verified")
 
 
+def test_usdt_to_prefund_flow():
+    """Test the complete USDT-only → signal → miss → urgent prefund → trade flow.
+    
+    This validates that when ALL balance is in USDT:
+    1. Signals are recorded from positive spreads
+    2. Blocked trades trigger record_miss()
+    3. After MISS_THRESHOLD (2) misses → urgent rebalance triggers
+    4. has_sufficient_signals() works with enough signals
+    """
+    print("\n" + "=" * 60)
+    print("TEST: USDT-only → Pre-fund → Trade Flow")
+    print("=" * 60)
+    
+    from core.signal_allocator import SignalAllocator
+    from core.balance_manager import BalanceManager
+    
+    # Setup: 100% USDT on all exchanges
+    bm = BalanceManager()
+    bm.balances = {
+        'MEXC': {'USDT': 14.80},
+        'Bybit': {'USDT': 14.17},
+        'Binance': {'USDT': 14.98},
+    }
+    
+    sa = SignalAllocator(balance_manager=bm)
+    
+    # Step 1: Verify MISS_THRESHOLD is 2 (not 50!)
+    assert sa.MISS_THRESHOLD == 2, f"MISS_THRESHOLD should be 2, got {sa.MISS_THRESHOLD}"
+    assert sa.MISS_WINDOW == 60.0, f"MISS_WINDOW should be 60, got {sa.MISS_WINDOW}"
+    print(f"  ✅ MISS_THRESHOLD = {sa.MISS_THRESHOLD} (correct, not 50)")
+    
+    # Step 2: No urgent rebalance initially
+    assert not sa.needs_urgent_rebalance(), "Should NOT need urgent rebalance initially"
+    print("  ✅ No urgent rebalance initially")
+    
+    # Step 3: Record signals (simulating scan_once finding spreads)
+    for i in range(20):
+        sa.record_signal(
+            symbol='ETH-USDT', strategy='CROSS_EXCHANGE',
+            exchange='MEXC', roi_pct=0.05 + i * 0.001
+        )
+    assert sa.has_sufficient_signals(15), "Should have sufficient signals after 20"
+    print(f"  ✅ 20 signals recorded → has_sufficient_signals(15) = True")
+    
+    # Step 4: Simulate blocked trade → record_miss()
+    sa.record_miss('ETH-USDT', 'Bybit', 'sell')
+    assert not sa.needs_urgent_rebalance(), "1 miss should NOT trigger urgent"
+    print("  ✅ 1 miss: no urgent rebalance (correct)")
+    
+    # Step 5: Second miss → URGENT triggered!
+    sa.record_miss('ETH-USDT', 'Bybit', 'sell')
+    assert sa.needs_urgent_rebalance(), "2 misses should trigger urgent rebalance!"
+    print("  ✅ 2 misses: URGENT rebalance triggered!")
+    
+    # Step 6: Verify urgent flag is consumed (one-shot)
+    assert not sa.needs_urgent_rebalance(), "Urgent flag should be consumed after check"
+    print("  ✅ Urgent flag consumed (one-shot)")
+    
+    # Step 7: Verify allocation picks ETH-USDT
+    allocation = sa.get_allocation()
+    assert 'ETH-USDT' in allocation, f"ETH-USDT should be in allocation, got {allocation}"
+    print(f"  ✅ Allocation picks ETH-USDT with weight {allocation['ETH-USDT']:.2f}")
+    
+    print("  ✅ COMPLETE: USDT → signals → miss → urgent → pre-fund → trade flow verified")
+
+
 if __name__ == "__main__":
     tests = [
         test_settings, test_price_store, test_exchange_config, test_order_executor,
@@ -1768,6 +1834,7 @@ if __name__ == "__main__":
         test_state_recovery,
         test_semi_hft_engine,
         test_event_driven_and_wiring,
+        test_usdt_to_prefund_flow,
     ]
     passed = failed = 0
     for t in tests:

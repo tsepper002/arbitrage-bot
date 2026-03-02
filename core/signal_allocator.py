@@ -103,9 +103,10 @@ class SignalAllocator:
     # Weight multiplier for executed trades vs raw signals
     EXECUTED_WEIGHT = 5.0
 
-    # Reactive rebalance: disabled for small capital (causes fee spiral)
-    MISS_THRESHOLD = 50  # Effectively disabled: 50 misses before rebalance
-    MISS_WINDOW = 300.0  # 5 min window
+    # Reactive rebalance: trigger pre-fund when profitable trades are blocked
+    # 2 misses in 60s means "we WOULD trade but have no inventory" → buy the coin!
+    MISS_THRESHOLD = 2   # 2 blocked trades → trigger pre-fund
+    MISS_WINDOW = 60.0   # 1 min window
 
     # Coin rotation: smart switch conditions
     SILENCE_TIMEOUT = 600       # 10 minutes of zero signals → consider switch
