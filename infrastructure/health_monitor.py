@@ -72,7 +72,8 @@ class HealthMonitor:
             cutoff = now - self.ERROR_WINDOW_S
             recent_errors = [t for t in self._exchange_errors.get(exchange, []) if t > cutoff]
             latencies = self._exchange_latencies.get(exchange, [])
-            avg_lat = sum(latencies[-10:]) / len(latencies[-10:]) if latencies else 0
+            recent_lat = latencies[-10:] if latencies else []
+            avg_lat = sum(recent_lat) / len(recent_lat) if len(recent_lat) >= 5 else 0
             last_ok = self._exchange_last_success.get(exchange, 0)
             result[exchange] = {
                 'healthy': self.is_exchange_healthy(exchange),

@@ -68,13 +68,16 @@ py main.py --mode real
 
 | Группа | Стратегии | Количество | Торгуют? |
 |--------|-----------|------------|----------|
-| **ARB_STRATEGIES** (market-neutral) | CROSS_EXCHANGE, TRIANGULAR, SMART_ORDER, FUNDING_RATE, VOLATILITY_ARB, INDEX_ARB, SPREAD_BETTING, PAIRS_TRADING | 8 | ✅ Могут |
-| **DIRECTIONAL_STRATEGIES** | VOLATILITY, MOMENTUM, BREAKOUT, DCA, GRID_TRADING, MARKET_MAKING | 6 | ❌ Только сигналы |
+| **ARB_STRATEGIES** (market-neutral) | CROSS_EXCHANGE, TRIANGULAR, SMART_ORDER, FUNDING_RATE, VOLATILITY_ARB, INDEX_ARB, SPREAD_BETTING, PAIRS_TRADING | 8 | Генерируют сигналы для арбитража |
+| **DIRECTIONAL_STRATEGIES** | VOLATILITY, MOMENTUM, BREAKOUT, DCA, GRID_TRADING, MARKET_MAKING | 6 | ❌ Только наблюдения |
 
-**Реально исполняет сделки только CROSS_EXCHANGE.** Остальные — генерируют сигналы, используемые для:
-- Выбора монеты (какая наиболее прибыльная)
-- Определения режима рынка (ranging vs trending)
-- Оптимизации типа ордера (market vs limit)
+**Только CROSS_EXCHANGE автоматически исполняет реальные ордера.** Остальные 7 ARB-стратегий генерируют сигналы, которые:
+- Учитываются при выборе монеты (какая наиболее прибыльная)
+- Получают "attribution" если CROSS_EXCHANGE потом торгует тот же символ
+- Определяют режим рынка (ranging vs trending)
+- Оптимизируют тип ордера (SMART_ORDER → market vs limit)
+
+6 DIRECTIONAL-стратегий **никогда не торгуют** — они конфликтуют с market-neutral арбитражем.
 
 ---
 

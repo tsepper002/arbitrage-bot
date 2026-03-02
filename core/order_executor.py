@@ -320,9 +320,10 @@ class OrderExecutor:
                 logger.info(f"📏 Exchange cap: {old_qty:.6f} → {qty:.6f} ({settings.MAX_EXPOSURE_PER_EXCHANGE_PCT}% limit)")
             
             # Per-coin cap: total exposure to this coin across ALL exchanges
-            base_coin = symbol.split('-')[0] if '-' in symbol else symbol
+            # Handle symbol formats: "BTC-USDT", "BTC/USDT", "BTCUSDT"
+            base_coin = symbol.split('-')[0] if '-' in symbol else symbol.split('/')[0] if '/' in symbol else symbol.replace('USDT', '')
             coin_exposure = sum(
-                self.balance_manager.get_balance(ex, base_coin) * buy_price
+                self.balance_manager.get_balance(ex, base_coin) * buy_price  # Use buy_price as approximate valuation
                 for ex in self.balance_manager.balances.keys()
             )
             max_per_coin = total_capital * (settings.MAX_EXPOSURE_PER_COIN_PCT / 100.0)
