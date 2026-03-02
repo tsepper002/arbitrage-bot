@@ -398,21 +398,47 @@ class OrderExecutor:
             
             execution_time = time.time() - start_time
             
-            # Step 6: Check fill results
-            if not buy_fill['filled'] or not sell_fill['filled']:
-                unfilled = 'buy' if not buy_fill['filled'] else 'sell'
-                logger.error(f"❌ {unfilled} order NOT FILLED after {self.FILL_TIMEOUT_SEC}s")
-                # Try to cancel unfilled order
-                if not buy_fill['filled'] and buy_order_id:
+            # Step 6: Check fill results and handle partial fills
+            buy_filled_qty = buy_fill.get('filled_qty', 0) if buy_fill.get('filled') else 0
+            sell_filled_qty = sell_fill.get('filled_qty', 0) if sell_fill.get('filled') else 0
+            
+            if buy_filled_qty == 0 and sell_filled_qty == 0:
+                logger.error(f"❌ BOTH orders unfilled after {self.FILL_TIMEOUT_SEC}s — no action needed")
+                if buy_order_id:
                     await self._safe_cancel(buy_client, symbol, buy_order_id, 'buy')
-                if not sell_fill['filled'] and sell_order_id:
+                if sell_order_id:
                     await self._safe_cancel(sell_client, symbol, sell_order_id, 'sell')
-                # If one side filled, emergency reverse
-                if buy_fill['filled'] and not sell_fill['filled']:
-                    await self._emergency_close(buy_ex, symbol, 'sell', qty, sell_price, buy_client)
-                elif sell_fill['filled'] and not buy_fill['filled']:
-                    await self._emergency_close(sell_ex, symbol, 'buy', qty, buy_price, sell_client)
-                return {'status': 'error', 'reason': f'{unfilled} not filled in {self.FILL_TIMEOUT_SEC}s'}
+                return {'status': 'error', 'reason': 'Both orders unfilled'}
+            
+            # Check for partial fill imbalance
+            if buy_filled_qty > 0 and sell_filled_qty > 0:
+                fill_ratio = min(buy_filled_qty, sell_filled_qty) / max(buy_filled_qty, sell_filled_qty)
+                if fill_ratio < 0.95:  # >5% imbalance
+                    excess_side = 'buy' if buy_filled_qty > sell_filled_qty else 'sell'
+                    excess_qty = abs(buy_filled_qty - sell_filled_qty)
+                    logger.warning(
+                        f"⚠️ Partial fill imbalance: buy={buy_filled_qty:.6f}, sell={sell_filled_qty:.6f} "
+                        f"({excess_side} excess: {excess_qty:.6f})"
+                    )
+                    # Hedge the excess by placing an offsetting order
+                    if excess_side == 'buy':
+                        # We bought more than we sold — sell the excess
+                        await self._emergency_close(buy_ex, symbol, 'sell', excess_qty, sell_price, buy_client)
+                    else:
+                        # We sold more than we bought — buy back the excess
+                        await self._emergency_close(sell_ex, symbol, 'buy', excess_qty, buy_price, sell_client)
+            elif buy_filled_qty > 0 and sell_filled_qty == 0:
+                logger.error(f"❌ Buy filled ({buy_filled_qty:.6f}) but sell NOT filled — reversing")
+                if sell_order_id:
+                    await self._safe_cancel(sell_client, symbol, sell_order_id, 'sell')
+                await self._emergency_close(buy_ex, symbol, 'sell', buy_filled_qty, sell_price, buy_client)
+                return {'status': 'error', 'reason': 'Sell not filled, reversed buy'}
+            elif sell_filled_qty > 0 and buy_filled_qty == 0:
+                logger.error(f"❌ Sell filled ({sell_filled_qty:.6f}) but buy NOT filled — reversing")
+                if buy_order_id:
+                    await self._safe_cancel(buy_client, symbol, buy_order_id, 'buy')
+                await self._emergency_close(sell_ex, symbol, 'buy', sell_filled_qty, buy_price, sell_client)
+                return {'status': 'error', 'reason': 'Buy not filled, reversed sell'}
             
             # Step 7: Check slippage
             actual_buy_price = buy_fill.get('avg_price', buy_price)

@@ -829,6 +829,14 @@ class ArbitrageEngine:
         last_stats_print = time.time()
         
         while True:
+            # CIRCUIT BREAKER: Check if trading is globally allowed before scanning
+            if self.risk_manager:
+                allowed, reason = self.risk_manager.is_trading_allowed()
+                if not allowed:
+                    logger.warning(f"⛔ CIRCUIT BREAKER: {reason}")
+                    await asyncio.sleep(60)  # Wait 1 minute before checking again
+                    continue
+
             scan_start = time.time()
             
             # Determine which symbols to scan
