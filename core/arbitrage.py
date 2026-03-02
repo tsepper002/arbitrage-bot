@@ -168,6 +168,10 @@ class ArbitrageEngine:
         # Spread persistence filter: only trade spreads that survive long enough
         self._spread_first_seen: Dict[str, float] = {}  # key -> first_seen_ms
         self.MIN_SPREAD_HOLD_MS = 500  # Spread must hold for 500ms before trading
+        # Strong spread bypass: skip persistence if spread is this many times above cushion
+        self.STRONG_SPREAD_MULTIPLIER = 3.0
+        # Default strong cushion when no CapitalManager (= Level 1 cushion + margin)
+        self.DEFAULT_STRONG_CUSHION_PCT = 0.18
 
         # Exchange latency tracking for execution feasibility checks
         self._exchange_latency_ms: Dict[str, float] = {}  # exchange -> avg round-trip ms
@@ -664,12 +668,11 @@ class ArbitrageEngine:
 
                 # SPREAD PERSISTENCE: Only trade spreads that have persisted long enough
                 # Engine 2.0: Uses level-specific persistence from CapitalManager
-                # EXCEPTION: Skip persistence check for strong spreads (>3× cushion above fees)
-                # These are almost certainly real and will disappear if we wait.
+                # EXCEPTION: Skip persistence for strong spreads (>3× cushion above threshold)
+                # — these are almost certainly real and will disappear if we wait.
                 min_hold_ms = cm.level.spread_persistence_ms if cm else self.MIN_SPREAD_HOLD_MS
                 spread_excess = gross_spread_pct - dynamic_min_spread
-                STRONG_SPREAD_MULTIPLIER = 3.0  # spread > 3× above threshold = strong
-                strong_cushion = (cm.level.spread_threshold_above_fees * STRONG_SPREAD_MULTIPLIER) if cm else 0.18
+                strong_cushion = (cm.level.spread_threshold_above_fees * self.STRONG_SPREAD_MULTIPLIER) if cm else self.DEFAULT_STRONG_CUSHION_PCT
                 is_strong_spread = spread_excess > strong_cushion
                 
                 if not is_strong_spread:

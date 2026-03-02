@@ -16,10 +16,8 @@ import settings
 
 
 def _scan_with_persistence(engine, symbol):
-    """Helper: scan with strong-spread bypass + persistence fallback.
-    
-    Strong spreads (>3× cushion) now pass on first scan.
-    If not, backdate persistence timestamps and retry.
+    """Helper: scan, and if no opportunities found, backdate persistence
+    timestamps and retry (allows the persistence check to pass on second scan).
     """
     opps = loop.run_until_complete(engine.scan_once(symbol))
     if not opps:
@@ -30,7 +28,9 @@ def _scan_with_persistence(engine, symbol):
 
 
 async def _async_scan_with_persistence(engine, symbol):
-    """Async helper: scan with strong-spread bypass + persistence fallback."""
+    """Async helper: scan, and if no opportunities found, backdate persistence
+    timestamps and retry.
+    """
     opps = await engine.scan_once(symbol)
     if not opps:
         for k in engine._spread_first_seen:

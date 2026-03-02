@@ -1197,9 +1197,10 @@ class IntegratedArbitrageBot:
                         self.capital_manager.update_equity(total_bal)
                         # Update volatility from engine's spread tracking
                         if self.engine and hasattr(self.engine, 'best_spread_pct'):
-                            # FIX: Use spread/10 as vol proxy (was ×2 → inflated threshold)
-                            # best_spread 0.19% → vol 0.019% → buffer 0.019%*0.20 = 0.004%
-                            # (Before: 0.19%×2 = 0.38% → buffer 0.076% → threshold += 0.076%!)
+                            # Spread/10 as vol proxy → feeds into volatility_buffer in threshold.
+                            # CapitalManager applies ×0.20 multiplier (see dynamic_threshold):
+                            #   best_spread 0.19% × 0.1 = 0.019% vol → buffer 0.019% × 0.20 = 0.004%
+                            # Was ×2.0 before → 0.076% buffer (inflated threshold by ~50% of fees!)
                             vol_pct = max(self.engine.best_spread_pct * 0.1, 0.001)
                             self.capital_manager.update_volatility(vol_pct)
                 
