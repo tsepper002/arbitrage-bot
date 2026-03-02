@@ -25,6 +25,8 @@ class PairsTradingStrategy:
         self.entry_threshold = self.config.get('entry_threshold', 2.0)
         self.exit_threshold = self.config.get('exit_threshold', 0.5)
         self.correlation_threshold = self.config.get('correlation_threshold', 0.7)
+        self.rolling_corr_window = self.config.get('rolling_corr_window', 30)
+        self.min_rolling_corr = self.config.get('min_rolling_corr', 0.5)
         
         self.pairs = {}
         self.spreads = defaultdict(list)
@@ -226,6 +228,29 @@ class PairsTradingStrategy:
         beta = np.linalg.lstsq(X, prices2_arr, rcond=None)[0]
         
         return beta[1]
+
+    def rolling_correlation(self, symbol1: str, symbol2: str) -> float:
+        """
+        Calculate rolling correlation over recent window to detect regime shifts.
+        
+        If rolling correlation drops below threshold, the pair relationship
+        may have broken — signals should be ignored to avoid regime-shift losses.
+        
+        Returns:
+            Rolling correlation coefficient (0.0 if insufficient data)
+        """
+        prices1 = self.price_history.get(symbol1, [])
+        prices2 = self.price_history.get(symbol2, [])
+        
+        window = self.rolling_corr_window
+        if len(prices1) < window or len(prices2) < window:
+            return 0.0
+        
+        # Use only the last `window` prices
+        recent1 = prices1[-window:]
+        recent2 = prices2[-window:]
+        
+        return float(np.corrcoef(recent1, recent2)[0, 1])
     
     def generate_signals(self, symbol1: str, symbol2: str,
                         price1: float, price2: float) -> Optional[Dict]:
@@ -244,6 +269,13 @@ class PairsTradingStrategy:
         pair_key = f"{symbol1}_{symbol2}"
         
         if pair_key not in self.pairs:
+            return None
+        
+        # ROLLING CORRELATION CHECK: detect regime shifts
+        # If correlation has broken down recently, skip signals — pair may no longer revert
+        rolling_corr = self.rolling_correlation(symbol1, symbol2)
+        if rolling_corr != 0.0 and abs(rolling_corr) < self.min_rolling_corr:
+            logger.debug(f"Pairs {pair_key}: rolling correlation {rolling_corr:.3f} < {self.min_rolling_corr} — regime shift, skipping")
             return None
         
         # Calculate and store spread

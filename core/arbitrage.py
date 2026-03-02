@@ -599,6 +599,15 @@ class ArbitrageEngine:
 
                 invested = buy_avg * filled
                 roi_pct = (net / invested) * 100 if invested else 0.0
+
+                # GLOBAL SLIPPAGE BUFFER: deduct estimated slippage from ALL trades
+                # Real execution rarely matches order book snapshot due to:
+                # - Market order slippage (~0.05% per leg)
+                # - Latency between scan and execution (~0.02% per leg)
+                # Total buffer: 0.07% × 2 legs = 0.14% deducted from ROI
+                slippage_per_leg = settings.GLOBAL_SLIPPAGE_PER_LEG_PCT
+                roi_pct -= slippage_per_leg * 2
+                net -= invested * (slippage_per_leg * 2 / 100)
                 
                 # PROFESSIONAL RISK CHECKS
                 # P1: Flash Crash Protection - Check if market is safe to trade

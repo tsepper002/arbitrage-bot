@@ -194,6 +194,14 @@ MAX_EXPOSURE_PER_EXCHANGE_PCT = _get_env_float("ARB_MAX_EXPOSURE_PER_EXCHANGE_PC
 # If imbalance exceeds this, stop trading that direction
 MAX_INVENTORY_SKEW_USDT = _get_env_float("ARB_MAX_INVENTORY_SKEW_USDT", 20.0)
 
+# ============================================================================
+# GLOBAL SLIPPAGE BUFFER
+# ============================================================================
+# Applied to ALL strategy ROI calculations before trade execution.
+# Accounts for: market order slippage, latency decay, hidden spread costs.
+# 0.07% per leg × 2 legs = 0.14% total deducted from expected ROI.
+GLOBAL_SLIPPAGE_PER_LEG_PCT = _get_env_float("ARB_SLIPPAGE_PER_LEG_PCT", 0.07)
+
 def get_enabled_strategies(capital_per_exchange: float = None) -> list:
     """Return list of strategy names enabled for current capital level.
     
@@ -278,8 +286,13 @@ VOLATILITY_CALM_THRESHOLD = _get_env_float("ARB_VOLATILITY_CALM_THRESHOLD", 0.5)
 VOLATILITY_STORM_MULTIPLIER = _get_env_float("ARB_VOLATILITY_STORM_MULTIPLIER", 3.0)
 
 # ============================================================================
-# FUNDING RATE ARBITRAGE (Strategy S3)
+# FUNDING RATE / CROSS-EXCHANGE PREMIUM ARBITRAGE (Strategy S3)
 # ============================================================================
+# NOTE: This strategy detects cross-exchange price PREMIUMS (price deviations
+# between exchanges) — NOT true spot-perpetual funding rate arbitrage.
+# True funding arb would require: long spot + short perpetual + collect funding.
+# This is more accurately "Premium Arbitrage" but kept as FUNDING_RATE for
+# backward compatibility with existing signal/logging infrastructure.
 FUNDING_MIN_RATE_PCT = _get_env_float("ARB_FUNDING_MIN_RATE", 0.03)  # Enter at 0.03%
 FUNDING_EXIT_RATE_PCT = _get_env_float("ARB_FUNDING_EXIT_RATE", 0.01)  # Exit at 0.01%
 FUNDING_CHECK_INTERVAL_SEC = _get_env_float("ARB_FUNDING_CHECK_INTERVAL", 300)  # 5 minutes

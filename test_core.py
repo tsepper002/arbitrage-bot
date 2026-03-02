@@ -391,10 +391,12 @@ def test_e2e_arbitrage():
     store = PriceStore()
     executor = OrderExecutor(dry_run=True)
     engine = ArbitrageEngine(store, min_net_pct=0.01, executor=executor)
+    # Spread must exceed fees (0.25%) + global slippage buffer (0.14%) = 0.39%
+    # Using 3000 vs 3030 = 1.0% spread → comfortably profitable
     loop.run_until_complete(store.update_levels("HTX", "ETH-USDT",
         bids_levels=[(3000.0, 10.0)], asks_levels=[(3000.0, 10.0)]))
     loop.run_until_complete(store.update_levels("MEXC", "ETH-USDT",
-        bids_levels=[(3010.0, 10.0)], asks_levels=[(3010.0, 10.0)]))
+        bids_levels=[(3030.0, 10.0)], asks_levels=[(3030.0, 10.0)]))
     # First scan records the spread (persistence filter), second scan finds it
     loop.run_until_complete(engine.scan_once("ETH-USDT"))
     # Backdate spread first-seen time so second scan passes persistence check
@@ -968,12 +970,14 @@ def test_dry_run_records_success():
     from core.arbitrage import ArbitrageEngine
     from core.order_executor import OrderExecutor
 
-    # Set up a profitable spread: buy HTX @ 5.000, sell Bybit @ 5.020
+    # Set up a profitable spread: buy HTX @ 5.000, sell Bybit @ 5.050
+    # Spread must exceed fees (0.25%) + slippage buffer (0.14%) = 0.39%
+    # Using 5.000 vs 5.050 = 1.0% spread → comfortably profitable
     store = PriceStore()
     loop.run_until_complete(store.update_levels('HTX', 'DOT-USDT',
         bids_levels=[(4.990, 100.0)], asks_levels=[(5.000, 100.0)]))
     loop.run_until_complete(store.update_levels('Bybit', 'DOT-USDT',
-        bids_levels=[(5.020, 100.0)], asks_levels=[(5.025, 100.0)]))
+        bids_levels=[(5.050, 100.0)], asks_levels=[(5.055, 100.0)]))
 
     executor = OrderExecutor(dry_run=True)
 
@@ -1384,12 +1388,14 @@ def test_scaling_and_e2e_pipeline():
     engine = ArbitrageEngine(store, executor=executor, risk_manager=risk_mgr)
 
     async def run_pipeline():
-        # Setup 5 exchanges with APT-USDT (profitable spread like user saw)
-        await store.update_levels('MEXC', 'APT-USDT', [(8.20, 500)], [(8.21, 500)])
-        await store.update_levels('HTX', 'APT-USDT', [(8.24, 500)], [(8.25, 500)])
-        await store.update_levels('Bybit', 'APT-USDT', [(8.22, 500)], [(8.23, 500)])
-        await store.update_levels('Binance', 'APT-USDT', [(8.215, 500)], [(8.225, 500)])
-        await store.update_levels('KuCoin', 'APT-USDT', [(8.21, 500)], [(8.22, 500)])
+        # Setup 5 exchanges with APT-USDT (profitable spread)
+        # Spread must exceed fees (0.25%) + slippage buffer (0.14%) = 0.39%
+        # MEXC ask 8.20 vs HTX bid 8.30 = 1.22% spread → comfortably profitable
+        await store.update_levels('MEXC', 'APT-USDT', [(8.19, 500)], [(8.20, 500)])
+        await store.update_levels('HTX', 'APT-USDT', [(8.30, 500)], [(8.31, 500)])
+        await store.update_levels('Bybit', 'APT-USDT', [(8.28, 500)], [(8.29, 500)])
+        await store.update_levels('Binance', 'APT-USDT', [(8.27, 500)], [(8.28, 500)])
+        await store.update_levels('KuCoin', 'APT-USDT', [(8.26, 500)], [(8.27, 500)])
 
         opps = await engine.scan_once('APT-USDT')
         # First scan registers spreads; backdate for persistence check
