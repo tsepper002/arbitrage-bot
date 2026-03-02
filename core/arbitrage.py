@@ -70,7 +70,8 @@ class ArbitrageEngine:
                  ml_model_trainer = None,
                  twap_engine = None,
                  signal_allocator = None,
-                 state_manager = None):
+                 state_manager = None,
+                 capital_manager = None):
         self.store = store
         self.params = EXCHANGE_PARAMS
         
@@ -127,6 +128,7 @@ class ArbitrageEngine:
         self.twap_engine = twap_engine
         self.signal_allocator = signal_allocator
         self.state_manager = state_manager
+        self.capital_manager = capital_manager
 
         # Event-driven scanning state
         self.updated_symbols: Set[str] = set()
@@ -495,12 +497,25 @@ class ArbitrageEngine:
             except Exception:
                 pass
 
+        # --- Engine 2.0: CapitalManager kill-logic checks ---
+        cm = self.capital_manager
+        if cm and not cm.is_coin_enabled(symbol):
+            return res  # Coin disabled by kill-logic
+
         # BIDIRECTIONAL SCAN FIX: Check ALL directed pairs (A->B AND B->A)
         # Previous version only checked exchanges[i+1:] which missed 50% of opportunities
         for i, buy_ex in enumerate(exchanges):
+            # Engine 2.0: Skip disabled exchanges
+            if cm and not cm.is_exchange_enabled(buy_ex):
+                continue
+
             # Check this exchange as buy against ALL other exchanges as sell
             for j, sell_ex in enumerate(exchanges):
                 if i == j:  # Skip same exchange
+                    continue
+                
+                # Engine 2.0: Skip disabled exchanges
+                if cm and not cm.is_exchange_enabled(sell_ex):
                     continue
                     
                 buy = exmap.get(buy_ex, {})
@@ -539,10 +554,25 @@ class ArbitrageEngine:
                     self._best_spread_info = f"{symbol} {buy_ex}→{sell_ex}"
                     self._best_spread_fees_pct = sum_fees_pct
                 
-                # Prefilter: skip if spread < 80% of fees (won't be profitable)
-                if gross_spread_pct < sum_fees_pct * 0.8:
-                    # Near-miss: spread is >30% of fee threshold (engine is working)
-                    if gross_spread_pct > sum_fees_pct * 0.3:
+                # Engine 2.0: Dynamic threshold replaces static fee prefilter
+                # threshold = fees + level cushion + latency_risk + volatility_buffer
+                if cm:
+                    avg_latency = (
+                        self._exchange_latency_ms.get(buy_ex, self.DEFAULT_EXCHANGE_LATENCY_MS) +
+                        self._exchange_latency_ms.get(sell_ex, self.DEFAULT_EXCHANGE_LATENCY_MS)
+                    ) / 2.0
+                    dynamic_min_spread = cm.dynamic_threshold(sum_fees_pct, avg_latency)
+                    
+                    # HTX filter: higher latency → only use for wide spreads
+                    if ('HTX' in (buy_ex, sell_ex)) and not cm.should_use_htx(gross_spread_pct):
+                        continue
+                else:
+                    dynamic_min_spread = sum_fees_pct * 0.8  # fallback: static 80% of fees
+                
+                # Prefilter: skip if spread < dynamic threshold
+                if gross_spread_pct < dynamic_min_spread:
+                    # Near-miss: spread is >50% of threshold (engine is working)
+                    if gross_spread_pct > dynamic_min_spread * 0.5:
                         self._near_miss_count += 1
                     continue
 
@@ -557,13 +587,15 @@ class ArbitrageEngine:
                     logger.warning(f"Skipping anomalous spread {gross_spread_pct:.2f}% for {symbol} {buy_ex}->{sell_ex} (threshold: {settings.ANOMALOUS_SPREAD_PCT}%)")
                     continue
 
-                # SPREAD PERSISTENCE: Only trade spreads that have persisted for MIN_SPREAD_HOLD_MS
+                # SPREAD PERSISTENCE: Only trade spreads that have persisted long enough
+                # Engine 2.0: Uses level-specific persistence from CapitalManager
+                min_hold_ms = cm.level.spread_persistence_ms if cm else self.MIN_SPREAD_HOLD_MS
                 spread_key = f"{symbol}:{buy_ex}->{sell_ex}"
                 now_ms = time.time() * 1000
                 if spread_key not in self._spread_first_seen:
                     self._spread_first_seen[spread_key] = now_ms
                     continue  # First time seeing this spread — wait for confirmation
-                elif now_ms - self._spread_first_seen[spread_key] < self.MIN_SPREAD_HOLD_MS:
+                elif now_ms - self._spread_first_seen[spread_key] < min_hold_ms:
                     continue  # Spread hasn't persisted long enough
 
                 # LATENCY CHECK: Skip if combined exchange latency exceeds spread lifetime
@@ -996,6 +1028,16 @@ class ArbitrageEngine:
                                 strategy='CROSS_EXCHANGE',
                                 exchange=o.get('buy_ex', ''),
                                 roi_pct=o.get('roi_pct', 0)
+                            )
+                        
+                        # Engine 2.0: Record to CapitalManager for kill-logic + quality ranking
+                        if self.capital_manager and result['status'] in ('success', 'simulated'):
+                            self.capital_manager.record_trade_result(
+                                symbol=o.get('symbol', ''),
+                                buy_exchange=o.get('buy_ex', ''),
+                                sell_exchange=o.get('sell_ex', ''),
+                                net_profit_pct=o.get('roi_pct', 0),
+                                slippage_pct=0.0,  # estimated from VWAP diff
                             )
                     
                     # PROFESSIONAL ANALYTICS: Record trade details

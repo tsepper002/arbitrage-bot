@@ -48,6 +48,7 @@ from core.smart_capital_allocator import get_smart_allocator
 from core.exchange_config import EXCHANGE_PARAMS
 from core.strategy_dispatcher import StrategyDispatcher  # NEW: All 14 strategies!
 from core.signal_allocator import SignalAllocator  # Signal-based inventory management
+from core.capital_manager import CapitalManager  # Engine 2.0: capital-level mode selection
 
 # Professional Infrastructure
 from infrastructure.health_monitor import HealthMonitor
@@ -269,6 +270,9 @@ class IntegratedArbitrageBot:
         # Strategy Dispatcher (NEW: All 14 strategies!)
         self.strategy_dispatcher = None
         
+        # Engine 2.0: Capital Manager
+        self.capital_manager = None
+        
         self.engine = None
         self.tasks = []
         
@@ -439,6 +443,21 @@ class IntegratedArbitrageBot:
             # Signal-Based Inventory Allocator
             self.signal_allocator = SignalAllocator(self.balance_manager)
             logger.info("✅ Signal Allocator initialized (HFT inventory management)")
+            
+            # Engine 2.0: Capital Manager — adaptive modes by equity level
+            initial_equity = settings.VIRTUAL_CAPITAL_PER_EXCHANGE * settings.NUM_EXCHANGES
+            if not settings.DRY_RUN and self.balance_manager:
+                try:
+                    total = sum(
+                        self.balance_manager.get_balance(ex, "USDT")
+                        for ex in self.balance_manager.balances
+                    )
+                    if total > 0:
+                        initial_equity = total
+                except Exception:
+                    pass
+            self.capital_manager = CapitalManager(initial_equity=initial_equity)
+            logger.info(f"✅ Capital Manager initialized: {self.capital_manager.get_summary()}")
             
             # Professional Infrastructure
             logger.info("\n🔬 Initializing Professional Infrastructure...")
@@ -844,7 +863,8 @@ class IntegratedArbitrageBot:
                 ml_model_trainer=self.ml_model_trainer,
                 twap_engine=self.twap_engine,
                 signal_allocator=getattr(self, 'signal_allocator', None),
-                state_manager=self.state_manager
+                state_manager=self.state_manager,
+                capital_manager=self.capital_manager,
             )
             # Provide REST clients for JIT inventory acquisition in live mode
             self.engine._rest_clients = self.rest_clients
@@ -1039,6 +1059,13 @@ class IntegratedArbitrageBot:
                     total_bal = self.balance_manager.get_total_balance_usdt(self.engine.store if self.engine else None)
                     virt = " (virtual)" if settings.DRY_RUN else ""
                     print(f" 💵 Capital: ${total_bal:.2f} USDT equiv{virt}")
+                    # Update CapitalManager with current equity
+                    if self.capital_manager:
+                        self.capital_manager.update_equity(total_bal)
+                
+                # Engine 2.0: Capital Manager status
+                if self.capital_manager:
+                    print(f" 🏦 {self.capital_manager.get_summary()}")
                 
                 # ML module status — comprehensive line
                 ml_parts = []

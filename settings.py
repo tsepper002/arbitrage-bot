@@ -202,6 +202,37 @@ MAX_INVENTORY_SKEW_USDT = _get_env_float("ARB_MAX_INVENTORY_SKEW_USDT", 20.0)
 # 0.07% per leg × 2 legs = 0.14% total deducted from expected ROI.
 GLOBAL_SLIPPAGE_PER_LEG_PCT = _get_env_float("ARB_SLIPPAGE_PER_LEG_PCT", 0.07)
 
+# ============================================================================
+# ENGINE 2.0 — MAKER-FIRST EXECUTION MODEL
+# ============================================================================
+# Instead of market+market (double taker fee), use limit_buy + market_sell:
+#   1. Place limit buy at best_bid + 20% of spread
+#   2. Wait up to MAKER_FILL_TIMEOUT_MS for ≥ MAKER_MIN_FILL_PCT fill
+#   3. If filled → instant market sell
+#   4. If spread disappears or timeout → cancel
+MAKER_FIRST_ENABLED = _get_env_bool("ARB_MAKER_FIRST", True)
+MAKER_FILL_TIMEOUT_MS = _get_env_int("ARB_MAKER_FILL_TIMEOUT_MS", 250)
+MAKER_MIN_FILL_PCT = _get_env_float("ARB_MAKER_MIN_FILL_PCT", 75.0)
+MAKER_PRICE_OFFSET_PCT = _get_env_float("ARB_MAKER_PRICE_OFFSET_PCT", 20.0)  # % of spread
+
+# ============================================================================
+# ENGINE 2.0 — WORKING CAPITAL / RESERVE SPLIT
+# ============================================================================
+# 85% of capital is actively traded; 15% is kept as reserve (buffer for
+# drawdowns, funding withdrawals, or emergency hedging).
+WORKING_CAPITAL_PCT = _get_env_float("ARB_WORKING_CAPITAL_PCT", 85.0)
+
+# ============================================================================
+# ENGINE 2.0 — ORDERBOOK STALENESS PROTECTION
+# ============================================================================
+MAX_ORDERBOOK_AGE_MS = _get_env_int("ARB_MAX_ORDERBOOK_AGE_MS", 200)
+
+# ============================================================================
+# ENGINE 2.0 — DEPTH IMPACT PROTECTION
+# ============================================================================
+# min_depth_at_best >= DEPTH_MULTIPLE × planned_position
+DEPTH_MULTIPLE = _get_env_float("ARB_DEPTH_MULTIPLE", 4.0)
+
 def get_enabled_strategies(capital_per_exchange: float = None) -> list:
     """Return list of strategy names enabled for current capital level.
     

@@ -378,12 +378,28 @@ class OrderExecutor:
                     logger.info(f"📏 Adjusted qty: {qty:.6f} → {adjusted_qty:.6f} (balance limited)")
                     qty = adjusted_qty
             
-            # Step 3: Place both orders SIMULTANEOUSLY
+            # Step 3: Place orders — Maker-First model or Parallel Market orders
+            # Engine 2.0: Maker-First reduces fees by using limit buy + market sell
+            # (saves 0.05-0.10% on buy side = significant for thin spreads)
             logger.info(f"⚡ Placing PARALLEL orders: Buy {qty:.6f} on {buy_ex}, Sell on {sell_ex}")
             start_time = time.time()
             
-            buy_task = buy_client.place_order(symbol, 'buy', 'market', qty, buy_price)
-            sell_task = sell_client.place_order(symbol, 'sell', 'market', qty, sell_price)
+            use_maker_first = (
+                settings.MAKER_FIRST_ENABLED
+                and not self.dry_run
+                and buy_price and sell_price
+                and sell_price > buy_price
+            )
+            
+            if use_maker_first:
+                # Maker-first: limit buy at best_bid + 20% of spread, then market sell
+                spread = sell_price - buy_price
+                maker_buy_price = buy_price + spread * (settings.MAKER_PRICE_OFFSET_PCT / 100.0)
+                buy_task = buy_client.place_order(symbol, 'buy', 'limit', qty, maker_buy_price)
+                sell_task = sell_client.place_order(symbol, 'sell', 'market', qty, sell_price)
+            else:
+                buy_task = buy_client.place_order(symbol, 'buy', 'market', qty, buy_price)
+                sell_task = sell_client.place_order(symbol, 'sell', 'market', qty, sell_price)
             
             results = await asyncio.gather(buy_task, sell_task, return_exceptions=True)
             buy_result, sell_result = results
