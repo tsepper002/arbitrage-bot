@@ -412,7 +412,10 @@ class OrderExecutor:
             
             # Check for partial fill imbalance
             if buy_filled_qty > 0 and sell_filled_qty > 0:
-                fill_ratio = min(buy_filled_qty, sell_filled_qty) / max(buy_filled_qty, sell_filled_qty)
+                max_filled = max(buy_filled_qty, sell_filled_qty)
+                if max_filled < 1e-8:
+                    return {'status': 'error', 'reason': 'Near-zero fill quantities'}
+                fill_ratio = min(buy_filled_qty, sell_filled_qty) / max_filled
                 if fill_ratio < 0.95:  # >5% imbalance
                     excess_side = 'buy' if buy_filled_qty > sell_filled_qty else 'sell'
                     excess_qty = abs(buy_filled_qty - sell_filled_qty)

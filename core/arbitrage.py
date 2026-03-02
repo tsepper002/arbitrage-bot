@@ -169,6 +169,7 @@ class ArbitrageEngine:
         self.MAX_COMBINED_LATENCY_MS = 1000  # Skip if combined latency > 1s
         self.DEFAULT_EXCHANGE_LATENCY_MS = 200  # Assumed latency when no data available
         self.LATENCY_EMA_ALPHA = 0.3  # Smoothing factor for latency EMA
+        self.MAX_VWAP_SLIPPAGE_PCT = 0.3  # Max acceptable VWAP vs top-of-book slippage
         
         logger.info(f"ArbitrageEngine initialized: min_roi={self.min_net_pct}%, max_exposure=${self.max_exposure_usdt}, safety_factor={self.safety_factor}")
 
@@ -580,7 +581,7 @@ class ArbitrageEngine:
                 buy_vwap_slippage = (buy_avg - top_ask) / top_ask * 100 if top_ask > 0 else 0
                 sell_vwap_slippage = (top_bid - sell_avg) / top_bid * 100 if top_bid > 0 else 0
                 total_book_slippage = buy_vwap_slippage + sell_vwap_slippage
-                if total_book_slippage > 0.3:  # >0.3% cumulative VWAP slippage (buy + sell)
+                if total_book_slippage > self.MAX_VWAP_SLIPPAGE_PCT:
                     logger.debug(
                         f"📖 {symbol} {buy_ex}→{sell_ex}: Book slippage {total_book_slippage:.3f}% "
                         f"(buy VWAP +{buy_vwap_slippage:.3f}%, sell VWAP -{sell_vwap_slippage:.3f}%)"
@@ -825,6 +826,8 @@ class ArbitrageEngine:
 
     def update_exchange_latency(self, exchange: str, latency_ms: float):
         """Update rolling average latency for an exchange."""
+        if latency_ms < 0 or latency_ms > 10000:
+            return  # Ignore unreasonable values
         old = self._exchange_latency_ms.get(exchange, latency_ms)
         alpha = self.LATENCY_EMA_ALPHA
         self._exchange_latency_ms[exchange] = old * (1 - alpha) + latency_ms * alpha
