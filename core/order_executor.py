@@ -298,7 +298,7 @@ class OrderExecutor:
             logger.debug(f"⛔ {symbol}: {reason}")
             return {'status': 'blocked', 'reason': reason}
         
-        # EXPOSURE CAP: Refuse trade if it would exceed per-exchange exposure limit
+        # EXPOSURE CAPS: per-exchange AND per-coin limits
         if self.balance_manager:
             total_capital = sum(
                 self.balance_manager.get_balance(ex, 'USDT')
@@ -307,14 +307,32 @@ class OrderExecutor:
             if total_capital <= 0:
                 logger.warning("⚠️  Exposure cap: total USDT capital is 0 — balance manager may not be initialized")
                 total_capital = 1.0
+            trade_value = qty * buy_price
+            
+            # Per-exchange cap
             max_per_exchange = total_capital * (settings.MAX_EXPOSURE_PER_EXCHANGE_PCT / 100.0)
-            buy_exchange_exposure = qty * buy_price
-            if buy_exchange_exposure > max_per_exchange:
+            if trade_value > max_per_exchange:
                 old_qty = qty
                 qty = max_per_exchange / buy_price if buy_price > 0 else 0
-                if qty * buy_price < self.MIN_ORDER_USDT:
+                trade_value = qty * buy_price
+                if trade_value < self.MIN_ORDER_USDT:
                     return {'status': 'blocked', 'reason': f'Exposure cap: would exceed {settings.MAX_EXPOSURE_PER_EXCHANGE_PCT}% on {buy_ex}'}
-                logger.info(f"📏 Exposure cap: {old_qty:.6f} → {qty:.6f} ({settings.MAX_EXPOSURE_PER_EXCHANGE_PCT}% limit)")
+                logger.info(f"📏 Exchange cap: {old_qty:.6f} → {qty:.6f} ({settings.MAX_EXPOSURE_PER_EXCHANGE_PCT}% limit)")
+            
+            # Per-coin cap: total exposure to this coin across ALL exchanges
+            base_coin = symbol.split('-')[0] if '-' in symbol else symbol
+            coin_exposure = sum(
+                self.balance_manager.get_balance(ex, base_coin) * buy_price
+                for ex in self.balance_manager.balances.keys()
+            )
+            max_per_coin = total_capital * (settings.MAX_EXPOSURE_PER_COIN_PCT / 100.0)
+            if coin_exposure + trade_value > max_per_coin:
+                allowed_value = max(0, max_per_coin - coin_exposure)
+                if allowed_value < self.MIN_ORDER_USDT:
+                    return {'status': 'blocked', 'reason': f'Coin exposure cap: {base_coin} at ${coin_exposure:.2f} ({coin_exposure/total_capital*100:.1f}% of {settings.MAX_EXPOSURE_PER_COIN_PCT}% max)'}
+                old_qty = qty
+                qty = allowed_value / buy_price if buy_price > 0 else 0
+                logger.info(f"📏 Coin cap: {old_qty:.6f} → {qty:.6f} ({base_coin} at {coin_exposure/total_capital*100:.1f}% exposure)")
 
         logger.info(
             f"🔴 LIVE EXECUTION: {symbol} | "
