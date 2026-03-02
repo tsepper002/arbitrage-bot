@@ -632,7 +632,19 @@ class ArbitrageEngine:
                 else:
                     dynamic_min_spread = sum_fees_pct * 0.8  # fallback: static 80% of fees
                 
-                # Prefilter: skip if spread < dynamic threshold
+                # SIGNAL COLLECTION: Record signals BEFORE threshold gate
+                # This is critical: coin selection needs signal data even when
+                # spreads are too thin to execute. Without this, signals never
+                # accumulate → pre-fund never triggers → bot is stuck forever.
+                # Only record if spread > fees (positive gross ROI)
+                if gross_spread_pct > sum_fees_pct and self.signal_allocator:
+                    raw_roi = gross_spread_pct - sum_fees_pct
+                    self.signal_allocator.record_signal(
+                        symbol=symbol, strategy='CROSS_EXCHANGE',
+                        exchange=buy_ex, roi_pct=raw_roi
+                    )
+                
+                # Prefilter: skip if spread < dynamic threshold (for EXECUTION only)
                 if gross_spread_pct < dynamic_min_spread:
                     # Near-miss: spread is >50% of threshold (engine is working)
                     if gross_spread_pct > dynamic_min_spread * 0.5:
