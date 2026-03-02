@@ -185,10 +185,11 @@ ARB_STRATEGIES = frozenset({'CROSS_EXCHANGE', 'TRIANGULAR', 'SMART_ORDER', 'FUND
 DIRECTIONAL_STRATEGIES = frozenset({'VOLATILITY', 'MOMENTUM', 'BREAKOUT', 'DCA', 
                                     'GRID_TRADING', 'MARKET_MAKING'})
 
-# DISABLED_STRATEGIES: strategies that should not be scanned at all.
-# These are directional strategies that waste CPU cycles producing signals
-# that are always blocked from execution. Disabling them frees CPU for 
-# faster CROSS_EXCHANGE scanning which is the actual profit source.
+# DISABLED_STRATEGIES: strategies excluded from scanning entirely.
+# Currently mirrors DIRECTIONAL_STRATEGIES because none of them can execute
+# arb trades. Kept as a separate set so that in the future, individual
+# directional strategies could be re-enabled (e.g., MARKET_MAKING at $1000+)
+# without changing the classification logic.
 DISABLED_STRATEGIES = frozenset(DIRECTIONAL_STRATEGIES)
 
 # ============================================================================

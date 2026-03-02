@@ -45,9 +45,8 @@ class StrategyDispatcher:
         # Capital-aware strategy selection
         # Also exclude strategies that are DISABLED (directional strategies that
         # never execute and only waste CPU cycles scanning)
-        disabled_set = getattr(settings, 'DISABLED_STRATEGIES', frozenset())
         self._enabled_strategies = set(s for s in settings.get_enabled_strategies() 
-                                        if s not in disabled_set)
+                                        if s not in settings.DISABLED_STRATEGIES)
         
         # Price history for strategies that need time series
         # symbol -> deque of (timestamp, mid_price)
@@ -81,16 +80,16 @@ class StrategyDispatcher:
         slow_names = [k for k in self.strategy_stats if k not in fast_names]
         enabled_fast = [n for n in fast_names if n in self._enabled_strategies]
         enabled_slow = [n for n in slow_names if n in self._enabled_strategies]
-        disabled_capital = [n for n in self.strategy_stats 
-                           if n not in self._enabled_strategies and n not in disabled_set]
-        disabled_arb = [n for n in self.strategy_stats if n in disabled_set]
+        disabled_by_capital = [n for n in self.strategy_stats 
+                               if n not in self._enabled_strategies and n not in settings.DISABLED_STRATEGIES]
+        disabled_directional = [n for n in self.strategy_stats if n in settings.DISABLED_STRATEGIES]
         logger.info(f"✅ StrategyDispatcher initialized with {len(self.strategy_stats)} strategies")
         logger.info(f"   Fast strategies ({len(enabled_fast)}): {', '.join(enabled_fast)}")
         logger.info(f"   Slow strategies ({len(enabled_slow)}): {', '.join(enabled_slow)}")
-        if disabled_arb:
-            logger.info(f"   🚫 Disabled (directional, no arb edge): {', '.join(disabled_arb)}")
-        if disabled_capital:
-            logger.info(f"   ⏸️  Disabled (capital too low): {', '.join(disabled_capital)}")
+        if disabled_directional:
+            logger.info(f"   🚫 Disabled (directional, no arb edge): {', '.join(disabled_directional)}")
+        if disabled_by_capital:
+            logger.info(f"   ⏸️  Disabled (capital too low): {', '.join(disabled_by_capital)}")
     
     def _get_price_store(self):
         """Get the PriceStore from bot_manager."""
