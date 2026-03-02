@@ -159,6 +159,16 @@ class ArbitrageEngine:
         # MEXC-first routing: prefer MEXC as buy-side (0.05% taker vs 0.10%+ others)
         self._low_fee_exchanges = ['MEXC']  # Exchanges with lowest taker fees
         self._low_fee_proximity = self.LOW_FEE_PROXIMITY_PCT / 100.0
+
+        # Spread persistence filter: only trade spreads that survive long enough
+        self._spread_first_seen: Dict[str, float] = {}  # key -> first_seen_ms
+        self.MIN_SPREAD_HOLD_MS = 500  # Spread must hold for 500ms before trading
+
+        # Exchange latency tracking for execution feasibility checks
+        self._exchange_latency_ms: Dict[str, float] = {}  # exchange -> avg round-trip ms
+        self.MAX_COMBINED_LATENCY_MS = 1000  # Skip if combined latency > 1s
+        self.DEFAULT_EXCHANGE_LATENCY_MS = 200  # Assumed latency when no data available
+        self.LATENCY_EMA_ALPHA = 0.3  # Smoothing factor for latency EMA
         
         logger.info(f"ArbitrageEngine initialized: min_roi={self.min_net_pct}%, max_exposure=${self.max_exposure_usdt}, safety_factor={self.safety_factor}")
 
@@ -411,6 +421,12 @@ class ArbitrageEngine:
             del self.recent_cache[k]
         if keys_to_remove:
             logger.debug(f"Cleaned {len(keys_to_remove)} old entries from recent_cache")
+
+        # Cleanup stale spread observations (>10 seconds old)
+        spread_cutoff = now * 1000 - 10000
+        stale_spreads = [k for k, ts in self._spread_first_seen.items() if ts < spread_cutoff]
+        for k in stale_spreads:
+            del self._spread_first_seen[k]
         
         snap = self.store.snapshot()
         exmap = snap.get(symbol, {})
@@ -538,6 +554,22 @@ class ArbitrageEngine:
                 # A5 RISK CHECK: Skip anomalous spreads (likely data errors)
                 if gross_spread_pct > settings.ANOMALOUS_SPREAD_PCT:
                     logger.warning(f"Skipping anomalous spread {gross_spread_pct:.2f}% for {symbol} {buy_ex}->{sell_ex} (threshold: {settings.ANOMALOUS_SPREAD_PCT}%)")
+                    continue
+
+                # SPREAD PERSISTENCE: Only trade spreads that have persisted for MIN_SPREAD_HOLD_MS
+                spread_key = f"{symbol}:{buy_ex}->{sell_ex}"
+                now_ms = time.time() * 1000
+                if spread_key not in self._spread_first_seen:
+                    self._spread_first_seen[spread_key] = now_ms
+                    continue  # First time seeing this spread — wait for confirmation
+                elif now_ms - self._spread_first_seen[spread_key] < self.MIN_SPREAD_HOLD_MS:
+                    continue  # Spread hasn't persisted long enough
+
+                # LATENCY CHECK: Skip if combined exchange latency exceeds spread lifetime
+                buy_latency = self._exchange_latency_ms.get(buy_ex, self.DEFAULT_EXCHANGE_LATENCY_MS)
+                sell_latency = self._exchange_latency_ms.get(sell_ex, self.DEFAULT_EXCHANGE_LATENCY_MS)
+                combined_latency = buy_latency + sell_latency
+                if combined_latency > self.MAX_COMBINED_LATENCY_MS:
                     continue
 
                 buy_avg, buy_filled = simulate_execution_from_book(asks, qty)
@@ -777,6 +809,12 @@ class ArbitrageEngine:
             res = res[:settings.MAX_CONCURRENT_OPPORTUNITIES]
         
         return res
+
+    def update_exchange_latency(self, exchange: str, latency_ms: float):
+        """Update rolling average latency for an exchange."""
+        old = self._exchange_latency_ms.get(exchange, latency_ms)
+        alpha = self.LATENCY_EMA_ALPHA
+        self._exchange_latency_ms[exchange] = old * (1 - alpha) + latency_ms * alpha
 
     def mark_symbol_updated(self, symbol: str):
         """Mark a symbol as having updated data (for event-driven scanning)."""
