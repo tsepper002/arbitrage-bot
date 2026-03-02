@@ -11,6 +11,7 @@ from collections import deque
 from typing import List, Optional, Tuple, Dict
 from datetime import datetime
 import settings
+from .exchange_config import round_qty, round_price
 
 logger = logging.getLogger("order_executor")
 
@@ -42,6 +43,7 @@ class OrderExecutor:
         self._trade_lock = asyncio.Lock()  # Prevent concurrent trade execution
         self._blocked_cooldown: Dict[str, float] = {}  # symbol → last blocked time
         self.BLOCKED_COOLDOWN_SEC = 10.0  # Don't retry blocked trades for 10s
+        self._open_orders: List[Dict] = []  # Track open limit orders for shutdown cancellation
         
         if self.dry_run:
             logger.info("🔵 OrderExecutor initialized in DRY RUN mode (safe simulation)")
@@ -406,7 +408,8 @@ class OrderExecutor:
             if use_maker_first:
                 # Maker-first: limit buy, wait for fill, THEN market sell
                 spread = sell_price - buy_price
-                maker_buy_price = buy_price + spread * (settings.MAKER_PRICE_OFFSET_PCT / 100.0)
+                maker_buy_price = round_price(buy_ex, symbol, buy_price + spread * (settings.MAKER_PRICE_OFFSET_PCT / 100.0))
+                qty = round_qty(buy_ex, symbol, qty)
                 
                 # Place limit buy first
                 buy_result = await buy_client.place_order(symbol, 'buy', 'limit', qty, maker_buy_price)
@@ -414,11 +417,19 @@ class OrderExecutor:
                     logger.error(f"❌ Maker buy failed: {buy_result}")
                     return {'status': 'error', 'reason': f'Maker buy failed: {buy_result}'}
                 
-                # Wait for fill (up to MAKER_FILL_TIMEOUT_MS)
+                # Track open order for shutdown cancellation
                 buy_order_id = self._extract_order_id(buy_result)
+                open_order = {'exchange': buy_ex, 'symbol': symbol, 'order_id': buy_order_id, 'side': 'buy'}
+                self._open_orders.append(open_order)
+                
+                # Wait for fill (up to MAKER_FILL_TIMEOUT_MS)
                 fill_timeout_sec = settings.MAKER_FILL_TIMEOUT_MS / 1000.0
                 buy_fill = await self._verify_fill(buy_client, symbol, buy_order_id, 'buy', maker_buy_price, qty)
                 buy_filled_pct = (buy_fill.get('filled_qty', 0) / qty * 100) if qty > 0 else 0
+                
+                # Remove from open orders (filled or about to cancel)
+                if open_order in self._open_orders:
+                    self._open_orders.remove(open_order)
                 
                 if buy_filled_pct < settings.MAKER_MIN_FILL_PCT:
                     # Not enough fill — cancel and abort
@@ -427,7 +438,7 @@ class OrderExecutor:
                     return {'status': 'blocked', 'reason': f'Maker buy fill too low: {buy_filled_pct:.0f}%'}
                 
                 # Buy filled ≥ min_fill_pct → place market sell
-                sell_qty = buy_fill.get('filled_qty', qty)
+                sell_qty = round_qty(sell_ex, symbol, buy_fill.get('filled_qty', qty))
                 sell_result = await sell_client.place_order(symbol, 'sell', 'market', sell_qty, sell_price)
                 if isinstance(sell_result, Exception):
                     logger.error(f"❌ Sell after maker buy failed: {sell_result}")
@@ -657,6 +668,18 @@ class OrderExecutor:
                 logger.info(f"✅ Cancelled {side} order {order_id}")
         except Exception as e:
             logger.warning(f"⚠️  Cancel {side} order {order_id} failed: {e}")
+
+    async def cancel_all_open_orders(self):
+        """Cancel all tracked open limit orders (called on shutdown)."""
+        if not self._open_orders:
+            return
+        logger.info(f"🧹 Cancelling {len(self._open_orders)} open limit orders...")
+        for order in list(self._open_orders):
+            ex_name = order.get('exchange', '')
+            client = self.rest_clients.get(ex_name)
+            if client:
+                await self._safe_cancel(client, order['symbol'], order['order_id'], order['side'])
+        self._open_orders.clear()
     
     async def _sync_balances_after_trade(self, buy_client, sell_client, buy_ex: str, sell_ex: str):
         """Force immediate balance sync after trade to get accurate balances."""

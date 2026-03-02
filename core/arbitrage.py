@@ -538,6 +538,16 @@ class ArbitrageEngine:
                 buy = exmap.get(buy_ex, {})
                 sell = exmap.get(sell_ex, {})
 
+                # §1.3 Orderbook staleness check: reject if data > 200ms old
+                now_ts = time.time()
+                max_age_sec = settings.MAX_ORDERBOOK_AGE_MS / 1000.0
+                buy_ts = buy.get("ts", 0)
+                sell_ts = sell.get("ts", 0)
+                if buy_ts and (now_ts - buy_ts) > max_age_sec:
+                    continue  # buy-side orderbook stale
+                if sell_ts and (now_ts - sell_ts) > max_age_sec:
+                    continue  # sell-side orderbook stale
+
                 asks = buy.get("asks_levels")
                 bids = sell.get("bids_levels")
 
