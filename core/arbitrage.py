@@ -569,7 +569,10 @@ class ArbitrageEngine:
                 top_ask = asks[0][0]
                 gross_spread_pct = ((top_bid - top_ask) / top_ask) * 100.0 if top_ask > 0 else 0
                 
-                buy_fee = self._fee_rate(buy_ex, "taker")
+                # §4 MAKER-FIRST FEE OPTIMIZATION:
+                # Buy side uses maker fee (limit order), sell side uses taker fee (market order)
+                # This is critical for MEXC where maker=0% vs taker=0.05%
+                buy_fee = self._fee_rate(buy_ex, "maker" if settings.MAKER_FIRST_ENABLED else "taker")
                 sell_fee = self._fee_rate(sell_ex, "taker")
                 sum_fees_pct = (buy_fee + sell_fee) * 100.0
                 

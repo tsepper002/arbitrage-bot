@@ -43,7 +43,11 @@ class StrategyDispatcher:
         self.slow_scan_interval = 60  # 1 minute
         
         # Capital-aware strategy selection
-        self._enabled_strategies = set(settings.get_enabled_strategies())
+        # Also exclude strategies that are DISABLED (directional strategies that
+        # never execute and only waste CPU cycles scanning)
+        disabled_set = getattr(settings, 'DISABLED_STRATEGIES', frozenset())
+        self._enabled_strategies = set(s for s in settings.get_enabled_strategies() 
+                                        if s not in disabled_set)
         
         # Price history for strategies that need time series
         # symbol -> deque of (timestamp, mid_price)
@@ -77,12 +81,16 @@ class StrategyDispatcher:
         slow_names = [k for k in self.strategy_stats if k not in fast_names]
         enabled_fast = [n for n in fast_names if n in self._enabled_strategies]
         enabled_slow = [n for n in slow_names if n in self._enabled_strategies]
-        disabled = [n for n in self.strategy_stats if n not in self._enabled_strategies]
+        disabled_capital = [n for n in self.strategy_stats 
+                           if n not in self._enabled_strategies and n not in disabled_set]
+        disabled_arb = [n for n in self.strategy_stats if n in disabled_set]
         logger.info(f"✅ StrategyDispatcher initialized with {len(self.strategy_stats)} strategies")
         logger.info(f"   Fast strategies ({len(enabled_fast)}): {', '.join(enabled_fast)}")
         logger.info(f"   Slow strategies ({len(enabled_slow)}): {', '.join(enabled_slow)}")
-        if disabled:
-            logger.info(f"   ⏸️  Disabled (capital too low): {', '.join(disabled)}")
+        if disabled_arb:
+            logger.info(f"   🚫 Disabled (directional, no arb edge): {', '.join(disabled_arb)}")
+        if disabled_capital:
+            logger.info(f"   ⏸️  Disabled (capital too low): {', '.join(disabled_capital)}")
     
     def _get_price_store(self):
         """Get the PriceStore from bot_manager."""
@@ -225,9 +233,12 @@ class StrategyDispatcher:
             # Increment call counters up front so dashboard always shows scan activity
             # (strategies are called every cycle, they just find 0 opportunities when data is pending)
             self.strategy_stats['CROSS_EXCHANGE']['calls'] += 1
-            self.strategy_stats['TRIANGULAR']['calls'] += 1
-            self.strategy_stats['SMART_ORDER']['calls'] += 1
-            self.strategy_stats['VOLATILITY']['calls'] += 1
+            if 'TRIANGULAR' in self._enabled_strategies:
+                self.strategy_stats['TRIANGULAR']['calls'] += 1
+            if 'SMART_ORDER' in self._enabled_strategies:
+                self.strategy_stats['SMART_ORDER']['calls'] += 1
+            if 'VOLATILITY' in self._enabled_strategies:
+                self.strategy_stats['VOLATILITY']['calls'] += 1
 
             # Update price history on every fast scan for slow strategies
             self._update_price_history()

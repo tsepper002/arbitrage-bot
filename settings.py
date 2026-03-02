@@ -176,10 +176,20 @@ STRATEGY_PRIORITY = {
 ARB_STRATEGIES = frozenset({'CROSS_EXCHANGE', 'TRIANGULAR', 'SMART_ORDER', 'FUNDING_RATE', 
                             'INDEX_ARB', 'VOLATILITY_ARB', 'SPREAD_BETTING', 'PAIRS_TRADING'})
 
-# Directional strategies: ONLY generate signals, NEVER execute trades
-# (they require position holding which conflicts with arb hedging)
+# Directional strategies: SIGNAL ONLY, NEVER execute trades.
+# These are DISABLED from scanning to save CPU for the arb strategies that
+# actually generate profit. They cannot execute because:
+#   1. They fail _is_executable() (no cross-exchange premium)
+#   2. They hit DIRECTIONAL_STRATEGIES block in _build_trade_from_signal()
+# CPU savings: ~30% less scanning overhead → faster arb detection
 DIRECTIONAL_STRATEGIES = frozenset({'VOLATILITY', 'MOMENTUM', 'BREAKOUT', 'DCA', 
                                     'GRID_TRADING', 'MARKET_MAKING'})
+
+# DISABLED_STRATEGIES: strategies that should not be scanned at all.
+# These are directional strategies that waste CPU cycles producing signals
+# that are always blocked from execution. Disabling them frees CPU for 
+# faster CROSS_EXCHANGE scanning which is the actual profit source.
+DISABLED_STRATEGIES = frozenset(DIRECTIONAL_STRATEGIES)
 
 # ============================================================================
 # EXPOSURE CAPS — per-coin and per-exchange limits

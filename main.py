@@ -1785,8 +1785,13 @@ class IntegratedArbitrageBot:
             return None
         
         # Calculate profit with real prices and fees
+        # §4 MAKER-FIRST: Buy side uses maker fee (limit order), sell side uses taker fee
+        # MEXC maker=0% → buying on MEXC with limit order is FREE
         from core.exchange_config import EXCHANGE_PARAMS
-        buy_fee = EXCHANGE_PARAMS.get(best_buy_ex, {}).get('taker', 0.001)
+        if settings.MAKER_FIRST_ENABLED:
+            buy_fee = EXCHANGE_PARAMS.get(best_buy_ex, {}).get('maker', 0.001)
+        else:
+            buy_fee = EXCHANGE_PARAMS.get(best_buy_ex, {}).get('taker', 0.001)
         sell_fee = EXCHANGE_PARAMS.get(best_sell_ex, {}).get('taker', 0.001)
         
         # Calculate max trade size from exposure limit (scales with capital)
