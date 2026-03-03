@@ -228,6 +228,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger("arbitrage_bot")
 
+
+class _DashboardErrorCapture(logging.Handler):
+    """Captures ERROR-level log messages for the static dashboard display."""
+    MAX_ERRORS = 10
+
+    def __init__(self):
+        super().__init__(level=logging.ERROR)
+        self.errors = []
+
+    def emit(self, record):
+        msg = self.format(record)
+        self.errors.append(msg)
+        if len(self.errors) > self.MAX_ERRORS:
+            self.errors = self.errors[-self.MAX_ERRORS:]
+
+
+_dashboard_error_handler = _DashboardErrorCapture()
+_dashboard_error_handler.setFormatter(logging.Formatter('%(message)s'))
+logging.getLogger().addHandler(_dashboard_error_handler)
+
 # Force all exchange loggers to INFO level (not DEBUG) for console
 # This prevents WebSocket modules from spamming console with DEBUG messages
 for logger_name in ['kucoin_ws', 'bybit_ws', 'htx_ws', 'mexc_ws', 'binance_ws', 'arbitrage_ws', 'MEXC', 'websockets', 'exchange_config', 'arbitrage_engine']:
@@ -321,6 +341,7 @@ class IntegratedArbitrageBot:
         self._rejection_total = 0
         self._last_rejection_reason = ""
         self._signal_priority_symbols = set()  # Symbols boosted by slow strategies
+        self._dashboard_errors = []  # Recent errors for dashboard display
         
     async def initialize(self):
         """Initialize all components."""
@@ -1109,246 +1130,237 @@ class IntegratedArbitrageBot:
             raise
     
     async def _monitor_loop(self):
-        """Compact status dashboard — updates in-place, no jumping."""
+        """Static in-place dashboard — clears screen and redraws every cycle."""
         interval = settings.MONITOR_INTERVAL_SEC
         cycle = 0
+
         try:
             while True:
                 await asyncio.sleep(interval)
                 cycle += 1
-                
-                # Gather data
+
+                # ── Gather ALL data first ────────────────────────────
                 snap = self.store.snapshot() if self.store else {}
-                total_exchanges = sum(len(exmap) for exmap in snap.values()) if snap else 0
+                total_connections = sum(len(exmap) for exmap in snap.values()) if snap else 0
                 active_symbols = len(snap) if snap else 0
-                
-                # Exchange connectivity
+
                 exchanges_with_data = set()
                 for exmap in snap.values():
                     exchanges_with_data.update(exmap.keys())
-                
-                # Executor stats
+
                 executor = getattr(self.engine, 'executor', None) if self.engine else None
                 exec_stats = executor.get_statistics() if executor else {}
                 total_trades = exec_stats.get('total_orders', 0)
                 total_profit = exec_stats.get('total_profit', 0.0)
                 avg_roi = exec_stats.get('average_roi', 0.0)
-                
-                # Strategy dispatcher stats
+
                 disp_stats = {}
-                total_scans = 0
-                total_opps = 0
                 if self.strategy_dispatcher:
                     disp_stats = self.strategy_dispatcher.strategy_stats
-                    total_scans = sum(s['calls'] for s in disp_stats.values())
-                    total_opps = sum(s['opportunities'] for s in disp_stats.values())
-                
-                # Mode label
-                mode = "🔵 DRY RUN" if settings.DRY_RUN else "🔴 LIVE"
-                
-                # Print compact dashboard
-                print(f"\n{'='*70}")
-                print(f" {mode} | Cycle #{cycle} | {active_symbols} symbols | {total_exchanges} connections")
-                print(f"{'='*70}")
-                
-                # Connected exchanges with fee info
-                all_exchanges = ['Bybit', 'KuCoin', 'HTX', 'MEXC', 'Binance']
-                connected = [ex for ex in all_exchanges if ex in exchanges_with_data]
-                disconnected = [ex for ex in all_exchanges if ex not in exchanges_with_data]
-                # Show fee next to each connected exchange
-                conn_parts = []
-                for ex in connected:
-                    fee = EXCHANGE_PARAMS.get(ex, {}).get('taker', 0)
-                    conn_parts.append(f"{ex}({fee*100:g}%)")
-                print(f" ✅ Connected: {', '.join(conn_parts) if conn_parts else 'none'}")
-                if disconnected:
-                    print(f" ❌ Disconnected: {', '.join(disconnected)}")
-                
-                # Strategies summary (compact)
-                print(f"{'─'*70}")
-                print(f" {'Strategy':<20} {'Scans':>8} {'Sigs':>6} {'Opps':>6} {'Trds':>6}")
-                print(f"{'─'*70}")
-                for name, stats in disp_stats.items():
-                    calls = stats['calls']
-                    signals = stats.get('signals', 0)
-                    opps = stats['opportunities']
-                    trades = stats.get('trades', 0)
-                    print(f" {name:<20} {calls:>8} {signals:>6} {opps:>6} {trades:>6}")
-                
-                # Totals
-                total_signals = sum(s.get('signals', 0) for s in disp_stats.values())
-                total_trades_strat = sum(s.get('trades', 0) for s in disp_stats.values())
-                print(f"{'─'*70}")
-                print(f" {'TOTAL':<20} {total_scans:>8} {total_signals:>6} {total_opps:>6} {total_trades_strat:>6}")
-                print(f"{'─'*70}")
-                print(f" 💰 Trades: {total_trades} | Profit: ${total_profit:.4f} | Avg ROI: {avg_roi:.3f}%")
-                
-                # Profit reserve display
-                if self.engine:
-                    reserved = getattr(self.engine, '_reserved_profit', 0.0)
-                    reinvested = getattr(self.engine, '_reinvested_profit', 0.0)
-                    if total_profit > 0:
-                        print(f" 💎 Reserve: ${reserved:.4f} (30% locked) | Reinvested: ${reinvested:.4f} (70%)")
-                
-                # Balance info — total portfolio value in USDT (all coins)
+
+                # Capital & balance
+                total_bal = 0.0
                 if self.balance_manager:
-                    total_bal = self.balance_manager.get_total_balance_usdt(self.engine.store if self.engine else None)
-                    virt = " (virtual)" if settings.DRY_RUN else ""
-                    print(f" 💵 Capital: ${total_bal:.2f} USDT equiv{virt}")
-                    # Update CapitalManager with current equity
+                    total_bal = self.balance_manager.get_total_balance_usdt(
+                        self.engine.store if self.engine else None)
                     if self.capital_manager:
                         self.capital_manager.update_equity(total_bal)
-                        # Update volatility from engine's spread tracking
                         if self.engine and hasattr(self.engine, 'best_spread_pct'):
-                            # Spread/10 as vol proxy → feeds into volatility_buffer in threshold.
-                            # CapitalManager applies ×0.20 multiplier (see dynamic_threshold):
-                            #   best_spread 0.19% × 0.1 = 0.019% vol → buffer 0.019% × 0.20 = 0.004%
-                            # Was ×2.0 before → 0.076% buffer (inflated threshold by ~50% of fees!)
                             vol_pct = max(self.engine.best_spread_pct * 0.1, 0.001)
                             self.capital_manager.update_volatility(vol_pct)
-                
-                # Engine 2.0: Capital Manager status
-                if self.capital_manager:
-                    print(f" 🏦 {self.capital_manager.get_summary()}")
-                
-                # Pre-fund / Inventory status
-                if hasattr(self, 'signal_allocator') and self.signal_allocator:
-                    sa = self.signal_allocator
-                    coin = getattr(sa, '_current_coin', None)
-                    setup = getattr(sa, '_initial_setup_done', False)
-                    if coin and setup:
-                        base = coin.split('-')[0] if '-' in coin else coin
-                        # Show which exchanges have the coin
-                        holdings = []
-                        if self.balance_manager:
-                            for ex in self.balance_manager.balances:
-                                amt = self.balance_manager.get_balance(ex, base)
-                                if amt > 0:
-                                    holdings.append(f"{ex}:{amt:.4g}")
-                        h_str = ", ".join(holdings) if holdings else "none"
-                        print(f" 📦 Coin: {coin} | Holdings: {h_str}")
-                    elif not setup:
-                        sig_count = len(getattr(sa, '_signals', []))
-                        print(f" 📦 Coin: waiting for signals ({sig_count} collected, need 15)")
-                    
-                    # Action status — what is the bot doing RIGHT NOW?
-                    urgent = getattr(sa, '_urgent_rebalance_needed', False)
-                    misses = getattr(sa, '_misses', [])
-                    recent_misses = sum(1 for m in misses if time.time() - m.get('timestamp', 0) < 60) if misses else 0
-                    if urgent:
-                        print(f" ⚡ ACTION: URGENT rebalance triggered — buying coin NOW")
-                    elif not setup and sig_count < 15:
-                        print(f" 🔄 ACTION: Collecting signals ({sig_count}/15) before first pre-fund")
-                    elif coin and recent_misses > 0:
-                        print(f" ⚠️  ACTION: {recent_misses} missed trades (no coin on exchange) — rebalance pending")
-                    elif coin and setup:
-                        print(f" ✅ ACTION: Scanning for arb spreads > threshold")
-                
-                # Semi-HFT Engine status
-                if hasattr(self, 'semi_hft_engine') and self.semi_hft_engine:
-                    print(f" 🚀 HFT: {self.semi_hft_engine.get_summary()}")
-                
-                # Dynamic threshold breakdown
-                # Units: _best_spread_fees_pct is in percent (e.g. 0.10 = 0.10%)
-                # dynamic_threshold() accepts/returns percent (e.g. 0.16 = 0.16%)
-                if self.capital_manager and self.engine:
-                    best_fees_pct = getattr(self.engine, '_best_spread_fees_pct', 0)
-                    if best_fees_pct > 0:
-                        th_pct = self.capital_manager.dynamic_threshold(best_fees_pct)
-                        best_sp = getattr(self.engine, '_best_spread_pct', 0)
-                        if best_sp > 0:
-                            gap = th_pct - best_sp
-                            if gap > 0:
-                                print(f" 🎯 Threshold: {th_pct:.3f}% (need {gap:.3f}% more spread to trade)")
-                            else:
-                                print(f" 🎯 Threshold: {th_pct:.3f}% ← spread ABOVE threshold! Trades possible!")
-                
-                # ML module status — comprehensive line
-                ml_parts = []
+
+                # Risk
+                daily_pnl = self.risk_manager.daily_pnl if self.risk_manager else 0.0
+
+                # Engine spread analytics
+                best_spread = getattr(self.engine, '_best_spread_pct', 0) if self.engine else 0
+                best_info = getattr(self.engine, '_best_spread_info', '') if self.engine else ''
+                best_fees = getattr(self.engine, '_best_spread_fees_pct', 0) if self.engine else 0
+                near_misses = getattr(self.engine, '_near_miss_count', 0) if self.engine else 0
+                total_analyzed = getattr(self.engine, '_total_pairs_analyzed', 0) if self.engine else 0
+
+                # Threshold
+                th_pct = 0.0
+                if self.capital_manager and best_fees > 0:
+                    th_pct = self.capital_manager.dynamic_threshold(best_fees)
+
+                # Signal allocator
+                sa = getattr(self, 'signal_allocator', None)
+                sa_coin = getattr(sa, '_current_coin', None) if sa else None
+                sa_setup = getattr(sa, '_initial_setup_done', False) if sa else False
+                sa_signals = len(getattr(sa, '_signals', [])) if sa else 0
+                sa_urgent = getattr(sa, '_urgent_rebalance_needed', False) if sa else False
+                sa_misses = getattr(sa, '_misses', []) if sa else []
+                recent_misses = sum(1 for m in sa_misses
+                                    if time.time() - m.get('timestamp', 0) < 60)
+
+                # HFT latencies from semi_hft_engine
+                hft = getattr(self, 'semi_hft_engine', None)
+                hft_latencies = {}
+                if hft:
+                    for ex, s in getattr(hft, '_latency', {}).items():
+                        hft_latencies[ex] = s.ema_ms
+
+                # ── Build the dashboard lines ────────────────────────
+                W = 74  # total width
+                mode = "DRY RUN" if settings.DRY_RUN else "LIVE"
+                mode_icon = "TEST" if settings.DRY_RUN else "REAL"
+                lines = []
+                L = lines.append  # shortcut
+
+                # ═══════ HEADER ═══════
+                L(f"{'=' * W}")
+                L(f"  ARBITRAGE BOT [{mode_icon}]   Cycle #{cycle}   "
+                  f"{active_symbols} symbols   {total_connections} WS feeds")
+                L(f"{'=' * W}")
+
+                # ─── EXCHANGES ───
+                L(f"  EXCHANGES:")
+                all_ex = ['Binance', 'MEXC', 'KuCoin', 'Bybit', 'HTX']
+                for ex in all_ex:
+                    fee_pct = EXCHANGE_PARAMS.get(ex, {}).get('taker', 0) * 100
+                    maker_pct = EXCHANGE_PARAMS.get(ex, {}).get('maker', fee_pct / 100) * 100
+                    connected = "OK" if ex in exchanges_with_data else "OFF"
+                    lat = hft_latencies.get(ex, 0)
+                    lat_str = f"{lat:.0f}ms" if lat > 0 else "---"
+                    # Determine if exchange is disabled by kill-logic
+                    cm = self.capital_manager
+                    disabled = ""
+                    if cm and hasattr(cm, 'is_exchange_enabled'):
+                        if not cm.is_exchange_enabled(ex):
+                            disabled = " [DISABLED]"
+                    icon = "+" if connected == "OK" else "-"
+                    L(f"    [{icon}] {ex:<10} fee:{maker_pct:g}%/{fee_pct:g}%  "
+                      f"lat:{lat_str:<8} {disabled}")
+
+                # ─── CAPITAL & PROFIT ───
+                L(f"{'─' * W}")
+                L(f"  CAPITAL: ${total_bal:.2f} USDT")
+                lvl_name = self.capital_manager._current_level.name if self.capital_manager else "N/A"
+                compound = self.capital_manager._compound_multiplier() if self.capital_manager else 1.0
+                L(f"  Level: {lvl_name}  |  Compound: {compound:.2f}x  |  "
+                  f"Daily PnL: ${daily_pnl:.4f}")
+                L(f"  Trades: {total_trades}  |  Profit: ${total_profit:.4f}  |  "
+                  f"Avg ROI: {avg_roi:.3f}%")
+                if total_profit > 0 and self.engine:
+                    reserved = getattr(self.engine, '_reserved_profit', 0.0)
+                    L(f"  Reserve: ${reserved:.4f} (30% locked)")
+
+                # ─── ACTIVE COIN & HOLDINGS ───
+                L(f"{'─' * W}")
+                if sa_coin and sa_setup:
+                    base = sa_coin.split('-')[0] if '-' in sa_coin else sa_coin
+                    L(f"  COIN: {sa_coin}")
+                    if self.balance_manager:
+                        parts = []
+                        for ex in all_ex:
+                            amt = self.balance_manager.get_balance(ex, base)
+                            usdt = self.balance_manager.get_balance(ex, 'USDT')
+                            if amt > 0 or usdt > 0:
+                                parts.append(f"    {ex:<10} {base}:{amt:<10.4f} USDT:{usdt:.2f}")
+                        for p in parts:
+                            L(p)
+                elif not sa_setup:
+                    L(f"  COIN: waiting for signals ({sa_signals}/15)")
+                else:
+                    L(f"  COIN: none selected")
+
+                # ─── SPREAD & THRESHOLD ANALYSIS ───
+                L(f"{'─' * W}")
+                if best_spread > 0 and best_fees > 0:
+                    pct_of_fees = best_spread / best_fees * 100
+                    L(f"  BEST SPREAD:  {best_spread:.4f}%  ({pct_of_fees:.0f}% of fees)  "
+                      f"{best_info}")
+                    L(f"  TOTAL FEES:   {best_fees:.4f}%")
+                    L(f"  THRESHOLD:    {th_pct:.4f}%")
+                    gap = th_pct - best_spread
+                    if gap > 0:
+                        L(f"  GAP:          {gap:.4f}%  (spread too thin by this much)")
+                    else:
+                        L(f"  >>> SPREAD ABOVE THRESHOLD — TRADES POSSIBLE!")
+                else:
+                    L(f"  SPREAD: no data yet")
+                if total_analyzed > 0:
+                    L(f"  Pairs scanned: {total_analyzed}  Near-misses: {near_misses}")
+
+                # ─── WHAT IS THE BOT DOING? ───
+                L(f"{'─' * W}")
+                if sa_urgent:
+                    L(f"  >> ACTION: BUYING COIN NOW (urgent rebalance)")
+                elif not sa_setup and sa_signals < 15:
+                    L(f"  >> ACTION: Collecting signals ({sa_signals}/15)")
+                elif recent_misses > 0:
+                    L(f"  >> ACTION: {recent_misses} missed trades — waiting for rebalance")
+                elif best_spread > 0 and th_pct > 0 and best_spread >= th_pct:
+                    L(f"  >> ACTION: Executing arb trades!")
+                else:
+                    L(f"  >> ACTION: Scanning... waiting for spread > threshold")
+
+                # ─── STRATEGIES (only non-zero) ───
+                active_strats = {k: v for k, v in disp_stats.items()
+                                 if v.get('calls', 0) > 0 or v.get('trades', 0) > 0}
+                if active_strats:
+                    L(f"{'─' * W}")
+                    L(f"  {'STRATEGY':<18} {'Scans':>7} {'Sigs':>6} {'Opps':>6} {'Trds':>6}")
+                    for name, stats in active_strats.items():
+                        L(f"  {name:<18} {stats.get('calls',0):>7} "
+                          f"{stats.get('signals',0):>6} "
+                          f"{stats.get('opportunities',0):>6} "
+                          f"{stats.get('trades',0):>6}")
+
+                # ─── HFT + ML (one line each) ───
+                if hft:
+                    vol_regime = getattr(hft, '_vol_regime', None)
+                    vr = vol_regime.regime if vol_regime else "N/A"
+                    L(f"{'─' * W}")
+                    L(f"  HFT: VolRegime={vr}")
+
+                # ML regime
                 if self.market_regime_detector:
                     regimes = self.market_regime_detector.get_all_regimes()
                     if regimes:
                         from collections import Counter
                         rc = Counter(regimes.values())
-                        top_regime = rc.most_common(1)[0][0] if rc else 'N/A'
-                        ml_parts.append(f"Regime={top_regime}")
-                    else:
-                        ml_parts.append("Regime=N/A")
-                if self.nn_predictor:
-                    try:
-                        cache = getattr(self.nn_predictor, 'prediction_cache', {})
-                        if cache:
-                            last_val = list(cache.values())[-1][1]
-                            ml_parts.append(f"NN conf={last_val:.2f}")
-                        else:
-                            ml_parts.append("NN conf=N/A")
-                    except Exception:
-                        ml_parts.append("NN conf=N/A")
-                if self.rl_agent:
-                    try:
-                        eps = getattr(self.rl_agent, 'epsilon', 0)
-                        ml_parts.append(f"RL ε={eps:.2f}")
-                    except Exception:
-                        pass
-                if self.ml_spread_predictor:
-                    ewma_vals = getattr(self.ml_spread_predictor, 'ewma_values', {})
-                    if ewma_vals:
-                        avg_ewma = sum(ewma_vals.values()) / len(ewma_vals)
-                        ml_parts.append(f"Spread EWMA={avg_ewma*100:.2f}%")
-                    else:
-                        ml_parts.append("Spread EWMA=learning")
-                if self.volatility_forecaster:
-                    try:
-                        vol_regimes = {s: self.volatility_forecaster.get_regime(s)
-                                       for s in list(getattr(self.volatility_forecaster, 'ewma_var', {}).keys())[:3]}
-                        if vol_regimes:
-                            top_vol = next(iter(vol_regimes.values()), 'N/A')
-                            ml_parts.append(f"Vol={top_vol}")
-                    except Exception:
-                        pass
-                if ml_parts:
-                    print(f" 🧠 ML: {' | '.join(ml_parts)}")
-                
-                # Engine analytics: best spread seen THIS cycle + near-miss tracking
+                        top = rc.most_common(1)[0][0] if rc else 'N/A'
+                        L(f"  ML:  Regime={top}")
+
+                # ─── REJECTIONS (why trades don't happen) ───
+                if self._rejection_total > 0:
+                    L(f"{'─' * W}")
+                    L(f"  REJECTIONS ({self._rejection_total} total):")
+                    # Sort by count, show top 5
+                    sorted_reasons = sorted(self._rejection_counts.items(),
+                                            key=lambda x: x[1], reverse=True)
+                    for reason, cnt in sorted_reasons[:5]:
+                        bar_len = min(cnt * 30 // max(self._rejection_total, 1), 30)
+                        bar = '#' * bar_len
+                        L(f"    {reason:<30} {cnt:>6}  {bar}")
+
+                # ─── RECENT ERRORS (from logging) ───
+                recent_errors = _dashboard_error_handler.errors[-5:]
+                if recent_errors:
+                    L(f"{'─' * W}")
+                    L(f"  ERRORS (last {len(recent_errors)}):")
+                    for err in recent_errors:
+                        # Truncate to fit width
+                        err_short = err[:W - 6]
+                        L(f"    {err_short}")
+
+                # ═══════ FOOTER ═══════
+                L(f"{'=' * W}")
+
+                # ── Clear screen and print all at once ────────────────
+                # Use ANSI escape: clear screen + move cursor to top
+                output = '\033[2J\033[H' + '\n'.join(lines)
+                sys.stdout.write(output + '\n')
+                sys.stdout.flush()
+
+                # Reset per-cycle engine metrics
                 if self.engine:
-                    best_spread = getattr(self.engine, '_best_spread_pct', 0)
-                    best_info = getattr(self.engine, '_best_spread_info', '')
-                    best_fees = getattr(self.engine, '_best_spread_fees_pct', 0)
-                    near_misses = getattr(self.engine, '_near_miss_count', 0)
-                    total_analyzed = getattr(self.engine, '_total_pairs_analyzed', 0)
-                    if best_spread > 0:
-                        gap = best_fees - best_spread
-                        pct_of_fees = (best_spread / best_fees * 100) if best_fees > 0 else 0
-                        print(f" 📊 Best spread: {best_spread:.4f}% ({pct_of_fees:.0f}% of {best_fees:.3f}% fees, gap={gap:.4f}%) | {best_info}")
-                    if near_misses > 0 or total_analyzed > 0:
-                        print(f" 🔍 Near-misses: {near_misses} | Pairs analyzed: {total_analyzed}")
-                    # Reset per-cycle metrics so dashboard shows CURRENT state
                     self.engine._best_spread_pct = 0.0
                     self.engine._best_spread_info = ""
                     self.engine._best_spread_fees_pct = 0.0
-                
-                # Rejection summary — shows WHY trades don't happen
-                if self._rejection_total > 0:
-                    top_reason = max(self._rejection_counts, key=self._rejection_counts.get) if self._rejection_counts else "N/A"
-                    top_count = self._rejection_counts.get(top_reason, 0)
-                    priority = ", ".join(sorted(self._signal_priority_symbols)[:5]) if self._signal_priority_symbols else "none"
-                    print(f" ⛔ Rejected: {self._rejection_total} trades ({top_reason}: {top_count}) | Priority symbols: {priority}")
-                
-                print(f"{'='*70}")
-                
-                # Every 1000 cycles, print detailed summary
-                if cycle % 1000 == 0:
-                    print(f"\n{'*'*70}")
-                    print(f"  📊 MILESTONE: {cycle} CYCLES COMPLETED")
-                    print(f"{'*'*70}")
-                    if executor:
-                        executor.print_statistics()
-                    if self.strategy_dispatcher:
-                        self.strategy_dispatcher.print_stats()
-                    if self.risk_manager:
-                        logger.info(f"Risk status: Daily P&L: ${self.risk_manager.daily_pnl:.2f}")
-                    print(f"{'*'*70}\n")
-                
+
         except asyncio.CancelledError:
             return
     
