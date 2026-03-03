@@ -248,6 +248,9 @@ _dashboard_error_handler = _DashboardErrorCapture()
 _dashboard_error_handler.setFormatter(logging.Formatter('%(message)s'))
 logging.getLogger().addHandler(_dashboard_error_handler)
 
+# ANSI escape for static dashboard (clear screen + cursor to top-left)
+ANSI_CLEAR_AND_HOME = '\033[2J\033[H'
+
 # Force all exchange loggers to INFO level (not DEBUG) for console
 # This prevents WebSocket modules from spamming console with DEBUG messages
 for logger_name in ['kucoin_ws', 'bybit_ws', 'htx_ws', 'mexc_ws', 'binance_ws', 'arbitrage_ws', 'MEXC', 'websockets', 'exchange_config', 'arbitrage_engine']:
@@ -1236,8 +1239,8 @@ class IntegratedArbitrageBot:
                 # ─── CAPITAL & PROFIT ───
                 L(f"{'─' * W}")
                 L(f"  CAPITAL: ${total_bal:.2f} USDT")
-                lvl_name = self.capital_manager._current_level.name if self.capital_manager else "N/A"
-                compound = self.capital_manager._compound_multiplier() if self.capital_manager else 1.0
+                lvl_name = self.capital_manager.level.name if self.capital_manager else "N/A"
+                compound = self.capital_manager.compound_multiplier if self.capital_manager else 1.0
                 L(f"  Level: {lvl_name}  |  Compound: {compound:.2f}x  |  "
                   f"Daily PnL: ${daily_pnl:.4f}")
                 L(f"  Trades: {total_trades}  |  Profit: ${total_profit:.4f}  |  "
@@ -1351,7 +1354,7 @@ class IntegratedArbitrageBot:
 
                 # ── Clear screen and print all at once ────────────────
                 # Use ANSI escape: clear screen + move cursor to top
-                output = '\033[2J\033[H' + '\n'.join(lines)
+                output = ANSI_CLEAR_AND_HOME + '\n'.join(lines)
                 sys.stdout.write(output + '\n')
                 sys.stdout.flush()
 

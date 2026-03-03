@@ -433,6 +433,16 @@ class CapitalManager:
         """HTX has higher latency — only use if spread is wide enough."""
         return spread_pct >= self._current_level.htx_min_spread_pct
 
+    @property
+    def level(self):
+        """Public access to current trading level."""
+        return self._current_level
+
+    @property
+    def compound_multiplier(self) -> float:
+        """Public access to compound multiplier."""
+        return self._compound_multiplier()
+
     def get_summary(self) -> str:
         """Return human-readable status summary."""
         lvl = self._current_level
