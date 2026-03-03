@@ -37,6 +37,12 @@ class ArbitrageEngine:
     # Profit reserve: 30% of profits are locked (untouchable), 70% reinvested
     PROFIT_REINVEST_PCT = 0.70
     PROFIT_RESERVE_PCT = 0.30
+    # Signal threshold for coin selection: record when spread > fees × this factor.
+    # Lower = more signals for pre-positioning in flat markets.
+    # Pairs with SignalAllocator.MIN_SIGNAL_ROI_PCT (currently -0.10%).
+    SIGNAL_TRACKING_FACTOR = 0.3
+    # Default exchange latency if no ping data available
+    DEFAULT_EXCHANGE_LATENCY_MS = 200.0
     
     def __init__(self, store, *,
                  default_qty: Optional[float] = None,
@@ -179,7 +185,6 @@ class ArbitrageEngine:
         # Exchange latency tracking for execution feasibility checks
         self._exchange_latency_ms: Dict[str, float] = {}  # exchange -> avg round-trip ms
         self.MAX_COMBINED_LATENCY_MS = 1000  # Skip if combined latency > 1s
-        self.DEFAULT_EXCHANGE_LATENCY_MS = 200  # Assumed latency when no data available
         self.LATENCY_EMA_ALPHA = 0.3  # Smoothing factor for latency EMA
         self.MAX_VWAP_SLIPPAGE_PCT = settings.MAX_VWAP_SLIPPAGE_PCT
         
@@ -650,11 +655,9 @@ class ArbitrageEngine:
                 # This is critical: coin selection needs signal data even when
                 # spreads are too thin to execute. Without this, signals never
                 # accumulate → pre-fund never triggers → bot is stuck forever.
-                # Record when spread > 30% of fees (near-profitable) for coin
-                # selection. ROI can be negative — that's OK, it means "almost
-                # profitable". When spreads spike, pre-positioned coins trade.
-                SIGNAL_TRACKING_FACTOR = 0.3  # 30% of fees = "near-profitable"
-                if gross_spread_pct > sum_fees_pct * SIGNAL_TRACKING_FACTOR and self.signal_allocator:
+                # Record when spread > SIGNAL_TRACKING_FACTOR × fees (near-profitable).
+                # ROI can be negative — accepted by SignalAllocator.MIN_SIGNAL_ROI_PCT.
+                if gross_spread_pct > sum_fees_pct * self.SIGNAL_TRACKING_FACTOR and self.signal_allocator:
                     raw_roi = gross_spread_pct - sum_fees_pct  # may be negative
                     self.signal_allocator.record_signal(
                         symbol=symbol, strategy='CROSS_EXCHANGE',

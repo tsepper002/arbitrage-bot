@@ -383,7 +383,9 @@ class SignalAllocator:
     # Minimum ROI for signal to count toward coin selection.
     # Negative values allow "almost profitable" signals — essential in flat markets
     # where spreads are close to fees but not yet above them.
-    # -0.10 means: spread within 0.10% of profitability counts for coin selection.
+    # Works with ArbitrageEngine.SIGNAL_TRACKING_FACTOR (0.3): signals are recorded
+    # when spread > 30% of fees, so ROI can be as low as -70% of fees (typically
+    # -0.07% to -0.14%). This threshold of -0.10% covers most near-profitable cases.
     MIN_SIGNAL_ROI_PCT = -0.10
 
     def _is_profitable_signal(self, sig) -> bool:
