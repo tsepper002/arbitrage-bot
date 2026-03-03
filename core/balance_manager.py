@@ -117,8 +117,8 @@ class BalanceManager:
             if hasattr(client, 'sync_server_time'):
                 try:
                     await client.sync_server_time()
-                except Exception:
-                    pass  # Time sync failure shouldn't block balance fetch
+                except Exception as e:
+                    logger.debug(f"{exchange_name}: time sync before balance failed: {e}")
             
             balance = await client.get_balance()
             self.balances[exchange_name] = balance

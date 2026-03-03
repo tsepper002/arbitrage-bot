@@ -21,6 +21,7 @@ import argparse
 import logging
 import os
 import time
+from collections import defaultdict
 from typing import List, Dict, Optional
 
 # CRITICAL: Load .env file BEFORE importing settings
@@ -1197,7 +1198,6 @@ class IntegratedArbitrageBot:
                 sa_best_sym = ""
                 sa_best_count = 0
                 if sa and hasattr(sa, '_signals'):
-                    from collections import defaultdict
                     _sym_counts = defaultdict(int)
                     for _sig in sa._signals:
                         if hasattr(sa, '_is_profitable_signal') and sa._is_profitable_signal(_sig):
@@ -1280,10 +1280,10 @@ class IntegratedArbitrageBot:
                 elif not sa_setup:
                     if sa_arb_signals > 0:
                         L(f"  COIN: collecting arb signals ({sa_best_count}/15 for {sa_best_sym})")
-                        L(f"        {sa_arb_signals} arb signals / {sa_signals_all} total signals")
+                        L(f"        {sa_arb_signals} arb / {sa_signals_all} total signals")
                     else:
-                        L(f"  COIN: waiting for cross-exchange arb signals (0/15)")
-                        L(f"        {sa_signals_all} other signals (not arb)")
+                        L(f"  COIN: waiting for arb signals (0/15)")
+                        L(f"        {sa_signals_all} total signals (none are cross-exchange arb)")
                 else:
                     L(f"  COIN: none selected")
 
