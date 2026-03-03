@@ -2089,6 +2089,11 @@ class IntegratedArbitrageBot:
     
     async def shutdown(self):
         """Graceful shutdown — sell coins FIRST, then cancel tasks, save state."""
+        # Prevent double-shutdown
+        if getattr(self, '_shutdown_complete', False):
+            return
+        self._shutdown_complete = True
+        
         logger.info("\n🛑 Shutting down gracefully...")
         
         # ========== §9.1 CANCEL ALL OPEN LIMIT ORDERS ==========
@@ -2101,13 +2106,19 @@ class IntegratedArbitrageBot:
         
         # ========== §9.2 SELL ALL COINS BACK TO USDT ==========
         # Do this BEFORE cancelling background tasks — WS feeds still alive for prices!
+        SELL_TIMEOUT_SEC = 60  # Max 60 seconds for sell operation
         if hasattr(self, 'signal_allocator') and self.signal_allocator:
             try:
                 price_store = getattr(self.engine, 'store', None) if hasattr(self, 'engine') and self.engine else None
-                await self.signal_allocator.sell_all_to_usdt(
-                    rest_clients=self.rest_clients,
-                    price_store=price_store,
+                await asyncio.wait_for(
+                    self.signal_allocator.sell_all_to_usdt(
+                        rest_clients=self.rest_clients,
+                        price_store=price_store,
+                    ),
+                    timeout=SELL_TIMEOUT_SEC,
                 )
+            except asyncio.TimeoutError:
+                logger.error(f"⚠️ CRITICAL: sell_all_to_usdt timed out after {SELL_TIMEOUT_SEC}s — some coins may remain on exchanges!")
             except Exception as e:
                 logger.error(f"⚠️ Error selling coins during shutdown: {e}")
         
@@ -2197,6 +2208,7 @@ async def main():
     
     for attempt in range(MAX_RESTARTS + 1):
         bot = IntegratedArbitrageBot()
+        shutdown_requested = False
         
         try:
             # Initialize all components
@@ -2209,8 +2221,11 @@ async def main():
             await bot.run()
             return 0  # Clean exit
             
-        except KeyboardInterrupt:
-            logger.info("\n⚠️  KeyboardInterrupt received")
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            # Ctrl+C on Windows raises CancelledError (via asyncio.run),
+            # on Unix raises KeyboardInterrupt. Catch BOTH to ensure shutdown.
+            logger.info("\n⚠️  Shutdown signal received (Ctrl+C)")
+            shutdown_requested = True
             await bot.shutdown()
             return 0
         except Exception as e:
@@ -2267,6 +2282,6 @@ if __name__ == "__main__":
     try:
         exit_code = asyncio.run(main())
         sys.exit(exit_code)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         print("\n👋 Goodbye!")
         sys.exit(0)
