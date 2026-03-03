@@ -451,7 +451,7 @@ class OrderExecutor:
                         continue
                     result = await buy_client.place_order(symbol, 'buy', 'limit', slice_qty, slice_price)
                     if isinstance(result, Exception):
-                        logger.debug(f"Slice {idx+1}/{len(slices)} failed (price={slice_price}, qty={slice_qty}): {result}")
+                        logger.warning(f"⚠️ Maker slice {idx+1}/{len(slices)} failed (price={slice_price}, qty={slice_qty}): {result}")
                         continue
                     buy_results.append(result)
                     oid = self._extract_order_id(result)
@@ -780,6 +780,13 @@ class OrderExecutor:
             logger.error(f"❌ EMERGENCY CLOSE FAILED: {e}")
             # This is critical - manual intervention may be needed
             logger.error(f"🚨🚨🚨 MANUAL INTERVENTION REQUIRED: {side} {qty} {symbol} on {exchange}")
+            # Persist failed emergency close so it can be retried on restart
+            if self.state_manager:
+                self.state_manager.add_pending_order({
+                    'exchange': exchange, 'symbol': symbol,
+                    'side': side, 'qty': qty, 'type': 'emergency_close_failed',
+                    'timestamp': time.time(),
+                })
             return None
     
     def get_statistics(self) -> Dict:

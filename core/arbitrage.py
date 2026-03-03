@@ -670,9 +670,9 @@ class ArbitrageEngine:
                 # Engine 2.0: Uses level-specific persistence from CapitalManager
                 # EXCEPTION: Skip persistence for strong spreads (>3× cushion above threshold)
                 # — these are almost certainly real and will disappear if we wait.
-                min_hold_ms = cm.level.spread_persistence_ms if cm else self.MIN_SPREAD_HOLD_MS
+                min_hold_ms = cm.level.spread_persistence_ms if cm and cm.level else self.MIN_SPREAD_HOLD_MS
                 spread_excess = gross_spread_pct - dynamic_min_spread
-                strong_cushion = (cm.level.spread_threshold_above_fees * self.STRONG_SPREAD_MULTIPLIER) if cm else self.DEFAULT_STRONG_CUSHION_PCT
+                strong_cushion = (cm.level.spread_threshold_above_fees * self.STRONG_SPREAD_MULTIPLIER) if cm and cm.level else self.DEFAULT_STRONG_CUSHION_PCT
                 is_strong_spread = spread_excess > strong_cushion
                 
                 if not is_strong_spread:

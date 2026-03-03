@@ -625,6 +625,7 @@ class SignalAllocator:
                 if price > 0:
                     self._last_prices[best_coin] = price  # Cache for portfolio valuation
                 if price <= 0:
+                    logger.warning(f"  ⚠️ {exchange}: No price available for {best_coin} — skipping pre-fund")
                     continue
                 
                 # Check if already positioned (from previous run)
@@ -912,14 +913,15 @@ class SignalAllocator:
         
         if settings.DRY_RUN:
             fee_cost = usdt_amount * fee_rate
-            qty_after_fee = qty * (1.0 - fee_rate)
-            self.balance_manager.update_balance_optimistic(exchange, 'USDT', -usdt_amount)
-            self.balance_manager.update_balance_optimistic(exchange, base_coin, qty_after_fee)
+            usdt_spent = usdt_amount  # Full USDT amount debited
+            qty_received = usdt_spent * (1.0 - fee_rate) / price if price > 0 else 0  # Fee deducted from USDT side
+            self.balance_manager.update_balance_optimistic(exchange, 'USDT', -usdt_spent)
+            self.balance_manager.update_balance_optimistic(exchange, base_coin, qty_received)
             self._total_rebalance_fees += fee_cost
             self._rebalance_history[(exchange, symbol)] = time.time()
             order['status'] = 'simulated'
             logger.info(
-                f"  🏦 [DRY] {exchange}: Buy {qty_after_fee:.6g} {base_coin} "
+                f"  🏦 [DRY] {exchange}: Buy {qty_received:.6g} {base_coin} "
                 f"(${usdt_amount:.2f}, fee=${fee_cost:.4f}) — {reason}"
             )
             return order
@@ -934,9 +936,11 @@ class SignalAllocator:
                     quantity=qty, price=price,
                 )
                 self._rebalance_history[(exchange, symbol)] = time.time()
-                qty_after_fee = qty * (1.0 - fee_rate)
-                self.balance_manager.update_balance_optimistic(exchange, 'USDT', -usdt_amount)
-                self.balance_manager.update_balance_optimistic(exchange, base_coin, qty_after_fee)
+                # Fee is deducted from the USDT side (exchange takes fee from payment)
+                usdt_spent = usdt_amount
+                qty_received = usdt_spent * (1.0 - fee_rate) / price if price > 0 else qty
+                self.balance_manager.update_balance_optimistic(exchange, 'USDT', -usdt_spent)
+                self.balance_manager.update_balance_optimistic(exchange, base_coin, qty_received)
                 self._total_rebalance_fees += usdt_amount * fee_rate
                 order['status'] = 'executed'
                 order['result'] = result
@@ -1071,8 +1075,8 @@ class SignalAllocator:
                             ob = await client.get_orderbook(symbol)
                             if ob and ob.get('bids') and len(ob['bids']) > 0 and len(ob['bids'][0]) > 0:
                                 price = float(ob['bids'][0][0])
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"  ⚠️ {exchange}: Orderbook fetch failed for {symbol}: {e}")
                 if price <= 0:
                     logger.warning(f"  ⚠️ {exchange}: Cannot sell {amount:.6g} {asset} — no price available")
                     continue

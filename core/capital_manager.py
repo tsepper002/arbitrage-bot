@@ -172,7 +172,7 @@ class CapitalManager:
     OVERTRADING_THRESHOLD_BUMP = 0.05 # +0.05% when overtrading detected
 
     # Volatility regime
-    HIGH_VOLATILITY_THRESHOLD = 1.5   # % — reduce size
+    HIGH_VOLATILITY_THRESHOLD = 3.0   # % — reduce size (crypto often moves >1.5%/day normally)
     HIGH_VOLATILITY_SIZE_REDUCTION = 0.20  # -20%
     HIGH_VOLATILITY_THRESHOLD_BUMP = 0.05  # +0.05%
 

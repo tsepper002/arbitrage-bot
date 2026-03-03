@@ -1391,7 +1391,8 @@ class IntegratedArbitrageBot:
                         if hasattr(client, 'sync_server_time'):
                             await client.sync_server_time()
                         rtt_ms = (time.time() - t0) * 1000
-                        self.semi_hft_engine.record_latency(name, rtt_ms)
+                        if self.semi_hft_engine:
+                            self.semi_hft_engine.record_latency(name, rtt_ms)
                         if self.engine:
                             self.engine.update_exchange_latency(name, rtt_ms)
                     except Exception as e:
