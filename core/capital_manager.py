@@ -188,6 +188,7 @@ class CapitalManager:
 
         # Trade history for overtrading detection
         self._recent_profits: List[float] = []  # last N net profit pct
+        self._total_trades_completed = 0  # Track total trades for compound gating
 
         # Exchange quality ranking
         self._exchange_scores: Dict[str, float] = {}
@@ -297,7 +298,14 @@ class CapitalManager:
         return max(0.0, base)
 
     def _compound_multiplier(self) -> float:
-        """Adaptive position scaling: +5% per 10% equity growth."""
+        """Adaptive position scaling: +5% per 10% equity growth.
+        
+        Returns 1.0 until at least 1 trade is completed to avoid
+        false inflation from pre-fund operations (buying coins reduces
+        USDT but doesn't change total equity).
+        """
+        if self._total_trades_completed < 1:
+            return 1.0
         if self._initial_equity <= 0:
             return 1.0
         growth_pct = ((self._current_equity / self._initial_equity) - 1.0) * 100.0
@@ -321,6 +329,7 @@ class CapitalManager:
                             slippage_pct: float = 0.0):
         """Record a completed trade for kill-logic + quality tracking."""
         now = time.time()
+        self._total_trades_completed += 1
 
         # --- coin health ---
         ch = self._coin_health.setdefault(symbol, _CoinHealth())

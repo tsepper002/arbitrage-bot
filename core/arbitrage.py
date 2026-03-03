@@ -140,6 +140,9 @@ class ArbitrageEngine:
         self._best_spread_pct = 0.0
         self._best_spread_info = ""
         self._best_spread_fees_pct = 0.0
+        self._best_net_spread_pct = -99.0  # Best (spread - fees) — how close to profit
+        self._best_net_spread_info = ""
+        self._best_net_spread_fees_pct = 0.0
         self._near_miss_count = 0
         self._total_pairs_analyzed = 0
 
@@ -611,6 +614,13 @@ class ArbitrageEngine:
                     self._best_spread_info = f"{symbol} {buy_ex}→{sell_ex}"
                     self._best_spread_fees_pct = sum_fees_pct
                 
+                # Track best NET spread (spread - fees) — closest to profitability
+                net_spread = gross_spread_pct - sum_fees_pct
+                if net_spread > self._best_net_spread_pct:
+                    self._best_net_spread_pct = net_spread
+                    self._best_net_spread_info = f"{symbol} {buy_ex}→{sell_ex}"
+                    self._best_net_spread_fees_pct = sum_fees_pct
+                
                 # Engine 2.0: Dynamic threshold replaces static fee prefilter
                 # threshold = fees + level cushion + latency_risk + volatility_buffer
                 # Semi-HFT: Enhanced with p95 slippage + execution failure rate + vol regime
@@ -640,9 +650,12 @@ class ArbitrageEngine:
                 # This is critical: coin selection needs signal data even when
                 # spreads are too thin to execute. Without this, signals never
                 # accumulate → pre-fund never triggers → bot is stuck forever.
-                # Only record if spread > fees (positive gross ROI)
-                if gross_spread_pct > sum_fees_pct and self.signal_allocator:
-                    raw_roi = gross_spread_pct - sum_fees_pct
+                # Record when spread > 30% of fees (near-profitable) for coin
+                # selection. ROI can be negative — that's OK, it means "almost
+                # profitable". When spreads spike, pre-positioned coins trade.
+                SIGNAL_TRACKING_FACTOR = 0.3  # 30% of fees = "near-profitable"
+                if gross_spread_pct > sum_fees_pct * SIGNAL_TRACKING_FACTOR and self.signal_allocator:
+                    raw_roi = gross_spread_pct - sum_fees_pct  # may be negative
                     self.signal_allocator.record_signal(
                         symbol=symbol, strategy='CROSS_EXCHANGE',
                         exchange=buy_ex, roi_pct=raw_roi

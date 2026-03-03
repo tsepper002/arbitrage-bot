@@ -1182,11 +1182,16 @@ class IntegratedArbitrageBot:
                 best_fees = getattr(self.engine, '_best_spread_fees_pct', 0) if self.engine else 0
                 near_misses = getattr(self.engine, '_near_miss_count', 0) if self.engine else 0
                 total_analyzed = getattr(self.engine, '_total_pairs_analyzed', 0) if self.engine else 0
+                # Best NET spread = closest to profitability (shows MEXC-pairs advantage)
+                best_net = getattr(self.engine, '_best_net_spread_pct', -99) if self.engine else -99
+                best_net_info = getattr(self.engine, '_best_net_spread_info', '') if self.engine else ''
+                best_net_fees = getattr(self.engine, '_best_net_spread_fees_pct', 0) if self.engine else 0
 
-                # Threshold
+                # Threshold — use best NET pair's fees (most relevant to profitability)
                 th_pct = 0.0
-                if self.capital_manager and best_fees > 0:
-                    th_pct = self.capital_manager.dynamic_threshold(best_fees)
+                th_fees = best_net_fees if best_net_fees > 0 else best_fees
+                if self.capital_manager and th_fees > 0:
+                    th_pct = self.capital_manager.dynamic_threshold(th_fees)
 
                 # Signal allocator
                 sa = getattr(self, 'signal_allocator', None)
@@ -1289,15 +1294,25 @@ class IntegratedArbitrageBot:
 
                 # ─── SPREAD & THRESHOLD ANALYSIS ───
                 L(f"{'─' * W}")
-                if best_spread > 0 and best_fees > 0:
+                if best_net > -99 and best_net_fees > 0:
+                    # Show best NET spread (closest to profitability)
+                    best_net_gross = best_net + best_net_fees  # recover gross
+                    L(f"  BEST NET:     {best_net:+.4f}%  (spread {best_net_gross:.4f}% − fees {best_net_fees:.4f}%)  "
+                      f"{best_net_info}")
+                    L(f"  THRESHOLD:    {th_pct:.4f}%  (fees {th_fees:.4f}% + cushion)")
+                    gap = th_pct - best_net_gross
+                    if gap > 0:
+                        L(f"  GAP:          {gap:.4f}%  (need {gap:.4f}% more spread to trade)")
+                    else:
+                        L(f"  >>> SPREAD ABOVE THRESHOLD — TRADES POSSIBLE!")
+                elif best_spread > 0 and best_fees > 0:
                     pct_of_fees = best_spread / best_fees * 100
                     L(f"  BEST SPREAD:  {best_spread:.4f}%  ({pct_of_fees:.0f}% of fees)  "
                       f"{best_info}")
-                    L(f"  TOTAL FEES:   {best_fees:.4f}%")
                     L(f"  THRESHOLD:    {th_pct:.4f}%")
                     gap = th_pct - best_spread
                     if gap > 0:
-                        L(f"  GAP:          {gap:.4f}%  (spread too thin by this much)")
+                        L(f"  GAP:          {gap:.4f}%  (need {gap:.4f}% more spread)")
                     else:
                         L(f"  >>> SPREAD ABOVE THRESHOLD — TRADES POSSIBLE!")
                 else:

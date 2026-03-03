@@ -380,20 +380,29 @@ class SignalAllocator:
         alternatives.sort(key=lambda x: x[1], reverse=True)
         return alternatives
 
+    # Minimum ROI for signal to count toward coin selection.
+    # Negative values allow "almost profitable" signals — essential in flat markets
+    # where spreads are close to fees but not yet above them.
+    # -0.10 means: spread within 0.10% of profitability counts for coin selection.
+    MIN_SIGNAL_ROI_PCT = -0.10
+
     def _is_profitable_signal(self, sig) -> bool:
-        """Check if signal is a profitable OPPORTUNITY (positive ROI from CROSS_EXCHANGE).
+        """Check if signal is a near-profitable CROSS_EXCHANGE opportunity.
+        
+        Accepts signals where spread is within MIN_SIGNAL_ROI_PCT of fees.
+        This allows the bot to pre-position coins in flat markets where spreads
+        are close to fees but not yet above them. When spreads spike, the
+        pre-positioned coins enable instant execution.
         
         Only CROSS_EXCHANGE signals represent actual tradeable cross-exchange arb.
         SMART_ORDER/VOLATILITY signals have positive ROI but aren't arb opportunities.
         """
-        return sig.roi_pct > 0 and sig.strategy == 'CROSS_EXCHANGE'
+        return sig.roi_pct > self.MIN_SIGNAL_ROI_PCT and sig.strategy == 'CROSS_EXCHANGE'
 
     def _compute_scores(self) -> Dict[str, float]:
         """Compute weighted signal scores per symbol.
 
-        Only counts OPPORTUNITY signals with POSITIVE ROI from ANY strategy.
-        Signals with zero or negative ROI are noise and ignored.
-
+        Counts near-profitable CROSS_EXCHANGE signals (ROI > MIN_SIGNAL_ROI_PCT).
         Uses exponential decay so recent signals matter more.
         Returns dict of symbol → score.
         """
@@ -401,7 +410,6 @@ class SignalAllocator:
         scores: Dict[str, float] = defaultdict(float)
 
         for sig in self._signals:
-            # Only count signals with positive ROI (actual profitable opportunities)
             if not self._is_profitable_signal(sig):
                 continue
 
@@ -413,8 +421,7 @@ class SignalAllocator:
             weight = self.EXECUTED_WEIGHT if sig.executed else 1.0
 
             # ROI bonus: higher ROI signals get proportionally more weight
-            # 0.1% ROI → 2× weight, 1.0% ROI → 11× weight
-            # Note: roi_pct guaranteed > 0 by _is_profitable_signal() filter above
+            # Clamp to 0 so negative-ROI signals get base weight only
             roi_bonus = 1.0 + max(sig.roi_pct, 0) * 10.0
 
             scores[sig.symbol] += weight * decay * roi_bonus
