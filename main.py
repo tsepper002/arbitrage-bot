@@ -1211,9 +1211,43 @@ class IntegratedArbitrageBot:
                 if self.capital_manager:
                     print(f" 🏦 {self.capital_manager.get_summary()}")
                 
+                # Pre-fund / Inventory status
+                if hasattr(self, 'signal_allocator') and self.signal_allocator:
+                    sa = self.signal_allocator
+                    coin = getattr(sa, '_current_coin', None)
+                    setup = getattr(sa, '_initial_setup_done', False)
+                    if coin and setup:
+                        base = coin.split('-')[0] if '-' in coin else coin
+                        # Show which exchanges have the coin
+                        holdings = []
+                        if self.balance_manager:
+                            for ex in self.balance_manager.balances:
+                                amt = self.balance_manager.get_balance(ex, base)
+                                if amt > 0:
+                                    holdings.append(f"{ex}:{amt:.4g}")
+                        h_str = ", ".join(holdings) if holdings else "none"
+                        print(f" 📦 Coin: {coin} | Holdings: {h_str}")
+                    elif not setup:
+                        sig_count = len(getattr(sa, '_signals', []))
+                        print(f" 📦 Coin: waiting for signals ({sig_count} collected, need 15)")
+                
                 # Semi-HFT Engine status
                 if hasattr(self, 'semi_hft_engine') and self.semi_hft_engine:
                     print(f" 🚀 HFT: {self.semi_hft_engine.get_summary()}")
+                
+                # Dynamic threshold breakdown
+                if self.capital_manager and self.engine:
+                    best_fees_pct = getattr(self.engine, '_best_spread_fees_pct', 0)
+                    if best_fees_pct > 0:
+                        th = self.capital_manager.dynamic_threshold(best_fees_pct / 100.0)
+                        th_pct = th * 100
+                        best_sp = getattr(self.engine, '_best_spread_pct', 0)
+                        if best_sp > 0:
+                            gap = th_pct - best_sp
+                            if gap > 0:
+                                print(f" 🎯 Threshold: {th_pct:.3f}% (need +{gap:.3f}% more spread to trade)")
+                            else:
+                                print(f" 🎯 Threshold: {th_pct:.3f}% ← spread ABOVE threshold! Trades possible!")
                 
                 # ML module status — comprehensive line
                 ml_parts = []
@@ -1987,19 +2021,11 @@ class IntegratedArbitrageBot:
             self._signal_priority_symbols.add(symbol)
     
     async def shutdown(self):
-        """Graceful shutdown — cancel orders, sell coins, save state."""
+        """Graceful shutdown — sell coins FIRST, then cancel tasks, save state."""
         logger.info("\n🛑 Shutting down gracefully...")
         
-        # Cancel all background tasks
-        for task in self.tasks:
-            if not task.done():
-                task.cancel()
-        
-        # Wait for tasks to finish
-        if self.tasks:
-            await asyncio.gather(*self.tasks, return_exceptions=True)
-        
         # ========== §9.1 CANCEL ALL OPEN LIMIT ORDERS ==========
+        # Do this FIRST — prevent stale limit orders from filling
         if hasattr(self, 'engine') and self.engine and self.engine.executor:
             try:
                 await self.engine.executor.cancel_all_open_orders()
@@ -2007,6 +2033,7 @@ class IntegratedArbitrageBot:
                 logger.error(f"⚠️ Error cancelling open orders: {e}")
         
         # ========== §9.2 SELL ALL COINS BACK TO USDT ==========
+        # Do this BEFORE cancelling background tasks — WS feeds still alive for prices!
         if hasattr(self, 'signal_allocator') and self.signal_allocator:
             try:
                 price_store = getattr(self.engine, 'store', None) if hasattr(self, 'engine') and self.engine else None
@@ -2016,6 +2043,15 @@ class IntegratedArbitrageBot:
                 )
             except Exception as e:
                 logger.error(f"⚠️ Error selling coins during shutdown: {e}")
+        
+        # NOW cancel all background tasks (WS feeds, monitors, etc.)
+        for task in self.tasks:
+            if not task.done():
+                task.cancel()
+        
+        # Wait for tasks to finish
+        if self.tasks:
+            await asyncio.gather(*self.tasks, return_exceptions=True)
         
         # Print final statistics
         if self.engine:

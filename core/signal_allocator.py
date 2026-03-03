@@ -575,15 +575,11 @@ class SignalAllocator:
         executed = []
         exchanges = list(self.balance_manager.balances.keys())
         
-        # CRITICAL: Only pre-fund on TOP exchanges by latency, not ALL 5.
-        # This concentrates capital where it's most useful for arb execution.
-        # n=3 ensures at least 2 exchanges after potential failures.
-        MIN_PREFUND_EXCHANGES = 2
-        if self.semi_hft_engine and hasattr(self.semi_hft_engine, 'get_top_exchanges'):
-            top = self.semi_hft_engine.get_top_exchanges(exchanges, n=max(len(exchanges) - 1, MIN_PREFUND_EXCHANGES))
-            if len(top) >= MIN_PREFUND_EXCHANGES:
-                logger.info(f"🏆 Pre-funding top {len(top)} exchanges: {', '.join(top)} (skipping: {', '.join(e for e in exchanges if e not in top)})")
-                exchanges = top
+        # Pre-fund on ALL connected exchanges — more exchanges = more arb pairs.
+        # Latency filtering applies at TRADE time, not at pre-fund time.
+        # Having coins on 5 exchanges creates 20 possible arb pairs (5×4).
+        # Having coins on 3 exchanges creates only 6 pairs (3×2).
+        logger.info(f"🏦 Pre-funding ALL {len(exchanges)} exchanges: {', '.join(exchanges)}")
         
         # Determine the #1 best coin using frequency × avg_roi scoring
         # This picks the coin with BOTH frequent signals AND high average ROI
@@ -1034,6 +1030,16 @@ class SignalAllocator:
         executed = []
         exchanges = list(self.balance_manager.balances.keys())
         
+        # Step 1: Refresh balances from REST to get ACTUAL current holdings
+        # (balance_manager may have stale optimistic data)
+        if rest_clients and not settings.DRY_RUN:
+            logger.info("💱 SHUTDOWN: Refreshing balances from exchanges...")
+            try:
+                await self.balance_manager.initialize_balances(rest_clients)
+                exchanges = list(self.balance_manager.balances.keys())
+            except Exception as e:
+                logger.warning(f"  ⚠️ Balance refresh failed, using cached: {e}")
+        
         logger.info("💱 SHUTDOWN: Selling ALL coins back to USDT on all exchanges...")
         
         for exchange in exchanges:
@@ -1044,7 +1050,7 @@ class SignalAllocator:
                 
                 symbol = f"{asset}-USDT"
                 
-                # Get current price
+                # Get current price — try multiple sources
                 price = 0.0
                 if price_store:
                     price = self.balance_manager._get_price_from_store(price_store, symbol, exchange)
@@ -1052,12 +1058,23 @@ class SignalAllocator:
                         price = self.balance_manager._get_any_price(price_store, symbol)
                 if price <= 0:
                     price = self._last_prices.get(symbol, 0.0)
+                # Last resort: try to get price from REST client orderbook
+                if price <= 0 and rest_clients and not settings.DRY_RUN:
+                    client = rest_clients.get(exchange)
+                    if client and hasattr(client, 'get_orderbook'):
+                        try:
+                            ob = await client.get_orderbook(symbol)
+                            if ob and ob.get('bids'):
+                                price = float(ob['bids'][0][0])
+                        except Exception:
+                            pass
                 if price <= 0:
                     logger.warning(f"  ⚠️ {exchange}: Cannot sell {amount:.6g} {asset} — no price available")
                     continue
                 
                 usdt_value = amount * price
-                if usdt_value < 1.0:
+                # Lower dust threshold — $0.50 minimum (was $1.00, which skipped small coins!)
+                if usdt_value < 0.50:
                     logger.debug(f"  ⏭️ {exchange}: Skip {asset} — only ${usdt_value:.2f} (dust)")
                     continue
                 
@@ -1067,6 +1084,8 @@ class SignalAllocator:
                 )
                 if order:
                     executed.append(order)
+                else:
+                    logger.warning(f"  ❌ {exchange}: Failed to sell {amount:.6g} {asset} (${usdt_value:.2f})")
         
         total_usdt = sum(o.get('amount_usdt', 0) for o in executed)
         if executed:
