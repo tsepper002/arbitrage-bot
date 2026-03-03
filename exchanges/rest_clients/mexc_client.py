@@ -52,7 +52,11 @@ class MEXCRESTClient(BaseRESTClient):
                 resolver=aiohttp.ThreadedResolver()
             )
             timeout = aiohttp.ClientTimeout(total=30, sock_connect=10)
-            self._session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+            self._session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout,
+                skip_auto_headers={'Content-Type'}
+            )
         return self._session
     
     async def close(self):
