@@ -914,7 +914,8 @@ class SignalAllocator:
         if settings.DRY_RUN:
             fee_cost = usdt_amount * fee_rate
             usdt_spent = usdt_amount  # Full USDT amount debited
-            qty_received = usdt_spent * (1.0 - fee_rate) / price if price > 0 else 0  # Fee deducted from USDT side
+            raw_qty = usdt_spent / price if price > 0 else 0
+            qty_received = raw_qty * (1.0 - fee_rate)  # Exchange deducts fee from received coins
             self.balance_manager.update_balance_optimistic(exchange, 'USDT', -usdt_spent)
             self.balance_manager.update_balance_optimistic(exchange, base_coin, qty_received)
             self._total_rebalance_fees += fee_cost
@@ -936,9 +937,10 @@ class SignalAllocator:
                     quantity=qty, price=price,
                 )
                 self._rebalance_history[(exchange, symbol)] = time.time()
-                # Fee is deducted from the USDT side (exchange takes fee from payment)
+                # Fee deducted from received coins (standard exchange behavior)
                 usdt_spent = usdt_amount
-                qty_received = usdt_spent * (1.0 - fee_rate) / price if price > 0 else qty
+                raw_qty = usdt_spent / price if price > 0 else qty
+                qty_received = raw_qty * (1.0 - fee_rate)
                 self.balance_manager.update_balance_optimistic(exchange, 'USDT', -usdt_spent)
                 self.balance_manager.update_balance_optimistic(exchange, base_coin, qty_received)
                 self._total_rebalance_fees += usdt_amount * fee_rate

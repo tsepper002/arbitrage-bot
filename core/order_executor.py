@@ -782,10 +782,12 @@ class OrderExecutor:
             logger.error(f"🚨🚨🚨 MANUAL INTERVENTION REQUIRED: {side} {qty} {symbol} on {exchange}")
             # Persist failed emergency close so it can be retried on restart
             if self.state_manager:
+                import uuid
                 self.state_manager.add_pending_order({
+                    'id': str(uuid.uuid4())[:8],
                     'exchange': exchange, 'symbol': symbol,
                     'side': side, 'qty': qty, 'type': 'emergency_close_failed',
-                    'timestamp': time.time(),
+                    'timestamp': time.time(), 'retry_count': 0,
                 })
             return None
     
