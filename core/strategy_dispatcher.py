@@ -401,7 +401,7 @@ class StrategyDispatcher:
         """
         opportunities = []
         
-        logger.info("⏰ Scanning 10 slow strategies...")
+        logger.debug("⏰ Scanning 10 slow strategies...")
         
         try:
             scanners = [
@@ -434,7 +434,7 @@ class StrategyDispatcher:
                 except Exception as e:
                     logger.debug(f"{name} scan error: {e}")
             
-            logger.info(f"   ✅ Slow scan complete: {len(opportunities)} opportunities found")
+            logger.debug(f"   ✅ Slow scan complete: {len(opportunities)} opportunities found")
             
         except Exception as e:
             logger.error(f"Error in slow strategy scan: {e}")

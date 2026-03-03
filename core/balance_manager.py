@@ -103,6 +103,7 @@ class BalanceManager:
     async def _fetch_balance(self, exchange_name: str, client) -> Dict[str, float]:
         """
         Fetch balance from a single exchange.
+        Syncs server time first to prevent timestamp errors.
         
         Returns:
             Dict of {currency: amount}
@@ -111,6 +112,13 @@ class BalanceManager:
             if not hasattr(client, 'get_balance'):
                 logger.warning(f"⚠️  {exchange_name} client has no get_balance method")
                 return {}
+            
+            # Sync time before balance fetch to prevent recvWindow errors
+            if hasattr(client, 'sync_server_time'):
+                try:
+                    await client.sync_server_time()
+                except Exception:
+                    pass  # Time sync failure shouldn't block balance fetch
             
             balance = await client.get_balance()
             self.balances[exchange_name] = balance

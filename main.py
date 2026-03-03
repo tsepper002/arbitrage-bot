@@ -1191,7 +1191,21 @@ class IntegratedArbitrageBot:
                 sa = getattr(self, 'signal_allocator', None)
                 sa_coin = getattr(sa, '_current_coin', None) if sa else None
                 sa_setup = getattr(sa, '_initial_setup_done', False) if sa else False
-                sa_signals = len(getattr(sa, '_signals', [])) if sa else 0
+                sa_signals_all = len(getattr(sa, '_signals', [])) if sa else 0
+                # Count only CROSS_EXCHANGE + positive ROI (what actually triggers pre-fund)
+                sa_arb_signals = 0
+                sa_best_sym = ""
+                sa_best_count = 0
+                if sa and hasattr(sa, '_signals'):
+                    from collections import defaultdict
+                    _sym_counts = defaultdict(int)
+                    for _sig in sa._signals:
+                        if hasattr(sa, '_is_profitable_signal') and sa._is_profitable_signal(_sig):
+                            _sym_counts[_sig.symbol] += 1
+                    sa_arb_signals = sum(_sym_counts.values())
+                    if _sym_counts:
+                        sa_best_sym = max(_sym_counts, key=_sym_counts.get)
+                        sa_best_count = _sym_counts[sa_best_sym]
                 sa_urgent = getattr(sa, '_urgent_rebalance_needed', False) if sa else False
                 sa_misses = getattr(sa, '_misses', []) if sa else []
                 recent_misses = sum(1 for m in sa_misses
@@ -1264,7 +1278,12 @@ class IntegratedArbitrageBot:
                         for p in parts:
                             L(p)
                 elif not sa_setup:
-                    L(f"  COIN: waiting for signals ({sa_signals}/15)")
+                    if sa_arb_signals > 0:
+                        L(f"  COIN: collecting arb signals ({sa_best_count}/15 for {sa_best_sym})")
+                        L(f"        {sa_arb_signals} arb signals / {sa_signals_all} total signals")
+                    else:
+                        L(f"  COIN: waiting for cross-exchange arb signals (0/15)")
+                        L(f"        {sa_signals_all} other signals (not arb)")
                 else:
                     L(f"  COIN: none selected")
 
@@ -1290,14 +1309,17 @@ class IntegratedArbitrageBot:
                 L(f"{'─' * W}")
                 if sa_urgent:
                     L(f"  >> ACTION: BUYING COIN NOW (urgent rebalance)")
-                elif not sa_setup and sa_signals < 15:
-                    L(f"  >> ACTION: Collecting signals ({sa_signals}/15)")
+                elif not sa_setup and sa_arb_signals < 15:
+                    if sa_arb_signals > 0:
+                        L(f"  >> ACTION: Collecting arb signals ({sa_best_count}/15 for {sa_best_sym})")
+                    else:
+                        L(f"  >> ACTION: Waiting for cross-exchange arb signals (0/15)")
                 elif recent_misses > 0:
                     L(f"  >> ACTION: {recent_misses} missed trades — waiting for rebalance")
                 elif best_spread > 0 and th_pct > 0 and best_spread >= th_pct:
                     L(f"  >> ACTION: Executing arb trades!")
                 else:
-                    L(f"  >> ACTION: Scanning... waiting for spread > threshold")
+                    L(f"  >> ACTION: Scanning... best spread {best_spread:.3f}% < threshold {th_pct:.3f}%")
 
                 # ─── STRATEGIES (only non-zero) ───
                 active_strats = {k: v for k, v in disp_stats.items()
@@ -1562,13 +1584,13 @@ class IntegratedArbitrageBot:
                         if symbol_counts:
                             best_sym = max(symbol_counts, key=symbol_counts.get)
                             best_count = symbol_counts[best_sym]
-                            logger.info(
+                            logger.debug(
                                 f"🔍 Searching for first coin... "
                                 f"Best: {best_sym} with {best_count}/15 positive-ROI signals | "
                                 f"Total symbols tracked: {len(symbol_counts)}"
                             )
                         else:
-                            logger.info("🔍 Searching for first coin... 0 positive-ROI signals so far")
+                            logger.debug("🔍 Searching for first coin... 0 positive-ROI signals so far")
                     
                 except Exception as e:
                     logger.warning(f"⚠️ Rebalance error: {e}")
@@ -1671,7 +1693,7 @@ class IntegratedArbitrageBot:
                 if all_opps and hasattr(self, 'engine') and self.engine:
                     executable = [o for o in all_opps if self._is_executable(o)]
                     if executable:
-                        logger.info(f"🎯 Strategies found {len(executable)} executable opportunities (of {len(all_opps)} signals)")
+                        logger.debug(f"🎯 Strategies found {len(executable)} executable opportunities (of {len(all_opps)} signals)")
                         trade_executed_this_cycle = False
                         for opp in executable:
                             # LIMIT: one trade per cycle to avoid balance race conditions

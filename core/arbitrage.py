@@ -1318,7 +1318,7 @@ class ArbitrageEngine:
                 # Print scanning status
                 active_symbols = len([s for s in symbols if s in snap and snap[s]])
                 total_exchanges = sum(len(snap.get(s, {})) for s in symbols) if snap else 0
-                logger.info(f"📊 STATUS: Scanning {active_symbols}/{len(symbols)} symbols across {total_exchanges} exchange connections")
+                logger.debug(f"📊 STATUS: Scanning {active_symbols}/{len(symbols)} symbols across {total_exchanges} exchange connections")
                 
                 # Show which exchanges have data
                 if snap:
@@ -1327,7 +1327,7 @@ class ArbitrageEngine:
                         if s in snap:
                             exchanges_with_data.update(snap[s].keys())
                     if exchanges_with_data:
-                        logger.info(f"📡 Active exchanges: {', '.join(sorted(exchanges_with_data))}")
+                        logger.debug(f"📡 Active exchanges: {', '.join(sorted(exchanges_with_data))}")
                     else:
                         logger.warning("⚠️ No exchange data available in price store")
                 

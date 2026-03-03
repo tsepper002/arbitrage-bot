@@ -815,16 +815,12 @@ class OrderExecutor:
         }
     
     def print_statistics(self):
-        """Print execution statistics to console."""
+        """Log execution statistics (DEBUG level to avoid disrupting static dashboard)."""
         stats = self.get_statistics()
-        mode_str = "🔵 DRY RUN" if self.dry_run else "🔴 LIVE"
-        
-        print(f"\n{'='*60}")
-        print(f"  Order Executor Statistics ({mode_str})")
-        print(f"{'='*60}")
-        print(f"  Total Orders: {stats['total_orders']}")
-        print(f"  Total Profit: ${stats['total_profit']:.4f} USDT")
-        print(f"  Average ROI: {stats['average_roi']:.3f}%")
-        if stats.get('symbols_traded'):
-            print(f"  Symbols Traded: {', '.join(stats['symbols_traded'])}")
-        print(f"{'='*60}\n")
+        mode_str = "DRY RUN" if self.dry_run else "LIVE"
+        syms = ', '.join(stats.get('symbols_traded', []))
+        logger.debug(
+            f"OrderExecutor [{mode_str}]: Orders={stats['total_orders']} "
+            f"Profit=${stats['total_profit']:.4f} ROI={stats['average_roi']:.3f}% "
+            f"Symbols={syms or 'none'}"
+        )
