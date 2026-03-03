@@ -193,6 +193,8 @@ class CapitalManager:
 
         # Overtrading bump (added to dynamic threshold when overtrading detected)
         self._overtrading_bump = 0.0
+        self._overtrading_bump_set_time = 0.0  # When bump was last set
+        self.OVERTRADING_BUMP_DECAY_SEC = 300.0  # Bump decays after 5 minutes
 
         # Volatility regime
         self._current_volatility_pct = 0.0
@@ -240,17 +242,24 @@ class CapitalManager:
                   + spread_threshold_above_fees  (level-specific cushion)
                   + latency_risk
                   + volatility_buffer
-                  + overtrading_bump
+                  + overtrading_bump (decays over time)
         """
         lvl = self._current_level
         latency_risk = avg_latency_ms * self.LATENCY_RISK_FACTOR
         volatility_buffer = self._current_volatility_pct * 0.20 if self._current_volatility_pct > 0 else 0.0
+        # Time-based decay: overtrading bump fades after OVERTRADING_BUMP_DECAY_SEC
+        effective_bump = self._overtrading_bump
+        if effective_bump > 0 and self._overtrading_bump_set_time > 0:
+            elapsed = time.time() - self._overtrading_bump_set_time
+            if elapsed > self.OVERTRADING_BUMP_DECAY_SEC:
+                effective_bump = 0.0
+                self._overtrading_bump = 0.0
         threshold = (
             total_fee_pct
             + lvl.spread_threshold_above_fees
             + latency_risk
             + volatility_buffer
-            + self._overtrading_bump
+            + effective_bump
         )
         return threshold
 
@@ -355,6 +364,7 @@ class CapitalManager:
             avg = sum(self._recent_profits) / len(self._recent_profits)
             if avg < self.OVERTRADING_MIN_AVG_PROFIT:
                 self._overtrading_bump = self.OVERTRADING_THRESHOLD_BUMP
+                self._overtrading_bump_set_time = time.time()
             else:
                 self._overtrading_bump = 0.0
 

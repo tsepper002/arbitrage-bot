@@ -1249,11 +1249,12 @@ class IntegratedArbitrageBot:
                     print(f" 🚀 HFT: {self.semi_hft_engine.get_summary()}")
                 
                 # Dynamic threshold breakdown
+                # Units: _best_spread_fees_pct is in percent (e.g. 0.10 = 0.10%)
+                # dynamic_threshold() accepts/returns percent (e.g. 0.16 = 0.16%)
                 if self.capital_manager and self.engine:
                     best_fees_pct = getattr(self.engine, '_best_spread_fees_pct', 0)
                     if best_fees_pct > 0:
-                        th = self.capital_manager.dynamic_threshold(best_fees_pct / 100.0)
-                        th_pct = th * 100
+                        th_pct = self.capital_manager.dynamic_threshold(best_fees_pct)
                         best_sp = getattr(self.engine, '_best_spread_pct', 0)
                         if best_sp > 0:
                             gap = th_pct - best_sp
