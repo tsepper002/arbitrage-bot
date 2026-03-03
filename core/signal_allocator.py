@@ -93,6 +93,7 @@ class SignalAllocator:
     # Minimum order size for pre-positioning
     MIN_PREPOSITION_USDT = 1.0  # $1 minimum
     MIN_EXCHANGES_FOR_ARB = 2  # Need at least 2 exchanges to do cross-exchange arb
+    MIN_SELL_VALUE_USD = 0.50  # Skip selling positions below this value (dust)
 
     # CRITICAL: Long cooldowns prevent fee-churning
     REBALANCE_THRESHOLD_PCT = 0.30  # Buy if holding < 30% of target
@@ -1064,7 +1065,7 @@ class SignalAllocator:
                     if client and hasattr(client, 'get_orderbook'):
                         try:
                             ob = await client.get_orderbook(symbol)
-                            if ob and ob.get('bids'):
+                            if ob and ob.get('bids') and len(ob['bids']) > 0 and len(ob['bids'][0]) > 0:
                                 price = float(ob['bids'][0][0])
                         except Exception:
                             pass
@@ -1073,8 +1074,7 @@ class SignalAllocator:
                     continue
                 
                 usdt_value = amount * price
-                # Lower dust threshold — $0.50 minimum (was $1.00, which skipped small coins!)
-                if usdt_value < 0.50:
+                if usdt_value < self.MIN_SELL_VALUE_USD:
                     logger.debug(f"  ⏭️ {exchange}: Skip {asset} — only ${usdt_value:.2f} (dust)")
                     continue
                 

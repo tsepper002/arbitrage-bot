@@ -1245,7 +1245,7 @@ class IntegratedArbitrageBot:
                         if best_sp > 0:
                             gap = th_pct - best_sp
                             if gap > 0:
-                                print(f" 🎯 Threshold: {th_pct:.3f}% (need +{gap:.3f}% more spread to trade)")
+                                print(f" 🎯 Threshold: {th_pct:.3f}% (need {gap:.3f}% more spread to trade)")
                             else:
                                 print(f" 🎯 Threshold: {th_pct:.3f}% ← spread ABOVE threshold! Trades possible!")
                 
