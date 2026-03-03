@@ -358,8 +358,7 @@ class StrategyDispatcher:
                                 smart_order_signals_this_scan += 1
                                 break  # one per symbol
                 if smart_order_signals_this_scan > 0:
-                    self.strategy_stats['SMART_ORDER']['signals'] += 1  # 1 per scan, not per symbol
-                    self.strategy_stats['SMART_ORDER']['opportunities'] += 1
+                    self.strategy_stats['SMART_ORDER']['signals'] += smart_order_signals_this_scan
 
             # --- VOLATILITY: detect high short-term volatility ---
             # Only signal when volatility exceeds round-trip fees (otherwise noise)

@@ -46,7 +46,7 @@ class OrderExecutor:
         self.last_trade_time_per_symbol: Dict[str, float] = {}  # symbol -> last trade timestamp
         self._trade_lock = asyncio.Lock()  # Prevent concurrent trade execution
         self._blocked_cooldown: Dict[str, float] = {}  # symbol → last blocked time
-        self.BLOCKED_COOLDOWN_SEC = 10.0  # Don't retry blocked trades for 10s
+        self.BLOCKED_COOLDOWN_SEC = 3.0  # Short cooldown — pre-fund reacts in ~10s
         self._open_orders: List[Dict] = []  # Track open limit orders for shutdown cancellation
         
         if self.dry_run:

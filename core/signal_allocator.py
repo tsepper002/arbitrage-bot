@@ -934,8 +934,10 @@ class SignalAllocator:
                     quantity=qty, price=price,
                 )
                 self._rebalance_history[(exchange, symbol)] = time.time()
+                qty_after_fee = qty * (1.0 - fee_rate)
                 self.balance_manager.update_balance_optimistic(exchange, 'USDT', -usdt_amount)
-                self.balance_manager.update_balance_optimistic(exchange, base_coin, qty)
+                self.balance_manager.update_balance_optimistic(exchange, base_coin, qty_after_fee)
+                self._total_rebalance_fees += usdt_amount * fee_rate
                 order['status'] = 'executed'
                 order['result'] = result
                 logger.info(f"  🏦 {exchange}: Bought {qty:.6g} {base_coin} (${usdt_amount:.2f}) — {reason}")
@@ -989,7 +991,9 @@ class SignalAllocator:
                 )
                 self._rebalance_history[(exchange, symbol)] = time.time()
                 self.balance_manager.update_balance_optimistic(exchange, base_coin, -qty)
-                self.balance_manager.update_balance_optimistic(exchange, 'USDT', usdt_amount)
+                usdt_after_fee = usdt_amount * (1.0 - fee_rate)
+                self.balance_manager.update_balance_optimistic(exchange, 'USDT', usdt_after_fee)
+                self._total_rebalance_fees += usdt_amount * fee_rate
                 order['status'] = 'executed'
                 order['result'] = result
                 logger.info(f"  🔄 {exchange}: Sold {qty:.6g} {base_coin} (${usdt_amount:.2f}) — {reason}")

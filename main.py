@@ -1230,6 +1230,19 @@ class IntegratedArbitrageBot:
                     elif not setup:
                         sig_count = len(getattr(sa, '_signals', []))
                         print(f" 📦 Coin: waiting for signals ({sig_count} collected, need 15)")
+                    
+                    # Action status — what is the bot doing RIGHT NOW?
+                    urgent = getattr(sa, '_urgent_rebalance_needed', False)
+                    misses = getattr(sa, '_misses', [])
+                    recent_misses = sum(1 for m in misses if time.time() - m.get('timestamp', 0) < 60) if misses else 0
+                    if urgent:
+                        print(f" ⚡ ACTION: URGENT rebalance triggered — buying coin NOW")
+                    elif not setup and sig_count < 15:
+                        print(f" 🔄 ACTION: Collecting signals ({sig_count}/15) before first pre-fund")
+                    elif coin and recent_misses > 0:
+                        print(f" ⚠️  ACTION: {recent_misses} missed trades (no coin on exchange) — rebalance pending")
+                    elif coin and setup:
+                        print(f" ✅ ACTION: Scanning for arb spreads > threshold")
                 
                 # Semi-HFT Engine status
                 if hasattr(self, 'semi_hft_engine') and self.semi_hft_engine:

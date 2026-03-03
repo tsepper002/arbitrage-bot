@@ -937,13 +937,8 @@ class ArbitrageEngine:
                     "bids_levels": bids[:10],
                 }
 
-                # Record EVERY positive-ROI finding to signal allocator BEFORE dedup
-                # This is the PRIMARY source for coin selection — count ALL, not just deduped
-                if roi_pct > 0 and self.signal_allocator:
-                    self.signal_allocator.record_signal(
-                        symbol=symbol, strategy='CROSS_EXCHANGE',
-                        exchange=buy_ex, roi_pct=roi_pct
-                    )
+                # Signal already recorded at line 644 (before threshold gate)
+                # for coin selection. Don't record again here to avoid double-counting.
 
                 if net > 0 and roi_pct >= (regime_min_roi - imbalance_adj):
                     # dedupe and persist
