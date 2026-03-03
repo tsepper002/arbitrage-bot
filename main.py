@@ -2208,8 +2208,6 @@ async def main():
     
     for attempt in range(MAX_RESTARTS + 1):
         bot = IntegratedArbitrageBot()
-        shutdown_requested = False
-        
         try:
             # Initialize all components
             success = await bot.initialize()
@@ -2225,7 +2223,6 @@ async def main():
             # Ctrl+C on Windows raises CancelledError (via asyncio.run),
             # on Unix raises KeyboardInterrupt. Catch BOTH to ensure shutdown.
             logger.info("\n⚠️  Shutdown signal received (Ctrl+C)")
-            shutdown_requested = True
             await bot.shutdown()
             return 0
         except Exception as e:
