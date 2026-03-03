@@ -170,6 +170,7 @@ class CapitalManager:
     OVERTRADING_WINDOW = 10           # Last N trades to check
     OVERTRADING_MIN_AVG_PROFIT = 0.20 # 0.20%
     OVERTRADING_THRESHOLD_BUMP = 0.05 # +0.05% when overtrading detected
+    OVERTRADING_BUMP_DECAY_SEC = 300.0  # Bump decays after 5 minutes
 
     # Volatility regime
     HIGH_VOLATILITY_THRESHOLD = 3.0   # % — reduce size (crypto often moves >1.5%/day normally)
@@ -194,7 +195,6 @@ class CapitalManager:
         # Overtrading bump (added to dynamic threshold when overtrading detected)
         self._overtrading_bump = 0.0
         self._overtrading_bump_set_time = 0.0  # When bump was last set
-        self.OVERTRADING_BUMP_DECAY_SEC = 300.0  # Bump decays after 5 minutes
 
         # Volatility regime
         self._current_volatility_pct = 0.0
@@ -254,6 +254,7 @@ class CapitalManager:
             if elapsed > self.OVERTRADING_BUMP_DECAY_SEC:
                 effective_bump = 0.0
                 self._overtrading_bump = 0.0
+                self._overtrading_bump_set_time = 0.0
         threshold = (
             total_fee_pct
             + lvl.spread_threshold_above_fees
@@ -367,6 +368,7 @@ class CapitalManager:
                 self._overtrading_bump_set_time = time.time()
             else:
                 self._overtrading_bump = 0.0
+                self._overtrading_bump_set_time = 0.0
 
         # --- periodic exchange ranking ---
         total = sum(eh.total_trades for eh in self._exchange_health.values())
