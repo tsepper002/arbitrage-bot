@@ -135,10 +135,15 @@ class KuCoinRESTClient(BaseRESTClient):
                     raise ValueError(f"Market buy funds ${funds} below KuCoin minimum $0.10")
                 order_data["funds"] = f"{funds:.4f}"
             else:
-                order_data["size"] = str(quantity)
+                # Market sell: truncate to 8 decimal places as safety net
+                # (proper rounding by exchange step_size happens in order_executor)
+                truncated = math.floor(quantity * 1e8) / 1e8
+                order_data["size"] = f"{truncated:.8f}".rstrip('0').rstrip('.')
         else:
             order_data["price"] = str(price)
-            order_data["size"] = str(quantity)
+            # Limit order: truncate size to 8 decimal places as safety net
+            truncated = math.floor(quantity * 1e8) / 1e8
+            order_data["size"] = f"{truncated:.8f}".rstrip('0').rstrip('.')
             order_data["timeInForce"] = time_in_force
         
         body = json.dumps(order_data)

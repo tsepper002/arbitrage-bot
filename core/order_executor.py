@@ -523,9 +523,11 @@ class OrderExecutor:
                 buy_result_final = buy_result
                 sell_result_final = sell_result
             else:
-                # Standard parallel market orders
-                buy_task = buy_client.place_order(symbol, 'buy', 'market', qty, buy_price)
-                sell_task = sell_client.place_order(symbol, 'sell', 'market', qty, sell_price)
+                # Standard parallel market orders — round qty for BOTH exchanges
+                buy_qty_rounded = round_qty(buy_ex, symbol, qty)
+                sell_qty_rounded = round_qty(sell_ex, symbol, qty)
+                buy_task = buy_client.place_order(symbol, 'buy', 'market', buy_qty_rounded, buy_price)
+                sell_task = sell_client.place_order(symbol, 'sell', 'market', sell_qty_rounded, sell_price)
                 results = await asyncio.gather(buy_task, sell_task, return_exceptions=True)
                 buy_result_final, sell_result_final = results
             
@@ -784,6 +786,8 @@ class OrderExecutor:
         Emergency close position when one leg of arbitrage fails.
         Top arb bot pattern: retry with exponential backoff (Hummingbot, CCXT).
         """
+        # Round qty to exchange step_size — prevents "Order size increment invalid"
+        qty = round_qty(exchange, symbol, qty)
         for attempt in range(1, self.EMERGENCY_CLOSE_MAX_RETRIES + 1):
             try:
                 logger.warning(f"🚨 EMERGENCY CLOSE (attempt {attempt}/{self.EMERGENCY_CLOSE_MAX_RETRIES}): {side} {qty} {symbol} on {exchange}")
