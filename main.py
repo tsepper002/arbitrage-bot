@@ -1909,8 +1909,8 @@ class IntegratedArbitrageBot:
             return None  # Signal-only strategy, no trade execution
 
         # SLIPPAGE BUFFER: Reduce expected profit by estimated market impact
-        # This accounts for the gap between simulation and actual execution
-        SLIPPAGE_PER_LEG_PCT = 0.05  # 0.05% slippage per leg, applied to both legs
+        # Aligned with main engine: 0.01% per leg (small $5 orders have minimal impact)
+        SLIPPAGE_PER_LEG_PCT = 0.01  # 0.01% slippage per leg
         roi_pct = opp.get('roi_pct', opp.get('data', {}).get('roi_pct', 0)) or 0
         if roi_pct > 0:
             adjusted_roi = roi_pct - SLIPPAGE_PER_LEG_PCT * 2  # Both legs
@@ -1992,10 +1992,11 @@ class IntegratedArbitrageBot:
             return None
         
         # Calculate profit with real prices and fees
-        # §4 MAKER-FIRST: Buy side uses maker fee (limit order), sell side uses taker fee
-        # MEXC maker=0% → buying on MEXC with limit order is FREE
+        # MEXC always has 0% maker fee even for market orders — use it unconditionally
         from core.exchange_config import EXCHANGE_PARAMS
-        if settings.MAKER_FIRST_ENABLED:
+        if best_buy_ex == 'MEXC':
+            buy_fee = 0.0  # MEXC 0% maker fee — always cheaper to buy here
+        elif settings.MAKER_FIRST_ENABLED:
             buy_fee = EXCHANGE_PARAMS.get(best_buy_ex, {}).get('maker', 0.001)
         else:
             buy_fee = EXCHANGE_PARAMS.get(best_buy_ex, {}).get('taker', 0.001)

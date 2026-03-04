@@ -124,12 +124,19 @@ def get_pair_rules(exchange: str, symbol: str) -> Dict[str, Any]:
 
 
 def round_qty(exchange: str, symbol: str, qty: float) -> float:
-    """Round quantity to exchange step_size."""
+    """Round quantity DOWN to exchange step_size.
+
+    Uses round() to clean up floating-point artifacts.
+    E.g. math.floor(5.89/0.01)*0.01 = 5.890000000000001 → round → 5.89
+    """
     rules = get_pair_rules(exchange, symbol)
     step = rules["step_size"]
     if step <= 0:
         return qty
-    return math.floor(qty / step) * step
+    # Calculate decimal places from step size for clean rounding
+    decimals = max(0, -math.floor(math.log10(step))) if step < 1 else 0
+    result = math.floor(qty / step) * step
+    return round(result, decimals)
 
 
 def round_price(exchange: str, symbol: str, price: float) -> float:

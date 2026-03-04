@@ -331,32 +331,58 @@ class StrategyDispatcher:
                                 self.record_signal('TRIANGULAR', pair_b)
                                 logger.info(f"   🔺 TRI: {direction} net_roi={best_roi:.3f}%")
 
-            # --- SMART_ORDER: detect when spread is wide enough for limit orders ---
-            # These are market condition SIGNALS (wide spread on single exchange).
-            # Count as signals, not opportunities — actual opportunities are only
-            # counted when _build_trade_from_signal() finds a profitable cross-exchange pair.
+            # --- SMART_ORDER: detect cross-exchange price discrepancies ---
+            # Top arb bot pattern: scan ALL pairs of exchanges for spreads > fees.
+            # This is a secondary cross-exchange scanner (complements ArbitrageEngine)
+            # that also records signals for the SignalAllocator coin-selection system.
             if 'SMART_ORDER' in self._enabled_strategies:
                 from core.exchange_config import EXCHANGE_PARAMS as EP
                 smart_order_signals_this_scan = 0
                 for symbol, exmap in snap.items():
+                    if len(exmap) < 2:
+                        continue
+                    # Find lowest ask and highest bid across exchanges
+                    best_ask_ex, best_ask = None, float('inf')
+                    best_bid_ex, best_bid = None, 0.0
                     for ex, rec in exmap.items():
                         bid, ask = rec.get("bid"), rec.get("ask")
-                        if bid and ask and ask > 0:
-                            spread_pct = (ask - bid) / ask * 100
-                            # Use exchange-specific taker fee
-                            fee_pct = EP.get(ex, {}).get("taker", 0.001) * 100
-                            # Spread wide enough to profit from limit orders
-                            if spread_pct > fee_pct * 2:
-                                opportunities.append({
-                                    'strategy': 'SMART_ORDER',
-                                    'type': 'limit_opportunity',
-                                    'symbol': symbol,
-                                    'exchange': ex,
-                                    'data': {'spread_pct': spread_pct, 'ratio': spread_pct / fee_pct if fee_pct > 0 else 1.0}
-                                })
-                                self.record_signal('SMART_ORDER', symbol)
-                                smart_order_signals_this_scan += 1
-                                break  # one per symbol
+                        if ask and ask > 0 and ask < best_ask:
+                            best_ask = ask
+                            best_ask_ex = ex
+                        if bid and bid > 0 and bid > best_bid:
+                            best_bid = bid
+                            best_bid_ex = ex
+                    if not best_ask_ex or not best_bid_ex or best_ask_ex == best_bid_ex:
+                        continue
+                    if best_ask <= 0:
+                        continue
+                    cross_spread_pct = (best_bid - best_ask) / best_ask * 100
+                    if cross_spread_pct <= 0:
+                        continue
+                    # MEXC 0% maker if buying there; otherwise taker fees
+                    buy_fee = 0.0 if best_ask_ex == 'MEXC' else EP.get(best_ask_ex, {}).get('taker', 0.001) * 100
+                    sell_fee = EP.get(best_bid_ex, {}).get('taker', 0.001) * 100
+                    total_fees = buy_fee + sell_fee
+                    # Signal if spread covers at least 30% of fees (for coin selection)
+                    if cross_spread_pct > total_fees * 0.3:
+                        roi_pct = cross_spread_pct - total_fees
+                        opportunities.append({
+                            'strategy': 'SMART_ORDER',
+                            'type': 'cross_exchange_spread',
+                            'symbol': symbol,
+                            'exchange': best_ask_ex,
+                            'data': {
+                                'spread_pct': cross_spread_pct,
+                                'roi_pct': roi_pct,
+                                'buy_ex': best_ask_ex,
+                                'sell_ex': best_bid_ex,
+                            }
+                        })
+                        self.record_signal('SMART_ORDER', symbol)
+                        smart_order_signals_this_scan += 1
+                        # Record as opportunity when spread > fees (actually profitable)
+                        if cross_spread_pct > total_fees:
+                            self.strategy_stats['SMART_ORDER']['opportunities'] += 1
                 if smart_order_signals_this_scan > 0:
                     self.strategy_stats['SMART_ORDER']['signals'] += smart_order_signals_this_scan
 

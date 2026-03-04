@@ -7,6 +7,7 @@ import time
 import hmac
 import hashlib
 import json
+import math
 import socket
 from typing import Dict, Any, Optional, List
 import aiohttp
@@ -91,6 +92,20 @@ class BybitRESTClient(BaseRESTClient):
         """Convert BTC-USDT to BTCUSDT."""
         return symbol.replace("-", "")
     
+    BYBIT_QTY_MAX_DECIMALS = 8
+
+    @staticmethod
+    def _truncate_qty(quantity: float) -> str:
+        """Truncate quantity to max decimal places and format as clean string.
+
+        Prevents 'Order quantity has too many decimals' (retCode 170137).
+        Python float arithmetic can produce 5.890000000000001 from
+        math.floor(5.89/0.01)*0.01 — this cleans it.
+        """
+        factor = 10 ** BybitRESTClient.BYBIT_QTY_MAX_DECIMALS
+        truncated = math.floor(quantity * factor) / factor
+        return f"{truncated:.{BybitRESTClient.BYBIT_QTY_MAX_DECIMALS}f}".rstrip('0').rstrip('.')
+
     async def place_order(
         self,
         symbol: str,
@@ -108,7 +123,7 @@ class BybitRESTClient(BaseRESTClient):
             "symbol": self.normalize_symbol(symbol),
             "side": side.capitalize(),
             "orderType": "Market" if order_type == "market" else "Limit",
-            "qty": str(quantity),
+            "qty": self._truncate_qty(quantity),
         }
         
         if order_type == "market" and side.lower() == "buy" and price:
@@ -120,7 +135,7 @@ class BybitRESTClient(BaseRESTClient):
             body["marketUnit"] = "quoteCoin"
         
         if order_type == "limit" and price:
-            body["price"] = str(price)
+            body["price"] = str(round(price, 8))
             body["timeInForce"] = time_in_force
         
         body_str = json.dumps(body)
