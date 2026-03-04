@@ -333,15 +333,19 @@ class SignalAllocator:
         return 0.0
 
     def _score_symbol_recent(self, symbol: str, last_n: int = 30) -> float:
-        """Score a symbol by frequency × avg_roi from the last N signals.
+        """Score a symbol by frequency × avg_roi from the last N CROSS_EXCHANGE signals.
         
-        This gives better initial coin selection: picks the coin with
-        both frequent signals AND high average ROI, not just most signals.
+        Only counts CROSS_EXCHANGE signals (actual arb opportunities).
+        SMART_ORDER signals are excluded to avoid coin selection based on
+        single-exchange observations that don't represent arb potential.
         
         Returns: score = signal_count × avg_roi_pct (higher = better)
         """
-        # Get last N signals for this symbol
-        symbol_signals = [s for s in reversed(self._signals) if s.symbol == symbol][:last_n]
+        # Get last N CROSS_EXCHANGE signals for this symbol
+        symbol_signals = [
+            s for s in reversed(self._signals) 
+            if s.symbol == symbol and s.strategy == 'CROSS_EXCHANGE'
+        ][:last_n]
         if not symbol_signals:
             return 0.0
         
@@ -660,6 +664,13 @@ class SignalAllocator:
                         sold_old += 1
             if sold_old > 0:
                 logger.info(f"  🧹 Sold {sold_old} old positions to free USDT for {base_coin}")
+                # CRITICAL: Refresh balances after selling old coins!
+                # Without this, Step 2 sees stale balance (pre-sell USDT amount)
+                # and skips buys because "available USDT < minimum".
+                try:
+                    await self.balance_manager.sync_balances()
+                except Exception as e:
+                    logger.debug(f"Balance refresh after sell failed: {e}")
             
             # ── Step 2: Buy target coin on all exchanges ──
             already_positioned = 0
@@ -852,6 +863,11 @@ class SignalAllocator:
                             f"({trigger_reason}, {len(alternatives)} alternatives, "
                             f"best score {new_score:.2f})"
                         )
+                        # Log top-3 alternatives so user can see WHY this coin was chosen
+                        for i, (alt_sym, alt_score) in enumerate(alternatives[:3]):
+                            alt_base = alt_sym.split('-')[0] if '-' in alt_sym else alt_sym.replace('USDT', '')
+                            alt_sigs = sum(1 for s in self._signals if s.symbol == alt_sym and s.strategy == 'CROSS_EXCHANGE')
+                            logger.info(f"  #{i+1} {alt_base}: score={alt_score:.2f}, arb_signals={alt_sigs}")
                         
                         # Sell old coin on all exchanges
                         for exchange in exchanges:
@@ -877,6 +893,13 @@ class SignalAllocator:
                             )
                             if order:
                                 executed.append(order)
+                        
+                        # Refresh balances after selling old coin
+                        # Without this, buy step sees stale USDT amounts
+                        try:
+                            await self.balance_manager.sync_balances()
+                        except Exception as e:
+                            logger.debug(f"Balance refresh after switch sell failed: {e}")
                         
                         # Buy new coin on all exchanges
                         for exchange in exchanges:

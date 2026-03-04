@@ -339,7 +339,7 @@ class OrderExecutor:
                 trade_value = qty * buy_price
                 if trade_value < self.MIN_ORDER_USDT:
                     return {'status': 'blocked', 'reason': f'Exposure cap: would exceed {settings.MAX_EXPOSURE_PER_EXCHANGE_PCT}% on {buy_ex}'}
-                logger.info(f"📏 Exchange cap: {old_qty:.6f} → {qty:.6f} ({settings.MAX_EXPOSURE_PER_EXCHANGE_PCT}% limit)")
+                logger.debug(f"📏 Exchange cap: {old_qty:.6f} → {qty:.6f} ({settings.MAX_EXPOSURE_PER_EXCHANGE_PCT}% limit)")
             
             # Per-coin cap: total exposure to this coin across ALL exchanges
             # Handle symbol formats: "BTC-USDT", "BTC/USDT", "BTCUSDT"

@@ -41,9 +41,14 @@ class BalanceManager:
         self.excluded_exchanges: Set[str] = set()
         self.locked_funds: Dict[str, Dict[str, float]] = {}  # {exchange: {currency: locked_amount}}
         self._asset_prices: Dict[str, float] = {}  # cache: {asset: usd_price} for equity estimation
+        self._price_store_ref = None  # Set via set_price_store() for equity checks during sync
         self.initialized = False
         
         logger.info("✅ BalanceManager initialized")
+    
+    def set_price_store(self, price_store):
+        """Set price store reference for equity estimation during balance sync."""
+        self._price_store_ref = price_store
     
     async def initialize(self):
         """
@@ -134,9 +139,14 @@ class BalanceManager:
             # would exclude all exchanges!
             usdt_balance = balance.get('USDT', 0)
             total_equity = usdt_balance
-            for asset, amount in balance.items():
-                if asset != 'USDT' and amount > 0:
-                    total_equity += amount * self._estimate_asset_value(asset)
+            # First try price_store for accurate prices
+            if self._price_store_ref:
+                total_equity = self._exchange_balance_usdt(exchange_name, balance, self._price_store_ref)
+            else:
+                # Fallback to cached prices
+                for asset, amount in balance.items():
+                    if asset != 'USDT' and amount > 0:
+                        total_equity += amount * self._estimate_asset_value(asset)
             
             if total_equity < settings.MIN_BALANCE_PER_EXCHANGE:
                 if exchange_name not in self.excluded_exchanges:
@@ -362,13 +372,13 @@ class BalanceManager:
                 # Try to get price from PriceStore: e.g. BTC → BTC-USDT
                 symbol = f"{coin}-USDT"
                 price = self._get_price_from_store(price_store, symbol, exchange)
-                if price > 0:
-                    total += amount * price
-                else:
+                if price <= 0:
                     # Try without exchange-specific price (any exchange)
                     price = self._get_any_price(price_store, symbol)
-                    if price > 0:
-                        total += amount * price
+                if price > 0:
+                    total += amount * price
+                    # Cache for _estimate_asset_value (used in balance exclusion check)
+                    self._asset_prices[coin] = price
         return total
     
     def _get_price_from_store(self, price_store, symbol: str, exchange: str) -> float:

@@ -791,6 +791,9 @@ class IntegratedArbitrageBot:
         try:
             self.loop = asyncio.get_running_loop()
             self.store = PriceStore()
+            # Give balance_manager access to price_store for equity calculation
+            if self.balance_manager:
+                self.balance_manager.set_price_store(self.store)
             
             symbols: List[str] = settings.TRADING_SYMBOLS
             logger.info(f"📈 Tracking {len(symbols)} symbols: {', '.join(symbols[:5])}{'...' if len(symbols) > 5 else ''}")
@@ -1605,7 +1608,7 @@ class IntegratedArbitrageBot:
                             best_count = symbol_counts[best_sym]
                             logger.debug(
                                 f"🔍 Searching for first coin... "
-                                f"Best: {best_sym} with {best_count}/15 positive-ROI signals | "
+                                f"Best: {best_sym} with {best_count}/{self.signal_allocator.MIN_SIGNALS_FOR_ALLOCATION} positive-ROI signals | "
                                 f"Total symbols tracked: {len(symbol_counts)}"
                             )
                         else:
