@@ -682,23 +682,10 @@ class ArbitrageEngine:
                     logger.warning(f"Skipping anomalous spread {gross_spread_pct:.2f}% for {symbol} {buy_ex}->{sell_ex} (threshold: {settings.ANOMALOUS_SPREAD_PCT}%)")
                     continue
 
-                # SPREAD PERSISTENCE: Only trade spreads that have persisted long enough
-                # Engine 2.0: Uses level-specific persistence from CapitalManager
-                # EXCEPTION: Skip persistence for strong spreads (>3× cushion above threshold)
-                # — these are almost certainly real and will disappear if we wait.
-                min_hold_ms = cm.level.spread_persistence_ms if cm and cm.level else self.MIN_SPREAD_HOLD_MS
-                spread_excess = gross_spread_pct - dynamic_min_spread
-                strong_cushion = (cm.level.spread_threshold_above_fees * self.STRONG_SPREAD_MULTIPLIER) if cm and cm.level else self.DEFAULT_STRONG_CUSHION_PCT
-                is_strong_spread = spread_excess > strong_cushion
-                
-                if not is_strong_spread:
-                    spread_key = f"{symbol}:{buy_ex}->{sell_ex}"
-                    now_ms = time.time() * 1000
-                    if spread_key not in self._spread_first_seen:
-                        self._spread_first_seen[spread_key] = now_ms
-                        continue  # First time seeing this spread — wait for confirmation
-                    elif now_ms - self._spread_first_seen[spread_key] < min_hold_ms:
-                        continue  # Spread hasn't persisted long enough
+                # TOP BOT PATTERN: Execute IMMEDIATELY if spread > threshold.
+                # CCXT/Hummingbot/Barbotine: NO persistence wait.
+                # Spread persistence was adding 100-150ms delay → spreads close before execution.
+                # The threshold check above is sufficient protection against noise.
 
                 # LATENCY CHECK: Skip if combined exchange latency exceeds spread lifetime
                 buy_latency = self._exchange_latency_ms.get(buy_ex, self.DEFAULT_EXCHANGE_LATENCY_MS)
@@ -848,16 +835,16 @@ class ArbitrageEngine:
                     self.metrics_collector.record('roi_pct', roi_pct)
                     self.metrics_collector.record('net_profit_usdt', net)
 
-                # --- PRE-TRADE ML/EXECUTION CHECKS ---
+                # --- ML DATA COLLECTION (advisory only, NEVER blocks trades) ---
+                # TOP BOT PATTERN: CCXT/Hummingbot have ZERO ML gates.
+                # ML modules collect data for analysis but cannot prevent execution.
 
-                # M1: Order Flow Tracker — reduce confidence if smart money disagrees
-                ml_skip = False
+                # M1: Order Flow Tracker — log for analysis
                 if getattr(self, 'order_flow_tracker', None):
                     try:
                         smart_signal = self.order_flow_tracker.get_smart_money_signal(buy_ex, symbol)
                         if smart_signal == 'sell':
-                            roi_pct *= 0.7  # Reduce confidence when smart money sells
-                            logger.debug(f"Order flow: smart money SELL signal for {symbol}, reduced ROI to {roi_pct:.3f}%")
+                            logger.debug(f"Order flow: smart money SELL signal for {symbol} (advisory)")
                     except Exception as e:
                         logger.debug(f"Order flow tracker error: {e}")
 
@@ -867,77 +854,36 @@ class ArbitrageEngine:
                         orderbook_data = {'bids': bids[:10], 'asks': asks[:10]}
                         icebergs = self.iceberg_detector.detect(symbol, orderbook_data)
                         if icebergs:
-                            logger.info(f"🧊 Iceberg orders detected for {symbol}: {len(icebergs)} hidden orders")
+                            logger.debug(f"🧊 Iceberg orders detected for {symbol}: {len(icebergs)}")
                     except Exception as e:
                         logger.debug(f"Iceberg detector error: {e}")
 
-                # M3: Slippage Predictor — subtract predicted slippage from ROI
-                predicted_slippage = 0.0
+                # M3: Slippage Predictor — log prediction (don't adjust ROI)
                 if getattr(self, 'slippage_predictor', None):
                     try:
                         predicted_slippage = self.slippage_predictor.predict(
                             symbol, buy_ex, order_size_usdt=invested
                         )
-                        roi_pct -= predicted_slippage * 100.0
-                        logger.debug(f"Slippage prediction for {symbol}: {predicted_slippage*100:.4f}%, adjusted ROI: {roi_pct:.3f}%")
+                        logger.debug(f"Slippage prediction for {symbol}: {predicted_slippage*100:.4f}%")
                     except Exception as e:
                         logger.debug(f"Slippage predictor error: {e}")
 
-                # M4: Neural Network — skip if prediction confidence is very low
-                nn_prob = None
+                # M4-M8: NN, RL, Pattern, Adaptive — collect data only
                 if getattr(self, 'nn_predictor', None):
                     try:
                         features = [roi_pct, gross_spread_pct, filled, invested, imbalance_adj]
                         nn_prob = self.nn_predictor.predict(features, symbol)
-                        if nn_prob < 0.3:
-                            ml_skip = True
-                            logger.debug(f"NN predictor: low probability {nn_prob:.2f} for {symbol}, skipping")
-                    except Exception as e:
-                        logger.debug(f"Neural network predictor error: {e}")
+                        logger.debug(f"NN prediction for {symbol}: {nn_prob:.2f}")
+                    except Exception:
+                        pass
 
-                # M5: RL Agent — skip if action is SKIP
-                rl_action = None
-                if getattr(self, 'rl_agent', None) and not ml_skip:
+                if getattr(self, 'rl_agent', None):
                     try:
-                        state_features = {
-                            'spread': gross_spread_pct,
-                            'volatility': 0.0,
-                            'trend': imbalance_adj,
-                        }
+                        state_features = {'spread': gross_spread_pct, 'volatility': 0.0, 'trend': imbalance_adj}
                         rl_action = self.rl_agent.get_action(state_features)
-                        if rl_action == 'SKIP':
-                            ml_skip = True
-                            logger.debug(f"RL agent: SKIP action for {symbol}")
-                    except Exception as e:
-                        logger.debug(f"RL agent error: {e}")
-
-                # M6: Volatility Forecaster + price history — moved to per-symbol level (before pair loop)
-
-                # M7: Pattern Recognition — check for technical signals
-                if getattr(self, 'pattern_recognition', None):
-                    try:
-                        price_hist = getattr(self, '_symbol_prices', {}).get(symbol, [])
-                        if len(price_hist) >= 20:
-                            signals = self.pattern_recognition.get_trading_signals(price_hist)
-                            if signals.get('action') == 'SELL':
-                                logger.debug(f"Pattern recognition: SELL signal for {symbol}, cautious")
-                    except (AttributeError, ValueError, TypeError) as e:
-                        logger.debug(f"Pattern recognition error: {e}")
-
-                # M8: Market Adaptive Strategy — adjust based on market regime
-                if getattr(self, 'market_adaptive_strategy', None):
-                    try:
-                        price_hist = getattr(self, '_symbol_prices', {}).get(symbol, [])
-                        if len(price_hist) >= 20:
-                            regime = self.market_adaptive_strategy.detect_market_regime(price_hist)
-                            params = self.market_adaptive_strategy.adapt_parameters(regime)
-                            if params.get('confidence', 1.0) < 0.3:
-                                logger.debug(f"Market adaptive: low confidence regime={regime}")
-                    except (AttributeError, ValueError, TypeError) as e:
-                        logger.debug(f"Market adaptive error: {e}")
-
-                if ml_skip:
-                    continue
+                        logger.debug(f"RL agent action for {symbol}: {rl_action}")
+                    except Exception:
+                        pass
 
                 info = {
                     "symbol": symbol,

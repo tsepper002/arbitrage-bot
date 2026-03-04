@@ -107,12 +107,13 @@ MAX_EXPOSURE_USDT = _get_env_float("ARB_MAX_EXPOSURE_USDT", _default_exposure)
 SAFETY_FACTOR = _get_env_float("ARB_SAFETY_FACTOR", 0.5)
 
 # Maximum number of trades per minute (rate limiting)
-# AGGRESSIVE: Increased to 8 for higher throughput (+60%)
-MAX_TRADES_PER_MINUTE = _get_env_int("ARB_MAX_TRADES_PER_MINUTE", 8)
+# TOP BOT PATTERN: Allow high-frequency trading — top bots execute every opportunity
+MAX_TRADES_PER_MINUTE = _get_env_int("ARB_MAX_TRADES_PER_MINUTE", 30)
 
 # Cooldown period in seconds before same symbol can be traded again
-# AGGRESSIVE: Reduced to 3.0s for faster re-entry on same symbols
-PER_SYMBOL_COOLDOWN_SEC = _get_env_float("ARB_SYMBOL_COOLDOWN_SEC", 3.0)
+# TOP BOT PATTERN: CCXT/Hummingbot allow rapid re-entry on same symbols
+# 1.0s prevents double-execution of same spread but allows fast trading
+PER_SYMBOL_COOLDOWN_SEC = _get_env_float("ARB_SYMBOL_COOLDOWN_SEC", 1.0)
 SYMBOL_COOLDOWN_SEC = PER_SYMBOL_COOLDOWN_SEC  # Alias for compatibility
 
 # Maximum concurrent opportunities to process per scan cycle

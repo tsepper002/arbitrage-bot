@@ -81,7 +81,9 @@ class SignalAllocator:
     MAX_HISTORY = 5000
 
     # Minimum signals before a symbol gets allocation
-    MIN_SIGNALS_FOR_ALLOCATION = 15  # Require 15+ positive-ROI signals before buying a coin
+    # TOP BOT PATTERN: Start trading FAST. CCXT/Hummingbot pre-position immediately.
+    # 3 signals = ~30 seconds of scanning = enough to pick the best coin.
+    MIN_SIGNALS_FOR_ALLOCATION = 3
 
     # Pre-fund: use 50% of USDT for ONE coin on each exchange
     # Example: $14/exchange − $2 reserve = $12 available → $6 for coin (above $5 min)

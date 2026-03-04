@@ -239,30 +239,15 @@ class CapitalManager:
                           avg_latency_ms: float = 0.0) -> float:
         """Compute the dynamic minimum spread required for a profitable trade.
 
-        threshold = total_fees
-                  + spread_threshold_above_fees  (level-specific cushion)
-                  + latency_risk
-                  + volatility_buffer
-                  + overtrading_bump (decays over time)
+        TOP BOT PATTERN (CCXT/Hummingbot/Barbotine):
+        threshold = total_fees + small_buffer (0.01-0.02%)
+        
+        Simplified from 5-7 factors to just: fees + level cushion.
+        Latency/volatility/overtrading factors REMOVED — they were blocking
+        profitable trades that top bots would execute successfully.
         """
         lvl = self._current_level
-        latency_risk = avg_latency_ms * self.LATENCY_RISK_FACTOR
-        volatility_buffer = self._current_volatility_pct * 0.05 if self._current_volatility_pct > 0 else 0.0
-        # Time-based decay: overtrading bump fades after OVERTRADING_BUMP_DECAY_SEC
-        effective_bump = self._overtrading_bump
-        if effective_bump > 0 and self._overtrading_bump_set_time > 0:
-            elapsed = time.time() - self._overtrading_bump_set_time
-            if elapsed > self.OVERTRADING_BUMP_DECAY_SEC:
-                effective_bump = 0.0
-                self._overtrading_bump = 0.0
-                self._overtrading_bump_set_time = 0.0
-        threshold = (
-            total_fee_pct
-            + lvl.spread_threshold_above_fees
-            + latency_risk
-            + volatility_buffer
-            + effective_bump
-        )
+        threshold = total_fee_pct + lvl.spread_threshold_above_fees
         return threshold
 
     def update_volatility(self, volatility_pct: float):

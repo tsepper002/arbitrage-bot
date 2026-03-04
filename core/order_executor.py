@@ -400,32 +400,15 @@ class OrderExecutor:
             if order_value_usdt < self.MIN_ORDER_USDT:
                 return {'status': 'blocked', 'reason': f'Order value ${order_value_usdt:.2f} < minimum ${self.MIN_ORDER_USDT}'}
             
-            # Step 3: Place orders — Maker-First model or Parallel Market orders
-            # Engine 2.0: Maker-First reduces fees by using limit buy + market sell
-            # (saves 0.05-0.10% on buy side = significant for thin spreads)
-            logger.info(f"⚡ Placing PARALLEL orders: Buy {qty:.6f} on {buy_ex}, Sell on {sell_ex}")
+            # Step 3: Place orders — SIMULTANEOUS buy+sell (top arb bot pattern)
+            # Like CCXT/Hummingbot/Barbotine: asyncio.gather(buy, sell) for speed
+            logger.info(f"⚡ Placing SIMULTANEOUS orders: Buy {qty:.6f} on {buy_ex}, Sell on {sell_ex}")
             start_time = time.time()
             
-            use_maker_first = (
-                settings.MAKER_FIRST_ENABLED
-                and not self.dry_run
-                and buy_price and sell_price
-                and sell_price > buy_price
-            )
-            
-            # Semi-HFT: Use predictive model to decide maker vs market-market
-            # In PANIC regime or low fill probability → skip maker, go market-market
-            if use_maker_first and self.semi_hft and settings.SEMI_HFT_ENABLED:
-                # Get orderbook data for fill probability prediction
-                asks_data = opportunity.get('asks_levels', [])
-                bids_data = opportunity.get('bids_levels', [])
-                if asks_data and bids_data:
-                    if not self.semi_hft.should_use_maker(
-                        symbol, buy_ex, bids_data, asks_data, 
-                        (sell_price / buy_price - 1) * 100 if buy_price > 0 else 0
-                    ):
-                        use_maker_first = False
-                        logger.debug(f"🔄 Semi-HFT: Switching to market-market (low fill prob or panic)")
+            # TOP BOT PATTERN: Always execute both legs simultaneously
+            # Maker-first (sequential) creates 250ms+ naked exposure window
+            # where price can move against us. Simultaneous = zero exposure gap.
+            use_maker_first = False  # DISABLED: top bots always use simultaneous execution
             
             if use_maker_first:
                 # Maker-first: limit buy, wait for fill, THEN market sell
