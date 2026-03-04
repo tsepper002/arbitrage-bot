@@ -240,11 +240,11 @@ class CapitalManager:
         """Compute the dynamic minimum spread required for a profitable trade.
 
         TOP BOT PATTERN (CCXT/Hummingbot/Barbotine):
-        threshold = total_fees + small_buffer (0.01-0.02%)
+        threshold = total_fees + level-specific cushion
         
-        Simplified from 5-7 factors to just: fees + level cushion.
-        Latency/volatility/overtrading factors REMOVED — they were blocking
-        profitable trades that top bots would execute successfully.
+        The cushion comes from lvl.spread_threshold_above_fees (currently
+        0.008-0.015% depending on capital level). Latency, volatility,
+        and overtrading factors removed — they were blocking profitable trades.
         """
         lvl = self._current_level
         threshold = total_fee_pct + lvl.spread_threshold_above_fees

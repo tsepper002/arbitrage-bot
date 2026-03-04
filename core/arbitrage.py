@@ -682,10 +682,16 @@ class ArbitrageEngine:
                     logger.warning(f"Skipping anomalous spread {gross_spread_pct:.2f}% for {symbol} {buy_ex}->{sell_ex} (threshold: {settings.ANOMALOUS_SPREAD_PCT}%)")
                     continue
 
-                # TOP BOT PATTERN: Execute IMMEDIATELY if spread > threshold.
-                # CCXT/Hummingbot/Barbotine: NO persistence wait.
-                # Spread persistence was adding 100-150ms delay → spreads close before execution.
-                # The threshold check above is sufficient protection against noise.
+                # TOP BOT PATTERN: Execute quickly if spread > threshold.
+                # Minimal 30ms persistence check catches obvious data glitches
+                # without the 150ms delay that was killing real opportunities.
+                spread_key = f"{symbol}:{buy_ex}->{sell_ex}"
+                now_ms = time.time() * 1000
+                if spread_key not in self._spread_first_seen:
+                    self._spread_first_seen[spread_key] = now_ms
+                    continue  # First observation: wait 30ms to confirm
+                elif now_ms - self._spread_first_seen[spread_key] < 30:
+                    continue  # Not yet confirmed (30ms minimum)
 
                 # LATENCY CHECK: Skip if combined exchange latency exceeds spread lifetime
                 buy_latency = self._exchange_latency_ms.get(buy_ex, self.DEFAULT_EXCHANGE_LATENCY_MS)
