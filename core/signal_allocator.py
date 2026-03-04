@@ -114,9 +114,9 @@ class SignalAllocator:
     # Coin rotation: smart switch conditions
     # Top arb bot pattern: switch quickly when a better coin appears.
     # 5 min silence = coin has no cross-exchange arb potential → try another.
-    SILENCE_TIMEOUT = 120       # 2 minutes of zero signals → consider switch
+    SILENCE_TIMEOUT = 120       # 2 min of zero signals → consider switch (was 5 min)
     MIN_ALTERNATIVES = 1        # Need at least 1 hot alternative to switch
-    MIN_ALT_TRACK_RECORD = 60   # 1 min signal history (was 5 min — too slow)
+    MIN_ALT_TRACK_RECORD = 60   # 1 min signal history (was 5 min — faster reaction, monitor for premature switches)
     MAX_SELL_LOSS_PCT = 0.5     # Don't sell if price dropped >0.5% from entry
     COIN_SWITCH_COOLDOWN = 120  # 2 min cooldown between switches
     MAX_SIGNAL_STALENESS = 120  # 2 min: alternative is stale if no recent signals
@@ -694,7 +694,7 @@ class SignalAllocator:
                     executed.append(order)
             
             # Count BOTH newly bought AND already-positioned exchanges
-            buy_count = sum(1 for o in executed if 'pre-fund' in o.get('reason', '').lower())
+            buy_count = sum(1 for o in executed if o.get('side') == 'buy')
             total_ready = buy_count + already_positioned
             
             # Use price_store for accurate entry price
@@ -1193,8 +1193,8 @@ class SignalAllocator:
                                 ob = await client.get_orderbook(symbol)
                                 if ob and ob.get('bids') and len(ob['bids']) > 0 and len(ob['bids'][0]) > 0:
                                     retry_price = float(ob['bids'][0][0])
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"  ⚠️ {exchange}: Fresh price fetch failed for {symbol}: {e}")
                     retry_usdt = amount * retry_price
                     retry_order = await self._execute_sell_order(
                         exchange, symbol, asset, amount, retry_usdt, retry_price,
