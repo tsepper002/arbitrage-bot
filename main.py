@@ -2240,8 +2240,6 @@ async def main():
     
     for attempt in range(MAX_RESTARTS + 1):
         bot = IntegratedArbitrageBot()
-        should_restart = False
-        restart_delay = 0
         try:
             # Initialize all components
             success = await bot.initialize()
@@ -2254,8 +2252,7 @@ async def main():
             return 0  # Clean exit
             
         except (KeyboardInterrupt, asyncio.CancelledError):
-            # Ctrl+C on Windows raises CancelledError (via asyncio.run),
-            # on Unix raises KeyboardInterrupt. Catch BOTH to ensure shutdown.
+            # Ctrl+C: user wants to stop. Shutdown will sell coins via finally.
             logger.info("\n⚠️  Shutdown signal received (Ctrl+C)")
             return 0
         except Exception as e:
@@ -2265,18 +2262,7 @@ async def main():
             if bot.state_manager:
                 bot.state_manager.record_crash()
             
-            if attempt < MAX_RESTARTS:
-                restart_delay = RESTART_DELAYS[min(attempt, len(RESTART_DELAYS) - 1)]
-                should_restart = True
-                
-                # Send Telegram alert about restart
-                if bot.telegram_bot:
-                    try:
-                        await bot.telegram_bot.send_message(
-                            f"🔄 Bot crashed: {str(e)[:100]}\nRestarting in {restart_delay}s (attempt {attempt + 2})")
-                    except Exception:
-                        pass
-            else:
+            if attempt >= MAX_RESTARTS:
                 logger.error(f"❌ Max restarts ({MAX_RESTARTS}) exceeded. Giving up.")
                 if bot.telegram_bot:
                     try:
@@ -2284,6 +2270,16 @@ async def main():
                             f"🔴 Bot stopped after {MAX_RESTARTS} restart attempts.\nLast error: {str(e)[:150]}")
                     except Exception:
                         pass
+                return 1
+            
+            # Will restart after finally block
+            if bot.telegram_bot:
+                try:
+                    delay = RESTART_DELAYS[min(attempt, len(RESTART_DELAYS) - 1)]
+                    await bot.telegram_bot.send_message(
+                        f"🔄 Bot crashed: {str(e)[:100]}\nRestarting in {delay}s (attempt {attempt + 2})")
+                except Exception:
+                    pass
         finally:
             # ALWAYS ensure shutdown runs — sell all coins to USDT!
             # This is the safety net: even if exception handling fails,
@@ -2293,11 +2289,12 @@ async def main():
             except Exception as shutdown_err:
                 logger.error(f"⚠️ Shutdown error: {shutdown_err}")
         
-        if should_restart:
-            logger.info(f"🔄 Auto-restarting in {restart_delay}s (attempt {attempt + 2}/{MAX_RESTARTS + 1})...")
-            await asyncio.sleep(restart_delay)
-        elif not should_restart and attempt >= MAX_RESTARTS:
-            return 1
+        # If we get here, it was a fatal error with restarts remaining
+        delay = RESTART_DELAYS[min(attempt, len(RESTART_DELAYS) - 1)]
+        logger.info(f"🔄 Auto-restarting in {delay}s (attempt {attempt + 2}/{MAX_RESTARTS + 1})...")
+        await asyncio.sleep(delay)
+    
+    return 1  # Exhausted all restart attempts
 
 
 if __name__ == "__main__":
