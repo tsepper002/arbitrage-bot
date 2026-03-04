@@ -919,7 +919,7 @@ class ArbitrageEngine:
                         res.append(info)
                         
                         # USER-FRIENDLY INFO LOGGING
-                        logger.info(f"💰 OPPORTUNITY: {symbol} | Buy {buy_ex} @ {buy_avg:.6f} → Sell {sell_ex} @ {sell_avg:.6f} | ROI: {roi_pct:.3f}% | Net: ${net:.2f}")
+                        logger.info(f"💰 OPPORTUNITY: {symbol} | Buy {buy_ex} @ {buy_avg:.6f} → Sell {sell_ex} @ {sell_avg:.6f} | ROI: {roi_pct:.3f}% | Net: ${net:.4f}")
         
         # Sort by net profit, with MEXC-first tiebreaker (lower fees = more profit)
         def _sort_key(x):
@@ -1071,7 +1071,7 @@ class ArbitrageEngine:
                     # With pre-funded inventory, most trades should have both sides ready.
                     if result.get('status') == 'blocked' and self.signal_allocator:
                         missed_symbol = result.get('missed_symbol', o.get('symbol', ''))
-                        missed_exchange = result.get('missed_exchange', '')
+                        missed_exchange = result.get('missed_exchange', '') or o.get('sell_ex', '') or o.get('buy_ex', 'unknown')
                         missed_side = result.get('missed_side', 'sell')
                         self.signal_allocator.record_miss(missed_symbol, missed_exchange, missed_side)
                         # Also record the blocked opportunity as a signal for allocation
