@@ -100,7 +100,7 @@ class SignalAllocator:
     # CRITICAL: Long cooldowns prevent fee-churning
     REBALANCE_THRESHOLD_PCT = 0.30  # Buy if holding < 30% of target
     MAX_SINGLE_BUY_PCT = 0.50  # Max 50% of available USDT per single buy
-    LIQUIDATION_PCT = 0.80  # Sell 80% of non-allocated coins
+    LIQUIDATION_PCT = 1.00  # Sell 100% when switching coins (no residual)
     REBALANCE_COOLDOWN = 600  # 10 min: prevent fee-churning rotation
 
     # Weight multiplier for executed trades vs raw signals
@@ -114,11 +114,11 @@ class SignalAllocator:
     # Coin rotation: smart switch conditions
     # Top arb bot pattern: switch quickly when a better coin appears.
     # 5 min silence = coin has no cross-exchange arb potential → try another.
-    SILENCE_TIMEOUT = 300       # 5 minutes of zero signals → consider switch
+    SILENCE_TIMEOUT = 120       # 2 minutes of zero signals → consider switch
     MIN_ALTERNATIVES = 1        # Need at least 1 hot alternative to switch
-    MIN_ALT_TRACK_RECORD = 300  # Each alternative must have 5 min of signal history
+    MIN_ALT_TRACK_RECORD = 60   # 1 min signal history (was 5 min — too slow)
     MAX_SELL_LOSS_PCT = 0.5     # Don't sell if price dropped >0.5% from entry
-    COIN_SWITCH_COOLDOWN = 300  # 5 min cooldown between switches
+    COIN_SWITCH_COOLDOWN = 120  # 2 min cooldown between switches
     MAX_SIGNAL_STALENESS = 120  # 2 min: alternative is stale if no recent signals
     # Signal scoring window
     INITIAL_SIGNAL_WINDOW = 30  # Use last 30 signals for initial coin selection
