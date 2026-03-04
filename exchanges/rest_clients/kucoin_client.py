@@ -102,6 +102,16 @@ class KuCoinRESTClient(BaseRESTClient):
         """KuCoin uses BTC-USDT format already."""
         return symbol
     
+    # KuCoin max decimals for quantity (baseIncrement safety net)
+    KUCOIN_QTY_MAX_DECIMALS = 8
+
+    @staticmethod
+    def _truncate_qty(quantity: float) -> str:
+        """Truncate quantity to max decimal places and format as clean string."""
+        factor = 10 ** KuCoinRESTClient.KUCOIN_QTY_MAX_DECIMALS
+        truncated = math.floor(quantity * factor) / factor
+        return f"{truncated:.{KuCoinRESTClient.KUCOIN_QTY_MAX_DECIMALS}f}".rstrip('0').rstrip('.')
+
     async def place_order(
         self,
         symbol: str,
@@ -135,15 +145,13 @@ class KuCoinRESTClient(BaseRESTClient):
                     raise ValueError(f"Market buy funds ${funds} below KuCoin minimum $0.10")
                 order_data["funds"] = f"{funds:.4f}"
             else:
-                # Market sell: truncate to 8 decimal places as safety net
+                # Market sell: truncate to max decimal places as safety net
                 # (proper rounding by exchange step_size happens in order_executor)
-                truncated = math.floor(quantity * 1e8) / 1e8
-                order_data["size"] = f"{truncated:.8f}".rstrip('0').rstrip('.')
+                order_data["size"] = self._truncate_qty(quantity)
         else:
             order_data["price"] = str(price)
-            # Limit order: truncate size to 8 decimal places as safety net
-            truncated = math.floor(quantity * 1e8) / 1e8
-            order_data["size"] = f"{truncated:.8f}".rstrip('0').rstrip('.')
+            # Limit order: truncate size as safety net
+            order_data["size"] = self._truncate_qty(quantity)
             order_data["timeInForce"] = time_in_force
         
         body = json.dumps(order_data)
