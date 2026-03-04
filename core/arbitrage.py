@@ -746,8 +746,8 @@ class ArbitrageEngine:
                 # SMART MODE: When MEXC is buy side (0% maker → limit order),
                 # only the sell side (market order) carries slippage → 1 leg.
                 # For all other pairs: both sides are market → 2 legs.
+                # Note: is_mexc_buy already computed at line 610 in this loop iteration.
                 slippage_per_leg = settings.GLOBAL_SLIPPAGE_PER_LEG_PCT
-                is_mexc_buy = (settings.MAKER_FIRST_ENABLED and buy_ex == 'MEXC')
                 slippage_legs = 1 if is_mexc_buy else 2
                 slippage_cost = (buy_avg * filled) * (slippage_per_leg * slippage_legs / 100)
 
