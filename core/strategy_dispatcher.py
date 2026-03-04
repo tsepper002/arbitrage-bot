@@ -363,8 +363,12 @@ class StrategyDispatcher:
                     buy_fee = 0.0 if best_ask_ex == 'MEXC' else EP.get(best_ask_ex, {}).get('taker', 0.001) * 100
                     sell_fee = EP.get(best_bid_ex, {}).get('taker', 0.001) * 100
                     total_fees = buy_fee + sell_fee
-                    # Signal if spread covers at least 30% of fees (for coin selection)
-                    if cross_spread_pct > total_fees * 0.3:
+                    # Signal threshold: 30% of fees = "near-profitable" for coin selection.
+                    # Coin selection (SignalAllocator) needs to see which coins have
+                    # the BEST cross-exchange activity, even if not yet profitable.
+                    # Opportunities (line 384) use 100% of fees = actually profitable.
+                    SIGNAL_THRESHOLD_RATIO = 0.3
+                    if cross_spread_pct > total_fees * SIGNAL_THRESHOLD_RATIO:
                         roi_pct = cross_spread_pct - total_fees
                         opportunities.append({
                             'strategy': 'SMART_ORDER',

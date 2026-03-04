@@ -104,7 +104,9 @@ class BybitRESTClient(BaseRESTClient):
         """
         factor = 10 ** BybitRESTClient.BYBIT_QTY_MAX_DECIMALS
         truncated = math.floor(quantity * factor) / factor
-        return f"{truncated:.{BybitRESTClient.BYBIT_QTY_MAX_DECIMALS}f}".rstrip('0').rstrip('.')
+        formatted = f"{truncated:.{BybitRESTClient.BYBIT_QTY_MAX_DECIMALS}f}".rstrip('0').rstrip('.')
+        # Safety: ensure at least "0" is returned (not empty string)
+        return formatted if formatted else "0"
 
     async def place_order(
         self,
