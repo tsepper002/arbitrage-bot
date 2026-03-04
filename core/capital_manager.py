@@ -157,7 +157,7 @@ class CapitalManager:
     EXCHANGE_DISABLE_SECONDS = 3600   # 1 hour
     EXCHANGE_RANK_EVERY_N = 100       # re-rank every N trades
 
-    # Latency-to-risk conversion: 300ms → 0.001% price risk
+    # Latency-to-risk conversion: 330ms → 0.001% price risk
     # Pre-positioned arb has lower latency risk since buy is maker (limit)
     LATENCY_RISK_FACTOR = 0.000003
 

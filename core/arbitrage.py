@@ -749,8 +749,9 @@ class ArbitrageEngine:
                 fees = (buy_avg * filled) * buy_fee + (sell_avg * filled) * sell_fee
 
                 # GLOBAL SLIPPAGE BUFFER: deduct estimated slippage from trades
-                # With maker-first: buy side (limit) has ~0 slippage.
-                # Only sell side (market) carries slippage.
+                # With maker-first: buy side is a limit order with ~0 slippage,
+                # only the sell side (market order) carries slippage → 1 leg.
+                # Without maker-first: both sides are market → 2 legs.
                 slippage_per_leg = settings.GLOBAL_SLIPPAGE_PER_LEG_PCT
                 slippage_legs = 1 if settings.MAKER_FIRST_ENABLED else 2
                 slippage_cost = (buy_avg * filled) * (slippage_per_leg * slippage_legs / 100)
