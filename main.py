@@ -1260,8 +1260,10 @@ class IntegratedArbitrageBot:
                 L(f"  CAPITAL: ${total_bal:.2f} USDT")
                 lvl_name = self.capital_manager.level.name if self.capital_manager else "N/A"
                 compound = self.capital_manager.compound_multiplier if self.capital_manager else 1.0
+                exec_mode = "SMART (MEXC=maker 0%, others=simultaneous)" if settings.MAKER_FIRST_ENABLED else "SIMULTANEOUS"
                 L(f"  Level: {lvl_name}  |  Compound: {compound:.2f}x  |  "
                   f"Daily PnL: ${daily_pnl:.4f}")
+                L(f"  Exec: {exec_mode}")
                 L(f"  Trades: {total_trades}  |  Profit: ${total_profit:.4f}  |  "
                   f"Avg ROI: {avg_roi:.3f}%")
                 if total_profit > 0 and self.engine:

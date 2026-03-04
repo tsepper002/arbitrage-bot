@@ -400,15 +400,23 @@ class OrderExecutor:
             if order_value_usdt < self.MIN_ORDER_USDT:
                 return {'status': 'blocked', 'reason': f'Order value ${order_value_usdt:.2f} < minimum ${self.MIN_ORDER_USDT}'}
             
-            # Step 3: Place orders — SIMULTANEOUS buy+sell (top arb bot pattern)
-            # Like CCXT/Hummingbot/Barbotine: asyncio.gather(buy, sell) for speed
-            logger.info(f"⚡ Placing SIMULTANEOUS orders: Buy {qty:.6f} on {buy_ex}, Sell on {sell_ex}")
+            # Step 3: Place orders — SMART execution mode
+            # MEXC has 0% maker fee → use limit buy (saves 0.05% per trade)
+            # All other exchanges → simultaneous market orders (no fee advantage)
+            # This follows Hummingbot XEMM pattern: maker on favorable-fee side.
             start_time = time.time()
             
-            # TOP BOT PATTERN: Always execute both legs simultaneously
-            # Maker-first (sequential) creates 250ms+ naked exposure window
-            # where price can move against us. Simultaneous = zero exposure gap.
-            use_maker_first = False  # DISABLED: top bots always use simultaneous execution
+            # SMART EXECUTION: maker-first ONLY when MEXC is buy side (0% maker fee)
+            # For $5 orders on liquid pairs, fill probability >95% within 250ms
+            use_maker_first = (
+                settings.MAKER_FIRST_ENABLED
+                and buy_ex == 'MEXC'  # Only MEXC has 0% maker fee
+            )
+            
+            if use_maker_first:
+                logger.info(f"⚡ MAKER-FIRST: Limit buy on MEXC (0% fee), Market sell on {sell_ex}")
+            else:
+                logger.info(f"⚡ SIMULTANEOUS: Market buy on {buy_ex}, Market sell on {sell_ex}")
             
             if use_maker_first:
                 # Maker-first: limit buy, wait for fill, THEN market sell

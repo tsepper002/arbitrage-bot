@@ -605,9 +605,10 @@ class ArbitrageEngine:
                 gross_spread_pct = ((top_bid - top_ask) / top_ask) * 100.0 if top_ask > 0 else 0
                 
                 # §4 MAKER-FIRST FEE OPTIMIZATION:
-                # Buy side uses maker fee (limit order), sell side uses taker fee (market order)
-                # This is critical for MEXC where maker=0% vs taker=0.05%
-                buy_fee = self._fee_rate(buy_ex, "maker" if settings.MAKER_FIRST_ENABLED else "taker")
+                # SMART FEE CALCULATION: maker fee for MEXC buys (0% maker),
+                # taker fee for all other buy exchanges (no maker advantage)
+                is_mexc_buy = (settings.MAKER_FIRST_ENABLED and buy_ex == 'MEXC')
+                buy_fee = self._fee_rate(buy_ex, "maker" if is_mexc_buy else "taker")
                 sell_fee = self._fee_rate(sell_ex, "taker")
                 sum_fees_pct = (buy_fee + sell_fee) * 100.0
                 
@@ -742,11 +743,12 @@ class ArbitrageEngine:
                 fees = (buy_avg * filled) * buy_fee + (sell_avg * filled) * sell_fee
 
                 # GLOBAL SLIPPAGE BUFFER: deduct estimated slippage from trades
-                # With maker-first: buy side is a limit order with ~0 slippage,
+                # SMART MODE: When MEXC is buy side (0% maker → limit order),
                 # only the sell side (market order) carries slippage → 1 leg.
-                # Without maker-first: both sides are market → 2 legs.
+                # For all other pairs: both sides are market → 2 legs.
                 slippage_per_leg = settings.GLOBAL_SLIPPAGE_PER_LEG_PCT
-                slippage_legs = 1 if settings.MAKER_FIRST_ENABLED else 2
+                is_mexc_buy = (settings.MAKER_FIRST_ENABLED and buy_ex == 'MEXC')
+                slippage_legs = 1 if is_mexc_buy else 2
                 slippage_cost = (buy_avg * filled) * (slippage_per_leg * slippage_legs / 100)
 
                 gross = (sell_avg - buy_avg) * filled

@@ -223,10 +223,11 @@ GLOBAL_SLIPPAGE_PER_LEG_PCT = _get_env_float("ARB_SLIPPAGE_PER_LEG_PCT", 0.01)
 #   2. Wait up to MAKER_FILL_TIMEOUT_MS for ≥ MAKER_MIN_FILL_PCT fill
 #   3. If filled → instant market sell
 #   4. If spread disappears or timeout → cancel
-# TOP BOT PATTERN: simultaneous market orders (asyncio.gather buy+sell)
-# Maker-first is DISABLED because it creates 250ms+ naked exposure window.
+# SMART EXECUTION: maker-first for MEXC buys (0% maker fee → saves 0.05%),
+# simultaneous market orders for all other exchange pairs.
+# This follows Hummingbot XEMM pattern: use limit order on favorable-fee side.
 # Scan slippage calculation (arbitrage.py:749) uses this flag too.
-MAKER_FIRST_ENABLED = _get_env_bool("ARB_MAKER_FIRST", False)
+MAKER_FIRST_ENABLED = _get_env_bool("ARB_MAKER_FIRST", True)
 MAKER_FILL_TIMEOUT_MS = _get_env_int("ARB_MAKER_FILL_TIMEOUT_MS", 250)
 MAKER_MIN_FILL_PCT = _get_env_float("ARB_MAKER_MIN_FILL_PCT", 75.0)
 MAKER_PRICE_OFFSET_PCT = _get_env_float("ARB_MAKER_PRICE_OFFSET_PCT", 20.0)  # % of spread
