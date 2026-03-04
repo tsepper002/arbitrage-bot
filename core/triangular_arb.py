@@ -158,7 +158,7 @@ class TriangularArbitrageEngine:
     async def execute_opportunity(self, opportunity: Dict) -> Dict:
         """Execute a triangular arbitrage opportunity via OrderExecutor."""
         exchange = opportunity['exchange']
-        logger.info(
+        logger.debug(
             f"🔺 Executing triangular arb on {exchange}: "
             f"{opportunity['route']} (profit: {opportunity['profit_pct']:.3f}%)"
         )

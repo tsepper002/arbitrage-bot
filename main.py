@@ -1620,22 +1620,34 @@ class IntegratedArbitrageBot:
             return
     
     async def _triangular_scan_loop(self):
-        """Background task for triangular arbitrage scanning."""
+        """Background task for triangular arbitrage scanning.
+        
+        Top arb bot pattern: execute BEST opportunity only (not all),
+        to avoid depleting USDT balance across multiple simultaneous trades.
+        """
         try:
             await asyncio.sleep(5)  # Wait for price data
             while True:
                 try:
                     opps = self.triangular_engine.scan_opportunities()
                     if opps:
-                        for opp in opps:
-                            logger.info(
-                                f"🔺 TRI: {opp['route']} on {opp['exchange']} "
-                                f"profit={opp['profit_pct']:.3f}%"
-                            )
-                            if self.executor:
-                                await self.triangular_engine.execute_opportunity(opp)
-                            if self.strategy_dispatcher:
-                                self.strategy_dispatcher.strategy_stats['TRIANGULAR']['opportunities'] += 1
+                        # Sort by profit descending — execute BEST one only
+                        # (like top bots: don't spray orders, pick highest-EV trade)
+                        opps.sort(key=lambda o: o['profit_pct'], reverse=True)
+                        best = opps[0]
+                        logger.debug(
+                            f"🔺 TRI: {len(opps)} opps found, best: {best['route']} "
+                            f"on {best['exchange']} profit={best['profit_pct']:.3f}%"
+                        )
+                        if self.executor:
+                            result = await self.triangular_engine.execute_opportunity(best)
+                            if result.get('status') == 'success':
+                                logger.info(
+                                    f"🔺 TRI EXECUTED: {best['route']} on {best['exchange']} "
+                                    f"profit={best['profit_pct']:.3f}%"
+                                )
+                        if self.strategy_dispatcher:
+                            self.strategy_dispatcher.strategy_stats['TRIANGULAR']['opportunities'] += len(opps)
                 except Exception as e:
                     logger.warning(f"Triangular scan error: {e}")
                 await asyncio.sleep(2)  # Scan every 2 seconds
@@ -2074,8 +2086,8 @@ class IntegratedArbitrageBot:
         self._rejection_counts[bucket] = self._rejection_counts.get(bucket, 0) + 1
         self._last_rejection_reason = reason
         
-        # Log every 50th rejection at INFO so user sees it
-        if self._rejection_total % 50 == 1:
+        # Log every 200th rejection at INFO so user sees trends without spam
+        if self._rejection_total % 200 == 1:
             logger.info(
                 f"📊 Rejection #{self._rejection_total}: {strategy} {symbol} "
                 f"{buy_ex}→{sell_ex} spread={spread_pct:.3f}% < fees={fee_pct:.2f}%"

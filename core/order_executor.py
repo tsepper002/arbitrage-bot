@@ -168,34 +168,42 @@ class OrderExecutor:
             # Use lower min order in dry-run since no exchange API call
             min_order = 1.0
             
+            strategy = opp.get('strategy', '')
+            is_triangular = (strategy == 'TRIANGULAR' or buy_ex == sell_ex)
+            
             # Auto-adjust qty to available balance (prevents precision rounding issues)
-            available_sell = self.balance_manager.get_balance(sell_ex, base_currency)
             available_buy_usdt = self.balance_manager.get_balance(buy_ex, quote_currency)
             max_qty_from_usdt = available_buy_usdt / (buy_price * FEE_BUFFER) if buy_price > 0 else 0
             
-            # Use the minimum of requested qty, available to sell, and available to buy
-            adjusted_qty = min(qty, available_sell, max_qty_from_usdt)
+            if is_triangular:
+                # Triangular: all legs on same exchange, starts with USDT buy.
+                # No pre-positioned base coin needed.
+                adjusted_qty = min(qty, max_qty_from_usdt)
+            else:
+                available_sell = self.balance_manager.get_balance(sell_ex, base_currency)
+                adjusted_qty = min(qty, available_sell, max_qty_from_usdt)
             
             if adjusted_qty <= 0 or (adjusted_qty * buy_price) < min_order:
                 # Not enough balance for any meaningful trade
-                if available_sell <= 0:
-                    self._blocked_cooldown[symbol] = time.time()
-                    return {
-                        'status': 'blocked',
-                        'reason': f'No {base_currency} on {sell_ex}: have {available_sell:.6f}',
-                        'missed_symbol': symbol,
-                        'missed_exchange': sell_ex,
-                        'missed_side': 'sell',
-                    }
-                else:
-                    self._blocked_cooldown[symbol] = time.time()
-                    return {
-                        'status': 'blocked',
-                        'reason': f'Insufficient USDT on {buy_ex}: have ${available_buy_usdt:.2f}',
-                        'missed_symbol': symbol,
-                        'missed_exchange': buy_ex,
-                        'missed_side': 'buy',
-                    }
+                if not is_triangular:
+                    available_sell = self.balance_manager.get_balance(sell_ex, base_currency)
+                    if available_sell <= 0:
+                        self._blocked_cooldown[symbol] = time.time()
+                        return {
+                            'status': 'blocked',
+                            'reason': f'No {base_currency} on {sell_ex}: have {available_sell:.6f}',
+                            'missed_symbol': symbol,
+                            'missed_exchange': sell_ex,
+                            'missed_side': 'sell',
+                        }
+                self._blocked_cooldown[symbol] = time.time()
+                return {
+                    'status': 'blocked',
+                    'reason': f'Insufficient USDT on {buy_ex}: have ${available_buy_usdt:.2f}',
+                    'missed_symbol': symbol,
+                    'missed_exchange': buy_ex,
+                    'missed_side': 'buy',
+                }
             
             # Update qty and recalculate profit if adjusted
             if adjusted_qty < qty * self.QTY_ADJUST_THRESHOLD:
@@ -350,13 +358,6 @@ class OrderExecutor:
                 qty = allowed_value / buy_price if buy_price > 0 else 0
                 logger.info(f"📏 Coin cap: {old_qty:.6f} → {qty:.6f} ({base_coin} at {coin_exposure/total_capital*100:.1f}% exposure)")
 
-        logger.info(
-            f"🔴 LIVE EXECUTION: {symbol} | "
-            f"Buy {qty} @ ${buy_price:.4f} on {buy_ex} | "
-            f"Sell {qty} @ ${sell_price:.4f} on {sell_ex} | "
-            f"Expected: ${expected_net:.4f} ({expected_roi:.3f}%)"
-        )
-        
         try:
             # Step 1: Get REST clients
             buy_client = self.rest_clients.get(buy_ex)
@@ -368,30 +369,50 @@ class OrderExecutor:
                 return {'status': 'error', 'reason': error_msg}
             
             # Step 2: Auto-adjust qty to available balance (with fee buffer)
+            strategy = opp.get('strategy', '')
+            is_triangular = (strategy == 'TRIANGULAR' or buy_ex == sell_ex)
+            
             if self.balance_manager:
-                # Use has_sufficient_balance for proper safety margin checks
                 available_usdt = self.balance_manager.get_balance(buy_ex, quote_currency)
-                available_base = self.balance_manager.get_balance(sell_ex, base_currency)
                 # Fee buffer: 0.3% covers max taker fee (HTX 0.2%) + slippage
                 FEE_BUFFER = 1.003
                 max_qty_buy = available_usdt / (buy_price * FEE_BUFFER) if buy_price > 0 else 0
-                adjusted_qty = min(qty, available_base, max_qty_buy)
+                
+                if is_triangular:
+                    # Triangular arb: all legs on SAME exchange, starts with USDT buy.
+                    # No pre-positioned base coin needed — only check USDT balance.
+                    adjusted_qty = min(qty, max_qty_buy)
+                else:
+                    # Cross-exchange arb: need base coin on sell exchange
+                    available_base = self.balance_manager.get_balance(sell_ex, base_currency)
+                    adjusted_qty = min(qty, available_base, max_qty_buy)
                 
                 if adjusted_qty <= 0 or adjusted_qty * buy_price < self.MIN_ORDER_USDT:
-                    reason = (f"Insufficient balance: {buy_ex} USDT=${available_usdt:.2f}, "
-                              f"{sell_ex} {base_currency}={available_base:.6f}")
+                    if is_triangular:
+                        reason = f"Insufficient USDT: {buy_ex} USDT=${available_usdt:.2f} (need ${self.MIN_ORDER_USDT:.2f})"
+                    else:
+                        available_base = self.balance_manager.get_balance(sell_ex, base_currency)
+                        reason = (f"Insufficient balance: {buy_ex} USDT=${available_usdt:.2f}, "
+                                  f"{sell_ex} {base_currency}={available_base:.6f}")
                     logger.warning(f"⚠️  {reason}")
-                    # Set blocked cooldown to prevent spamming this symbol
                     self._blocked_cooldown[symbol] = time.time()
                     return {
                         'status': 'blocked', 'reason': reason,
-                        'missed_symbol': symbol, 'missed_exchange': sell_ex,
-                        'missed_side': 'sell' if available_base < adjusted_qty else 'buy',
+                        'missed_symbol': symbol, 'missed_exchange': sell_ex if not is_triangular else buy_ex,
+                        'missed_side': 'sell' if not is_triangular else 'buy',
                     }
                 
                 if adjusted_qty < qty * self.QTY_ADJUST_THRESHOLD:
                     logger.info(f"📏 Adjusted qty: {qty:.6f} → {adjusted_qty:.6f} (balance limited)")
                     qty = adjusted_qty
+            
+            logger.info(
+                f"🔴 LIVE EXECUTION: {symbol} | "
+                f"Buy {qty} @ ${buy_price:.4f} on {buy_ex} | "
+                f"Sell {qty} @ ${sell_price:.4f} on {sell_ex} | "
+                f"Expected: ${expected_net:.4f} ({expected_roi:.3f}%)"
+                + (f" [TRIANGULAR]" if is_triangular else "")
+            )
             
             # Step 2b: Final volume sanity check before any order placement
             if qty <= 0:
