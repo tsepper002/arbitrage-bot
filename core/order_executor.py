@@ -749,30 +749,38 @@ class OrderExecutor:
         except Exception as e:
             logger.debug(f"Post-trade balance sync error: {e}")
     
+    EMERGENCY_CLOSE_MAX_RETRIES = 3
+    EMERGENCY_CLOSE_BASE_DELAY = 0.5  # seconds, doubles each retry
+
     async def _emergency_close(self, exchange: str, symbol: str, side: str, qty: float, price: float, client):
         """
         Emergency close position when one leg of arbitrage fails.
-        Places immediate market order in opposite direction.
+        Top arb bot pattern: retry with exponential backoff (Hummingbot, CCXT).
         """
-        try:
-            logger.warning(f"🚨 EMERGENCY CLOSE: {side} {qty} {symbol} on {exchange}")
-            result = await client.place_order(symbol, side, 'market', qty, price)
-            logger.info(f"✅ Emergency close successful: {result}")
-            return result
-        except Exception as e:
-            logger.error(f"❌ EMERGENCY CLOSE FAILED: {e}")
-            # This is critical - manual intervention may be needed
-            logger.error(f"🚨🚨🚨 MANUAL INTERVENTION REQUIRED: {side} {qty} {symbol} on {exchange}")
-            # Persist failed emergency close so it can be retried on restart
-            if self.state_manager:
-                import uuid
-                self.state_manager.add_pending_order({
-                    'id': str(uuid.uuid4())[:8],
-                    'exchange': exchange, 'symbol': symbol,
-                    'side': side, 'qty': qty, 'type': 'emergency_close_failed',
-                    'timestamp': time.time(), 'retry_count': 0,
-                })
-            return None
+        for attempt in range(1, self.EMERGENCY_CLOSE_MAX_RETRIES + 1):
+            try:
+                logger.warning(f"🚨 EMERGENCY CLOSE (attempt {attempt}/{self.EMERGENCY_CLOSE_MAX_RETRIES}): {side} {qty} {symbol} on {exchange}")
+                result = await client.place_order(symbol, side, 'market', qty, price)
+                logger.info(f"✅ Emergency close successful on attempt {attempt}: {result}")
+                return result
+            except Exception as e:
+                logger.error(f"❌ Emergency close attempt {attempt} failed: {e}")
+                if attempt < self.EMERGENCY_CLOSE_MAX_RETRIES:
+                    delay = self.EMERGENCY_CLOSE_BASE_DELAY * (2 ** (attempt - 1))
+                    logger.info(f"⏳ Retrying emergency close in {delay:.1f}s...")
+                    await asyncio.sleep(delay)
+        
+        # All retries exhausted — persist for manual retry
+        logger.error(f"🚨🚨🚨 MANUAL INTERVENTION REQUIRED: {side} {qty} {symbol} on {exchange}")
+        if self.state_manager:
+            import uuid
+            self.state_manager.add_pending_order({
+                'id': str(uuid.uuid4())[:8],
+                'exchange': exchange, 'symbol': symbol,
+                'side': side, 'qty': qty, 'type': 'emergency_close_failed',
+                'timestamp': time.time(), 'retry_count': self.EMERGENCY_CLOSE_MAX_RETRIES,
+            })
+        return None
     
     def get_statistics(self) -> Dict:
         """Get execution statistics."""

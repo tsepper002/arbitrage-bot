@@ -39,6 +39,7 @@ class RiskManager:
         
         # Consecutive losses
         self.consecutive_losses = 0
+        self.last_loss_time = 0.0  # Top bots: reset after 1h even without profit
         
         # Open exposure
         self.open_exposure = 0.0
@@ -129,12 +130,17 @@ class RiskManager:
             logger.warning(f"🟡 {self.pause_reason} - pausing for 1 hour")
             return False, self.pause_reason
         
-        # Check consecutive losses
+        # Check consecutive losses (with time-based decay like top bots)
+        # Top bots reset consecutive loss counter after 1h even without profit
         if self.consecutive_losses >= settings.MAX_CONSECUTIVE_LOSSES:
-            self.paused_until = time.time() + 900  # 15 minutes
-            self.pause_reason = f"Consecutive losses ({self.consecutive_losses})"
-            logger.warning(f"🟡 {self.pause_reason} - pausing for 15 minutes")
-            return False, self.pause_reason
+            if self.last_loss_time > 0 and (time.time() - self.last_loss_time) > 3600:
+                logger.info(f"✅ Consecutive loss counter reset (1h elapsed since last loss)")
+                self.consecutive_losses = 0
+            else:
+                self.paused_until = time.time() + 900  # 15 minutes
+                self.pause_reason = f"Consecutive losses ({self.consecutive_losses})"
+                logger.warning(f"🟡 {self.pause_reason} - pausing for 15 minutes")
+                return False, self.pause_reason
         
         # Check open exposure
         if self.open_exposure >= settings.MAX_OPEN_EXPOSURE:
@@ -187,9 +193,11 @@ class RiskManager:
             return False, reason
         
         # Check single trade loss limit
-        # In arbitrage, max loss = amount × max_spread (not 100% of amount)
-        # Conservative estimate: worst case loss = 5% of trade amount (anomalous spread)
-        max_possible_loss = amount * (settings.ANOMALOUS_SPREAD_PCT / 100.0)
+        # In arbitrage, max loss ≈ amount × slippage + fees (not full spread)
+        # Top bots (Hummingbot): max_loss = amount × (max_slippage_pct/100 + total_fee_pct)
+        # Conservative: assume worst case 2% adverse move during execution
+        max_loss_pct = min(settings.ANOMALOUS_SPREAD_PCT, 2.0)  # Cap at 2%
+        max_possible_loss = amount * (max_loss_pct / 100.0)
         if max_possible_loss > settings.MAX_SINGLE_TRADE_LOSS:
             return False, f"Potential loss (${max_possible_loss:.2f}) exceeds max single trade limit (${settings.MAX_SINGLE_TRADE_LOSS:.2f})"
         
@@ -271,6 +279,7 @@ class RiskManager:
         # Track consecutive losses
         if pnl < 0:
             self.consecutive_losses += 1
+            self.last_loss_time = time.time()
             logger.info(f"Loss recorded: ${pnl:.2f} (consecutive losses: {self.consecutive_losses})")
         else:
             self.consecutive_losses = 0  # Reset on profit

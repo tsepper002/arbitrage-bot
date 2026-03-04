@@ -107,13 +107,23 @@ class PriceStore:
         a_len = len(rec.get("asks_levels", []))
         logger.debug(f"PriceStore.update_levels {exchange} {symbol} bids_levels={b_len} asks_levels={a_len} top_bid={rec.get('bid')} top_ask={rec.get('ask')}")
     
+    # Top arb bots mark data as stale after N seconds (Hummingbot uses 5s)
+    STALE_THRESHOLD_SEC = 5.0
+
     async def get(self, symbol: str) -> Dict[str, Dict[str, Any]]:
         """
         Get data for a symbol (async for compatibility, but no lock needed).
-        Returns a snapshot copy.
+        Returns a snapshot copy with 'stale' flag for each exchange.
         """
         exmap = self._data.get(symbol, {})
-        return {ex: rec.copy() for ex, rec in exmap.items()}
+        now = time.time()
+        result = {}
+        for ex, rec in exmap.items():
+            entry = rec.copy()
+            age = now - entry.get('ts', 0)
+            entry['stale'] = age > self.STALE_THRESHOLD_SEC
+            result[ex] = entry
+        return result
     
     def snapshot(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         """

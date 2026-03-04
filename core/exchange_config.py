@@ -60,7 +60,7 @@ EXCHANGE_PARAMS: Dict[str, Dict[str, Any]] = {
         "withdraw_fee": 1.0,  # USDT TRC20 withdrawal fee
         "withdraw_fee_currency": "USDT",
         "withdraw_network": "TRC20",
-        "min_notional": 10.0,  # Binance has higher min notional
+        "min_notional": 5.0,  # Binance spot MARKET orders: $5 min (LIMIT: $5 also)
         "min_size": 0.0001,
         "supports_depth": True,
     },

@@ -35,8 +35,9 @@ class BalanceManager:
         self.rest_clients = rest_clients or {}
         self.balances: Dict[str, Dict[str, float]] = {}  # {exchange: {currency: amount}}
         self.last_sync: Dict[str, float] = {}  # {exchange: timestamp}
-        self.sync_interval = 60.0  # Sync every 60 seconds
+        self.sync_interval = 30.0  # Top bots sync every 15-30s; 60s was too slow
         self.excluded_exchanges: Set[str] = set()
+        self.locked_funds: Dict[str, Dict[str, float]] = {}  # {exchange: {currency: locked_amount}}
         self.initialized = False
         
         logger.info("✅ BalanceManager initialized")
@@ -196,21 +197,23 @@ class BalanceManager:
             return False, f"No balance data for {exchange}"
         
         current_balance = self.balances[exchange].get(currency, 0)
+        locked = self.locked_funds.get(exchange, {}).get(currency, 0)
+        available = max(0, current_balance - locked)
         
-        if current_balance < amount:
-            return False, f"Insufficient {currency}: have {current_balance:.4f}, need {amount:.4f}"
+        if available < amount:
+            return False, f"Insufficient {currency}: have {available:.4f} (total {current_balance:.4f} - locked {locked:.4f}), need {amount:.4f}"
         
         # Dynamic safety margin based on balance size
-        if current_balance < 50:
+        if available < 50:
             safety_margin = 1.05  # 5% for small accounts
-        elif current_balance < 200:
+        elif available < 200:
             safety_margin = 1.10  # 10% for medium accounts
         else:
             safety_margin = 1.15  # 15% for large accounts
         
-        if current_balance < amount * safety_margin:
+        if available < amount * safety_margin:
             return False, (
-                f"Balance too low for safety margin: {current_balance:.4f} "
+                f"Balance too low for safety margin: {available:.4f} "
                 f"< {amount * safety_margin:.4f} (need {(safety_margin-1)*100:.0f}% buffer)"
             )
         
@@ -242,7 +245,29 @@ class BalanceManager:
             f"Optimistic update: {exchange} {currency} "
             f"{current:.4f} → {new_balance:.4f} (Δ {delta:+.4f})"
         )
-    
+
+    def lock_funds(self, exchange: str, currency: str, amount: float):
+        """Lock funds for a pending order (prevents double-spend).
+        Top arb bots (Hummingbot/CCXT) track locked vs available separately."""
+        if exchange not in self.locked_funds:
+            self.locked_funds[exchange] = {}
+        current_locked = self.locked_funds[exchange].get(currency, 0)
+        self.locked_funds[exchange][currency] = current_locked + amount
+        logger.debug(f"🔒 Locked {amount:.4f} {currency} on {exchange}")
+
+    def unlock_funds(self, exchange: str, currency: str, amount: float):
+        """Release locked funds after order completion/cancellation."""
+        if exchange in self.locked_funds:
+            current_locked = self.locked_funds[exchange].get(currency, 0)
+            self.locked_funds[exchange][currency] = max(0, current_locked - amount)
+            logger.debug(f"🔓 Unlocked {amount:.4f} {currency} on {exchange}")
+
+    def get_available_balance(self, exchange: str, currency: str) -> float:
+        """Get available (total - locked) balance. Used for trade sizing."""
+        total = self.balances.get(exchange, {}).get(currency, 0)
+        locked = self.locked_funds.get(exchange, {}).get(currency, 0)
+        return max(0, total - locked)
+
     def record_trade(
         self,
         buy_exchange: str,
