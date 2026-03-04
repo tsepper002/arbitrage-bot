@@ -2120,24 +2120,24 @@ class IntegratedArbitrageBot:
         
         # ========== §9.2 SELL ALL COINS BACK TO USDT ==========
         # Do this BEFORE cancelling background tasks — WS feeds still alive for prices!
-        # Shield from CancelledError: a second Ctrl+C must NOT abort the sell operation.
         SELL_TIMEOUT_SEC = 60  # Max 60 seconds for sell operation
         if hasattr(self, 'signal_allocator') and self.signal_allocator:
             try:
                 price_store = getattr(self.engine, 'store', None) if hasattr(self, 'engine') and self.engine else None
-                # asyncio.shield prevents a second CancelledError from aborting the sell
                 await asyncio.wait_for(
-                    asyncio.shield(
-                        self.signal_allocator.sell_all_to_usdt(
-                            rest_clients=self.rest_clients,
-                            price_store=price_store,
-                        )
+                    self.signal_allocator.sell_all_to_usdt(
+                        rest_clients=self.rest_clients,
+                        price_store=price_store,
                     ),
                     timeout=SELL_TIMEOUT_SEC,
                 )
-            except asyncio.CancelledError:
-                logger.warning("⚠️ Second Ctrl+C detected during sell — still trying to complete...")
-                # Try one more time without shield (last resort)
+            except asyncio.TimeoutError:
+                logger.error(f"⚠️ CRITICAL: sell_all_to_usdt timed out after {SELL_TIMEOUT_SEC}s — some coins may remain on exchanges!")
+            except (asyncio.CancelledError, Exception) as e:
+                # CancelledError: second Ctrl+C during shutdown
+                # Exception: any other failure
+                logger.error(f"⚠️ Error selling coins during shutdown: {e}")
+                # Last resort: try one quick sell attempt
                 try:
                     price_store = getattr(self.engine, 'store', None) if hasattr(self, 'engine') and self.engine else None
                     await asyncio.wait_for(
@@ -2148,11 +2148,7 @@ class IntegratedArbitrageBot:
                         timeout=15,
                     )
                 except Exception:
-                    logger.error("⚠️ CRITICAL: sell_all_to_usdt failed after second Ctrl+C — coins may remain on exchanges!")
-            except asyncio.TimeoutError:
-                logger.error(f"⚠️ CRITICAL: sell_all_to_usdt timed out after {SELL_TIMEOUT_SEC}s — some coins may remain on exchanges!")
-            except Exception as e:
-                logger.error(f"⚠️ Error selling coins during shutdown: {e}")
+                    logger.error("⚠️ CRITICAL: sell retry failed — coins may remain on exchanges!")
         
         # NOW cancel all background tasks (WS feeds, monitors, etc.)
         for task in self.tasks:

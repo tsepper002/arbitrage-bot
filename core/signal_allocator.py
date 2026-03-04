@@ -733,10 +733,12 @@ class SignalAllocator:
             
             # --- Trigger B: Urgent miss for different coin ---
             urgent_coin = self._urgent_missed_coin
+            urgent_first_seen = self._symbol_first_seen.get(urgent_coin, now) if urgent_coin else now
+            urgent_track_record = now - urgent_first_seen
             urgent_triggered = (
                 urgent_coin is not None
                 and urgent_coin != self._current_coin
-                and urgent_coin in self._symbol_first_seen  # Has signal history
+                and urgent_track_record >= self.MIN_ALT_TRACK_RECORD  # Must have sufficient history
             )
             
             trigger_reason = None
@@ -759,9 +761,10 @@ class SignalAllocator:
                     if urgent_in_alts:
                         # Move urgent coin to front
                         alternatives = urgent_in_alts + [a for a in alternatives if a[0] != urgent_coin]
-                    elif urgent_coin:
-                        # Urgent coin not in alternatives yet — add it with minimum score
-                        # (it has real trade demand, which is better than any signal score)
+                    elif urgent_coin and urgent_track_record >= self.MIN_ALT_TRACK_RECORD:
+                        # Urgent coin passed track record check but wasn't in alternatives
+                        # (e.g., didn't meet signal count). Still prioritize it because
+                        # it has REAL trade demand (missed profitable opportunities).
                         alternatives.insert(0, (urgent_coin, 1.0))
                 
                 if len(alternatives) >= self.MIN_ALTERNATIVES:
