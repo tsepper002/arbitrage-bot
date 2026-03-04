@@ -386,7 +386,7 @@ class SignalAllocator:
     # Works with ArbitrageEngine.SIGNAL_TRACKING_FACTOR (0.3): signals are recorded
     # when spread > 30% of fees, so ROI can be as low as -70% of fees (typically
     # -0.07% to -0.14%). This threshold of -0.10% covers most near-profitable cases.
-    MIN_SIGNAL_ROI_PCT = -0.10
+    MIN_SIGNAL_ROI_PCT = -0.15
 
     def _is_profitable_signal(self, sig) -> bool:
         """Check if signal is a near-profitable CROSS_EXCHANGE opportunity.

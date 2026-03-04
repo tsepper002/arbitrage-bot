@@ -212,7 +212,7 @@ MAX_INVENTORY_SKEW_USDT = _get_env_float("ARB_MAX_INVENTORY_SKEW_USDT", 20.0)
 # With maker-first execution: buy side (limit) has ~0 slippage.
 # Only sell side (market) carries slippage risk: ~0.03% per leg.
 # 0.03% per leg × 2 legs = 0.06% total (but buy-side is ~0 for maker).
-GLOBAL_SLIPPAGE_PER_LEG_PCT = _get_env_float("ARB_SLIPPAGE_PER_LEG_PCT", 0.03)
+GLOBAL_SLIPPAGE_PER_LEG_PCT = _get_env_float("ARB_SLIPPAGE_PER_LEG_PCT", 0.01)
 
 # ============================================================================
 # ENGINE 2.0 — MAKER-FIRST EXECUTION MODEL

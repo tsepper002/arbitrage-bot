@@ -44,62 +44,62 @@ class LevelParams:
 LEVEL_1_MICRO = LevelParams(
     name="MicroArb",
     min_equity=0,          # Default for any capital
-    spread_persistence_ms=180,
-    spread_threshold_above_fees=0.06,  # Maker-first: buy has ~0 slippage, only sell-side risk
-    max_slippage_pct=0.20,
-    min_net_profit_pct=0.08,   # Semi-HFT target: 0.08-0.15% net edge
-    min_net_profit_usdt=0.01,  # $0.01 minimum (small but profitable)
+    spread_persistence_ms=150,
+    spread_threshold_above_fees=0.015,  # Pre-positioned arb: only sell-side slippage (~0.01-0.02%)
+    max_slippage_pct=0.15,
+    min_net_profit_pct=0.01,   # Micro-profits: $5 × 0.01% = $0.0005 (volume-based)
+    min_net_profit_usdt=0.001, # $0.001 minimum (many small trades add up)
     max_exposure_per_exchange_pct=35.0,
     max_exposure_per_coin_pct=25.0,
     max_parallel_trades=1,
     coin_limit=1,
     working_capital_pct=85.0,
     position_size_pct=35.0,
-    htx_min_spread_pct=0.50,   # HTX allowed above 0.50% (was 0.70%)
+    htx_min_spread_pct=0.30,   # HTX allowed above 0.30% (pre-positioned)
 )
 
 LEVEL_2_MULTI = LevelParams(
     name="MultiCoin",
     min_equity=150,
-    spread_persistence_ms=150,
-    spread_threshold_above_fees=0.05,  # Maker-first: less cushion needed
-    max_slippage_pct=0.25,
-    min_net_profit_pct=0.06,   # Semi-HFT target
-    min_net_profit_usdt=0.02,
+    spread_persistence_ms=120,
+    spread_threshold_above_fees=0.012,  # Pre-positioned: tighter cushion with more capital
+    max_slippage_pct=0.15,
+    min_net_profit_pct=0.01,   # Micro-profits at scale
+    min_net_profit_usdt=0.002,
     max_exposure_per_exchange_pct=35.0,
     max_exposure_per_coin_pct=20.0,
     max_parallel_trades=3,
     coin_limit=3,
     working_capital_pct=85.0,
     position_size_pct=35.0,
-    htx_min_spread_pct=0.40,
+    htx_min_spread_pct=0.25,
 )
 
 LEVEL_3_STAT = LevelParams(
     name="StatArb",
     min_equity=300,
-    spread_persistence_ms=120,
-    spread_threshold_above_fees=0.04,  # Maker-first: minimal cushion
-    max_slippage_pct=0.25,
-    min_net_profit_pct=0.05,   # Semi-HFT target
-    min_net_profit_usdt=0.05,
+    spread_persistence_ms=100,
+    spread_threshold_above_fees=0.010,  # Tighter with higher volume
+    max_slippage_pct=0.15,
+    min_net_profit_pct=0.01,
+    min_net_profit_usdt=0.005,
     max_exposure_per_exchange_pct=30.0,
     max_exposure_per_coin_pct=15.0,
     max_parallel_trades=5,
     coin_limit=5,
     working_capital_pct=85.0,
     position_size_pct=30.0,
-    htx_min_spread_pct=0.35,
+    htx_min_spread_pct=0.20,
 )
 
 LEVEL_4_MM = LevelParams(
     name="MarketMaking",
     min_equity=1000,
-    spread_persistence_ms=100,
-    spread_threshold_above_fees=0.03,  # MM can work tighter spreads
-    max_slippage_pct=0.20,
-    min_net_profit_pct=0.04,
-    min_net_profit_usdt=0.10,
+    spread_persistence_ms=80,
+    spread_threshold_above_fees=0.008,  # Tightest with high capital
+    max_slippage_pct=0.12,
+    min_net_profit_pct=0.01,
+    min_net_profit_usdt=0.01,
     max_exposure_per_exchange_pct=30.0,
     max_exposure_per_coin_pct=15.0,
     max_parallel_trades=8,
@@ -157,9 +157,9 @@ class CapitalManager:
     EXCHANGE_DISABLE_SECONDS = 3600   # 1 hour
     EXCHANGE_RANK_EVERY_N = 100       # re-rank every N trades
 
-    # Latency-to-risk conversion: 100ms → 0.001% price risk
-    # Empirically derived: ~0.001% price movement per 100ms in crypto markets
-    LATENCY_RISK_FACTOR = 0.00001
+    # Latency-to-risk conversion: 300ms → 0.001% price risk
+    # Pre-positioned arb has lower latency risk since buy is maker (limit)
+    LATENCY_RISK_FACTOR = 0.000003
 
     # Adaptive scaling
     COMPOUND_EQUITY_STEP_PCT = 10.0   # Every +10% equity → scale up
@@ -247,7 +247,7 @@ class CapitalManager:
         """
         lvl = self._current_level
         latency_risk = avg_latency_ms * self.LATENCY_RISK_FACTOR
-        volatility_buffer = self._current_volatility_pct * 0.20 if self._current_volatility_pct > 0 else 0.0
+        volatility_buffer = self._current_volatility_pct * 0.05 if self._current_volatility_pct > 0 else 0.0
         # Time-based decay: overtrading bump fades after OVERTRADING_BUMP_DECAY_SEC
         effective_bump = self._overtrading_bump
         if effective_bump > 0 and self._overtrading_bump_set_time > 0:
