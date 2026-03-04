@@ -117,11 +117,11 @@ class SignalAllocator:
     # Coin rotation: smart switch conditions
     # Top arb bot pattern: switch quickly when a better coin appears.
     # 5 min silence = coin has no cross-exchange arb potential → try another.
-    SILENCE_TIMEOUT = 120       # 2 min of zero signals → consider switch (was 5 min)
+    SILENCE_TIMEOUT = 60        # 1 min of zero signals → consider switch
     MIN_ALTERNATIVES = 1        # Need at least 1 hot alternative to switch
-    MIN_ALT_TRACK_RECORD = 60   # 1 min signal history (was 5 min — faster reaction, monitor for premature switches)
+    MIN_ALT_TRACK_RECORD = 30   # 30s signal history (fast reaction to hot coins)
     MAX_SELL_LOSS_PCT = 0.5     # Don't sell if price dropped >0.5% from entry
-    COIN_SWITCH_COOLDOWN = 120  # 2 min cooldown between switches
+    COIN_SWITCH_COOLDOWN = 60   # 1 min cooldown between switches
     MAX_SIGNAL_STALENESS = 120  # 2 min: alternative is stale if no recent signals
     # Signal scoring window
     INITIAL_SIGNAL_WINDOW = 30  # Use last 30 signals for initial coin selection

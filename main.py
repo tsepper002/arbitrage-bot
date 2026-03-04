@@ -1311,7 +1311,12 @@ class IntegratedArbitrageBot:
                     if gap > 0:
                         L(f"  GAP:          {gap:.4f}%  (need {gap:.4f}% more spread to trade)")
                     else:
-                        L(f"  >>> SPREAD ABOVE THRESHOLD — TRADES POSSIBLE!")
+                        # Check if the best spread is for the CURRENT coin
+                        current_coin = sa.get_current_coin() if sa else None
+                        if current_coin and best_net_info and current_coin.split('-')[0] not in best_net_info:
+                            L(f"  >>> SPREAD ABOVE THRESHOLD on {best_net_info} — switching coin soon!")
+                        else:
+                            L(f"  >>> SPREAD ABOVE THRESHOLD — TRADES POSSIBLE!")
                 elif best_spread > 0 and best_fees > 0:
                     pct_of_fees = best_spread / best_fees * 100
                     L(f"  BEST SPREAD:  {best_spread:.4f}%  ({pct_of_fees:.0f}% of fees)  "
@@ -1321,7 +1326,11 @@ class IntegratedArbitrageBot:
                     if gap > 0:
                         L(f"  GAP:          {gap:.4f}%  (need {gap:.4f}% more spread)")
                     else:
-                        L(f"  >>> SPREAD ABOVE THRESHOLD — TRADES POSSIBLE!")
+                        current_coin = sa.get_current_coin() if sa else None
+                        if current_coin and best_info and current_coin.split('-')[0] not in best_info:
+                            L(f"  >>> SPREAD ABOVE THRESHOLD on {best_info} — switching coin soon!")
+                        else:
+                            L(f"  >>> SPREAD ABOVE THRESHOLD — TRADES POSSIBLE!")
                 else:
                     L(f"  SPREAD: no data yet")
                 if total_analyzed > 0:

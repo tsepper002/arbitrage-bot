@@ -1040,6 +1040,20 @@ class ArbitrageEngine:
                     # Only trade the pre-funded coin (skip other symbols)
                     if (self.signal_allocator and self.signal_allocator.get_current_coin()
                             and o.get('symbol') != self.signal_allocator.get_current_coin()):
+                        # CRITICAL: Record profitable misses for non-current coins!
+                        # Without this, the rebalancer never learns that FIL has
+                        # 0.31% spread while we're stuck in ATOM with 0.10% spread.
+                        # record_miss triggers urgent coin switch after MISS_THRESHOLD.
+                        opp_symbol = o.get('symbol', '')
+                        self.signal_allocator.record_miss(
+                            opp_symbol,
+                            o.get('sell_ex', ''),
+                            'sell'
+                        )
+                        logger.debug(
+                            f"⚡ Profitable {opp_symbol} skipped (positioned in "
+                            f"{self.signal_allocator.get_current_coin()}) — recorded as miss"
+                        )
                         continue
                     
                     # Check risk manager before executing
