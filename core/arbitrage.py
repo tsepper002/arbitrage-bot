@@ -911,7 +911,7 @@ class ArbitrageEngine:
                     key = f"{symbol}:{buy_ex}->{sell_ex}:{round(buy_avg,6)}:{round(sell_avg,6)}"
                     now = time.time()
                     last_ts = self.recent_cache.get(key, 0)
-                    if now - last_ts > 2.0:
+                    if now - last_ts > 2.0:  # 2s dedupe: includes price in key so only exact-same opps are deduped
                         self.recent_cache[key] = now
                         self._persist_opportunity(info)
                         res.append(info)

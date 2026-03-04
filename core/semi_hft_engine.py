@@ -534,7 +534,7 @@ class SemiHFTEngine:
 
         # ONLY in PANIC regime do we raise the threshold (market structure broken)
         if self._vol_regime.regime == "PANIC":
-            base += 0.05  # +0.05% in panic only (market structure may be broken)
+            base += 0.10  # +0.10% in panic (market structure broken, wider protection)
 
         return base
 
