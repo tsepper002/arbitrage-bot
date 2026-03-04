@@ -1272,6 +1272,7 @@ class IntegratedArbitrageBot:
 
                 # ─── ACTIVE COIN & HOLDINGS ───
                 L(f"{'─' * W}")
+                sa_threshold = getattr(sa, 'MIN_SIGNALS_FOR_ALLOCATION', 3) if sa else 3
                 if sa_coin and sa_setup:
                     base = sa_coin.split('-')[0] if '-' in sa_coin else sa_coin
                     L(f"  COIN: {sa_coin}")
@@ -1286,10 +1287,10 @@ class IntegratedArbitrageBot:
                             L(p)
                 elif not sa_setup:
                     if sa_arb_signals > 0:
-                        L(f"  COIN: collecting arb signals ({sa_best_count}/15 for {sa_best_sym})")
+                        L(f"  COIN: collecting arb signals ({sa_best_count}/{sa_threshold} for {sa_best_sym})")
                         L(f"        {sa_arb_signals} arb / {sa_signals_all} total signals")
                     else:
-                        L(f"  COIN: waiting for arb signals (0/15)")
+                        L(f"  COIN: waiting for arb signals (0/{sa_threshold})")
                         L(f"        {sa_signals_all} total signals (none are cross-exchange arb)")
                 else:
                     L(f"  COIN: none selected")
@@ -1326,11 +1327,11 @@ class IntegratedArbitrageBot:
                 L(f"{'─' * W}")
                 if sa_urgent:
                     L(f"  >> ACTION: BUYING COIN NOW (urgent rebalance)")
-                elif not sa_setup and sa_arb_signals < 15:
+                elif not sa_setup and sa_arb_signals < sa_threshold:
                     if sa_arb_signals > 0:
-                        L(f"  >> ACTION: Collecting arb signals ({sa_best_count}/15 for {sa_best_sym})")
+                        L(f"  >> ACTION: Collecting arb signals ({sa_best_count}/{sa_threshold} for {sa_best_sym})")
                     else:
-                        L(f"  >> ACTION: Waiting for cross-exchange arb signals (0/15)")
+                        L(f"  >> ACTION: Waiting for cross-exchange arb signals (0/{sa_threshold})")
                 elif recent_misses > 0:
                     L(f"  >> ACTION: {recent_misses} missed trades — waiting for rebalance")
                 elif best_spread > 0 and th_pct > 0 and best_spread >= th_pct:

@@ -620,17 +620,44 @@ class SignalAllocator:
                 f"(one-time cost, then pure arb)"
             )
             
+            # ── Step 1: Sell ALL non-target coins to free up USDT ──
+            # Previous sessions may have left various coins on exchanges.
+            # Without selling them first, there's no USDT to buy the target coin.
+            sold_old = 0
+            for exchange in exchanges:
+                balances = self.balance_manager.balances.get(exchange, {})
+                for asset, amount in list(balances.items()):
+                    if asset == 'USDT' or asset == base_coin or amount <= 0:
+                        continue
+                    old_symbol = f"{asset}-USDT"
+                    old_price = 0.0
+                    if price_store:
+                        old_price = self.balance_manager._get_price_from_store(price_store, old_symbol, exchange)
+                        if old_price <= 0:
+                            old_price = self.balance_manager._get_any_price(price_store, old_symbol)
+                    if old_price <= 0:
+                        old_price = self._last_prices.get(old_symbol, 0.0)
+                    if old_price <= 0:
+                        continue
+                    old_usdt = amount * old_price
+                    if old_usdt < self.MIN_SELL_VALUE_USD:
+                        continue
+                    order = await self._execute_sell_order(
+                        exchange, old_symbol, asset, amount, old_usdt, old_price,
+                        f'Cleanup: sell old {asset} before pre-fund {base_coin}', rest_clients
+                    )
+                    if order:
+                        executed.append(order)
+                        sold_old += 1
+            if sold_old > 0:
+                logger.info(f"  🧹 Sold {sold_old} old positions to free USDT for {base_coin}")
+            
+            # ── Step 2: Buy target coin on all exchanges ──
+            already_positioned = 0
             for exchange in exchanges:
                 usdt_balance = self.balance_manager.get_balance(exchange, 'USDT')
                 reserve = getattr(settings, 'BALANCE_RESERVE_USDT', 2.0)
                 available = usdt_balance - reserve
-                if available < self.MIN_PREPOSITION_USDT:
-                    continue
-                
-                # Use MAX_PREPOSITION_PCT of available USDT for the coin
-                buy_usdt = available * self.MAX_PREPOSITION_PCT
-                if buy_usdt < self.MIN_PREPOSITION_USDT:
-                    continue
                 
                 price = 0.0
                 if price_store:
@@ -638,15 +665,24 @@ class SignalAllocator:
                     if price <= 0:
                         price = self.balance_manager._get_any_price(price_store, best_coin)
                 if price > 0:
-                    self._last_prices[best_coin] = price  # Cache for portfolio valuation
+                    self._last_prices[best_coin] = price
                 if price <= 0:
                     logger.warning(f"  ⚠️ {exchange}: No price available for {best_coin} — skipping pre-fund")
                     continue
                 
                 # Check if already positioned (from previous run)
                 current_amount = self.balance_manager.get_balance(exchange, base_coin)
-                if current_amount * price > buy_usdt * 0.5:
+                target_usdt = max(available, 0) * self.MAX_PREPOSITION_PCT
+                if current_amount * price > max(target_usdt * 0.5, self.MIN_PREPOSITION_USDT):
                     logger.info(f"  ✅ {exchange}: Already has {current_amount:.6g} {base_coin}")
+                    already_positioned += 1
+                    continue
+                
+                if available < self.MIN_PREPOSITION_USDT:
+                    continue
+                
+                buy_usdt = available * self.MAX_PREPOSITION_PCT
+                if buy_usdt < self.MIN_PREPOSITION_USDT:
                     continue
                 
                 buy_qty = buy_usdt / price
@@ -657,22 +693,26 @@ class SignalAllocator:
                 if order:
                     executed.append(order)
             
-            if executed:
-                # Use price_store for accurate entry price (not stale cache)
-                entry_price = self.balance_manager._get_any_price(price_store, best_coin) if price_store else 0.0
-                self._coin_entry_price = entry_price if entry_price > 0 else self._last_prices.get(best_coin, 0.0)
-                # Need at least 2 exchanges funded to do cross-exchange arb
-                if len(executed) >= self.MIN_EXCHANGES_FOR_ARB:
-                    self._initial_setup_done = True
-                    logger.info(
-                        f"🏦 Pre-fund complete: {base_coin} on {len(executed)}/{len(exchanges)} exchanges "
-                        f"@ ${self._coin_entry_price:.4f}. Now pure arb trades — NO more buy/sell overhead!"
-                    )
-                else:
-                    logger.warning(
-                        f"⚠️ Pre-fund partial: {base_coin} on {len(executed)}/{len(exchanges)} exchanges. "
-                        f"Need 2+ exchanges for arb. Will retry next cycle."
-                    )
+            # Count BOTH newly bought AND already-positioned exchanges
+            buy_count = sum(1 for o in executed if 'pre-fund' in o.get('reason', '').lower())
+            total_ready = buy_count + already_positioned
+            
+            # Use price_store for accurate entry price
+            entry_price = self.balance_manager._get_any_price(price_store, best_coin) if price_store else 0.0
+            self._coin_entry_price = entry_price if entry_price > 0 else self._last_prices.get(best_coin, 0.0)
+            
+            if total_ready >= self.MIN_EXCHANGES_FOR_ARB:
+                self._initial_setup_done = True
+                logger.info(
+                    f"🏦 Pre-fund complete: {base_coin} on {total_ready}/{len(exchanges)} exchanges "
+                    f"({buy_count} bought, {already_positioned} already had) "
+                    f"@ ${self._coin_entry_price:.4f}. Now pure arb trades!"
+                )
+            elif total_ready > 0:
+                logger.warning(
+                    f"⚠️ Pre-fund partial: {base_coin} on {total_ready}/{len(exchanges)} exchanges. "
+                    f"Need {self.MIN_EXCHANGES_FOR_ARB}+ for arb. Will retry next cycle."
+                )
             else:
                 logger.warning("⚠️ Pre-fund failed on ALL exchanges. Will retry next cycle.")
             return executed
@@ -1141,12 +1181,23 @@ class SignalAllocator:
                 if order:
                     executed.append(order)
                 else:
-                    # Retry once with fresh price after 1 second
+                    # Retry once with FRESH price after 1 second
                     logger.warning(f"  ⚠️ {exchange}: First sell attempt failed for {asset}, retrying in 1s...")
                     await asyncio.sleep(1.0)
-                    # Try again — price might have changed slightly
+                    # Get fresh price from orderbook for retry
+                    retry_price = price
+                    if rest_clients and not settings.DRY_RUN:
+                        client = rest_clients.get(exchange)
+                        if client and hasattr(client, 'get_orderbook'):
+                            try:
+                                ob = await client.get_orderbook(symbol)
+                                if ob and ob.get('bids') and len(ob['bids']) > 0 and len(ob['bids'][0]) > 0:
+                                    retry_price = float(ob['bids'][0][0])
+                            except Exception:
+                                pass
+                    retry_usdt = amount * retry_price
                     retry_order = await self._execute_sell_order(
-                        exchange, symbol, asset, amount, usdt_value, price,
+                        exchange, symbol, asset, amount, retry_usdt, retry_price,
                         f'SHUTDOWN RETRY: sell all {asset} to USDT', rest_clients
                     )
                     if retry_order:
