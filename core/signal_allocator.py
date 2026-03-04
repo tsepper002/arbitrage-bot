@@ -176,7 +176,8 @@ class SignalAllocator:
         strategy: str,
         exchange: str = "",
         roi_pct: float = 0.0,
-        executed: bool = False
+        executed: bool = False,
+        price: float = 0.0
     ):
         """Record a signal for allocation scoring.
 
@@ -186,6 +187,7 @@ class SignalAllocator:
             exchange: Exchange where signal was found
             roi_pct: Expected ROI percentage
             executed: Whether the signal led to an actual trade
+            price: Current price (cached for pre-fund buy step)
         """
         self._signals.append(SignalRecord(
             symbol=symbol,
@@ -195,6 +197,10 @@ class SignalAllocator:
             roi_pct=roi_pct,
             executed=executed,
         ))
+
+        # Cache price for pre-fund Step 2 (buy target coin)
+        if price > 0:
+            self._last_prices[symbol] = price
 
         # Track signal timing per symbol
         now = time.time()
@@ -664,6 +670,9 @@ class SignalAllocator:
                     price = self.balance_manager._get_price_from_store(price_store, best_coin, exchange)
                     if price <= 0:
                         price = self.balance_manager._get_any_price(price_store, best_coin)
+                # Fallback to cached price from signal tracking
+                if price <= 0:
+                    price = self._last_prices.get(best_coin, 0.0)
                 if price > 0:
                     self._last_prices[best_coin] = price
                 if price <= 0:
@@ -681,7 +690,13 @@ class SignalAllocator:
                 if available < self.MIN_PREPOSITION_USDT:
                     continue
                 
-                buy_usdt = available * self.MAX_PREPOSITION_PCT
+                # For initial pre-fund, use up to 75% of available USDT
+                # (higher than normal 50% because positioning is the priority)
+                buy_usdt = available * 0.75
+                # Ensure we meet exchange minimum order size
+                min_order = self.MIN_ORDER_USDT.get(exchange, 5.0)
+                if buy_usdt < min_order and available >= min_order:
+                    buy_usdt = min_order  # Use exactly the minimum
                 if buy_usdt < self.MIN_PREPOSITION_USDT:
                     continue
                 

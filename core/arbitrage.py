@@ -662,7 +662,8 @@ class ArbitrageEngine:
                     raw_roi = gross_spread_pct - sum_fees_pct  # may be negative
                     self.signal_allocator.record_signal(
                         symbol=symbol, strategy='CROSS_EXCHANGE',
-                        exchange=buy_ex, roi_pct=raw_roi
+                        exchange=buy_ex, roi_pct=raw_roi,
+                        price=top_ask  # cache price for pre-fund buy step
                     )
                 
                 # Prefilter: skip if spread < dynamic threshold (for EXECUTION only)
