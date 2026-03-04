@@ -40,6 +40,7 @@ class BalanceManager:
         self.sync_interval = self.BALANCE_SYNC_INTERVAL_SEC
         self.excluded_exchanges: Set[str] = set()
         self.locked_funds: Dict[str, Dict[str, float]] = {}  # {exchange: {currency: locked_amount}}
+        self._asset_prices: Dict[str, float] = {}  # cache: {asset: usd_price} for equity estimation
         self.initialized = False
         
         logger.info("✅ BalanceManager initialized")
@@ -127,18 +128,27 @@ class BalanceManager:
             self.balances[exchange_name] = balance
             self.last_sync[exchange_name] = time.time()
             
-            # Check if exchange should be excluded
+            # Check if exchange should be excluded based on TOTAL equity
+            # (USDT + coin holdings), not just USDT.
+            # After pre-fund, most equity is in coins — checking only USDT
+            # would exclude all exchanges!
             usdt_balance = balance.get('USDT', 0)
-            if usdt_balance < settings.MIN_BALANCE_PER_EXCHANGE:
+            total_equity = usdt_balance
+            for asset, amount in balance.items():
+                if asset != 'USDT' and amount > 0:
+                    total_equity += amount * self._estimate_asset_value(asset)
+            
+            if total_equity < settings.MIN_BALANCE_PER_EXCHANGE:
                 if exchange_name not in self.excluded_exchanges:
                     logger.warning(
-                        f"⚠️  {exchange_name} excluded: USDT balance ${usdt_balance:.2f} "
+                        f"⚠️  {exchange_name} excluded: total equity ${total_equity:.2f} "
+                        f"(USDT ${usdt_balance:.2f} + coins) "
                         f"< minimum ${settings.MIN_BALANCE_PER_EXCHANGE:.2f}"
                     )
                     self.excluded_exchanges.add(exchange_name)
             else:
                 if exchange_name in self.excluded_exchanges:
-                    logger.info(f"✅ {exchange_name} re-enabled: balance sufficient")
+                    logger.info(f"✅ {exchange_name} re-enabled: equity ${total_equity:.2f}")
                     self.excluded_exchanges.discard(exchange_name)
             
             logger.debug(f"{exchange_name} balance: {balance}")
@@ -147,6 +157,10 @@ class BalanceManager:
         except Exception as e:
             logger.error(f"❌ Failed to fetch balance from {exchange_name}: {e}")
             return {}
+    
+    def _estimate_asset_value(self, asset: str) -> float:
+        """Estimate USD value of 1 unit of an asset using cached prices."""
+        return self._asset_prices.get(asset, 0.0)
     
     async def sync_balances(self):
         """
