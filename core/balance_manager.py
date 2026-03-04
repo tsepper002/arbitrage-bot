@@ -25,6 +25,8 @@ class BalanceManager:
     - Balance alerts via Telegram (if configured)
     """
     
+    BALANCE_SYNC_INTERVAL_SEC = 30.0  # Top bots: 15-30s; configurable at class level
+
     def __init__(self, rest_clients: Optional[Dict] = None):
         """
         Initialize balance manager.
@@ -35,7 +37,7 @@ class BalanceManager:
         self.rest_clients = rest_clients or {}
         self.balances: Dict[str, Dict[str, float]] = {}  # {exchange: {currency: amount}}
         self.last_sync: Dict[str, float] = {}  # {exchange: timestamp}
-        self.sync_interval = 30.0  # Top bots sync every 15-30s; 60s was too slow
+        self.sync_interval = self.BALANCE_SYNC_INTERVAL_SEC
         self.excluded_exchanges: Set[str] = set()
         self.locked_funds: Dict[str, Dict[str, float]] = {}  # {exchange: {currency: locked_amount}}
         self.initialized = False

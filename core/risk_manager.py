@@ -27,6 +27,8 @@ class RiskManager:
     - MIN_BALANCE_PER_EXCHANGE: Exclude low-balance exchanges
     """
     
+    MAX_ADVERSE_MOVE_PCT = 2.0  # Worst-case execution adverse move for arb
+
     def __init__(self):
         # Daily tracking
         self.daily_pnl = 0.0
@@ -196,7 +198,7 @@ class RiskManager:
         # In arbitrage, max loss ≈ amount × slippage + fees (not full spread)
         # Top bots (Hummingbot): max_loss = amount × (max_slippage_pct/100 + total_fee_pct)
         # Conservative: assume worst case 2% adverse move during execution
-        max_loss_pct = min(settings.ANOMALOUS_SPREAD_PCT, 2.0)  # Cap at 2%
+        max_loss_pct = min(settings.ANOMALOUS_SPREAD_PCT, self.MAX_ADVERSE_MOVE_PCT)
         max_possible_loss = amount * (max_loss_pct / 100.0)
         if max_possible_loss > settings.MAX_SINGLE_TRADE_LOSS:
             return False, f"Potential loss (${max_possible_loss:.2f}) exceeds max single trade limit (${settings.MAX_SINGLE_TRADE_LOSS:.2f})"
