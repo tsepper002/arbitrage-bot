@@ -112,11 +112,13 @@ class SignalAllocator:
     MISS_WINDOW = 60.0   # 1 min window
 
     # Coin rotation: smart switch conditions
-    SILENCE_TIMEOUT = 600       # 10 minutes of zero signals → consider switch
-    MIN_ALTERNATIVES = 3        # Need at least 3 hot alternatives to switch
-    MIN_ALT_TRACK_RECORD = 900  # Each alternative must have 15 min of signal history
+    # Top arb bot pattern: switch quickly when a better coin appears.
+    # 5 min silence = coin has no cross-exchange arb potential → try another.
+    SILENCE_TIMEOUT = 300       # 5 minutes of zero signals → consider switch
+    MIN_ALTERNATIVES = 1        # Need at least 1 hot alternative to switch
+    MIN_ALT_TRACK_RECORD = 300  # Each alternative must have 5 min of signal history
     MAX_SELL_LOSS_PCT = 0.5     # Don't sell if price dropped >0.5% from entry
-    COIN_SWITCH_COOLDOWN = 600  # 10 min cooldown between switches
+    COIN_SWITCH_COOLDOWN = 300  # 5 min cooldown between switches
     MAX_SIGNAL_STALENESS = 120  # 2 min: alternative is stale if no recent signals
     # Signal scoring window
     INITIAL_SIGNAL_WINDOW = 30  # Use last 30 signals for initial coin selection
@@ -151,6 +153,7 @@ class SignalAllocator:
         self._misses: List[Dict] = []  # [{symbol, exchange, side, timestamp}]
         self._urgent_rebalance_needed = False
         self._urgent_symbols: Dict[str, float] = {}  # symbol → timestamp of last miss
+        self._urgent_missed_coin: Optional[str] = None  # symbol that triggered urgent rebalance
         self._rebalance_history: Dict[tuple, float] = {}  # (exchange, symbol) → last_rebalance_time
         self._total_rebalance_fees = 0.0  # Track total fees spent on rebalancing
 
@@ -244,6 +247,7 @@ class SignalAllocator:
             if now - last_urgent < 30:
                 return  # Already triggered recently, skip spam
             self._urgent_rebalance_needed = True
+            self._urgent_missed_coin = symbol
             self._urgent_symbols[symbol] = now
             logger.info(
                 f"🔥 URGENT: {symbol} missed {recent_for_symbol}× in {self.MISS_WINDOW:.0f}s "
@@ -711,32 +715,60 @@ class SignalAllocator:
                         return executed
         
         # ========== PHASE 2B: SMART COIN SWITCH ==========
-        # Switch conditions (ALL must be met):
-        # 1. Current coin has 0 signals for >= SILENCE_TIMEOUT (10 min)
-        # 2. At least MIN_ALTERNATIVES (3) hot alternative coins available
-        # 3. Each alternative has MIN_ALT_TRACK_RECORD (15 min) of signal history
-        # 4. Sale price not more than MAX_SELL_LOSS_PCT (0.5%) below entry price
-        # 5. Cooldown since last switch >= COIN_SWITCH_COOLDOWN (10 min)
+        # Two triggers:
+        # A) SILENCE: Current coin has no arb signals for SILENCE_TIMEOUT
+        # B) URGENT MISS: A DIFFERENT coin has profitable opportunities but we have no inventory
+        # Both require: cooldown passed, alternative exists, price loss acceptable
         time_since_position = now - self._coin_positioned_at
         
         if time_since_position > self.COIN_SWITCH_COOLDOWN and self._current_coin:
-            # Check condition 1: no positive-ROI signals for SILENCE_TIMEOUT (10 min)
+            # --- Trigger A: Silence-based switch ---
+            # Use _last_profitable_signal_time if available, else fall back to
+            # _coin_positioned_at. This fixes the bug where last_profitable==0
+            # (never profitable) caused the switch to be skipped FOREVER.
             last_profitable = self._last_profitable_signal_time.get(self._current_coin, 0)
-            if last_profitable == 0:
-                pass  # No profitable signals ever — skip switch, coin just started
-            elif (now - last_profitable) >= self.SILENCE_TIMEOUT:
-                silence_duration = now - last_profitable
-                # Check condition 2 & 3: at least MIN_ALTERNATIVES with track record
+            effective_last = last_profitable if last_profitable > 0 else self._coin_positioned_at
+            silence_duration = now - effective_last
+            silence_triggered = silence_duration >= self.SILENCE_TIMEOUT
+            
+            # --- Trigger B: Urgent miss for different coin ---
+            urgent_coin = self._urgent_missed_coin
+            urgent_triggered = (
+                urgent_coin is not None
+                and urgent_coin != self._current_coin
+                and urgent_coin in self._symbol_first_seen  # Has signal history
+            )
+            
+            trigger_reason = None
+            if urgent_triggered:
+                trigger_reason = f"URGENT: missed trades for {urgent_coin}"
+                self._urgent_missed_coin = None  # Consume the urgent flag
+            elif silence_triggered:
+                trigger_reason = f"silence {silence_duration:.0f}s"
+            
+            if trigger_reason:
+                # Find alternatives — for urgent, the missed coin is the primary target
                 alternatives = self._get_hot_alternatives(
                     self._current_coin, 
                     min_track_record_sec=self.MIN_ALT_TRACK_RECORD
                 )
                 
+                # For urgent switch, prefer the missed coin if it's in alternatives
+                if urgent_triggered:
+                    urgent_in_alts = [a for a in alternatives if a[0] == urgent_coin]
+                    if urgent_in_alts:
+                        # Move urgent coin to front
+                        alternatives = urgent_in_alts + [a for a in alternatives if a[0] != urgent_coin]
+                    elif urgent_coin:
+                        # Urgent coin not in alternatives yet — add it with minimum score
+                        # (it has real trade demand, which is better than any signal score)
+                        alternatives.insert(0, (urgent_coin, 1.0))
+                
                 if len(alternatives) >= self.MIN_ALTERNATIVES:
-                    # Pick the best alternative (highest score)
+                    # Pick the best alternative (highest score, or urgent coin)
                     new_coin, new_score = alternatives[0]
                     
-                    # Check condition 4: sale price not >0.5% below entry
+                    # Check price loss: don't sell if price dropped >0.5% from entry
                     sell_ok = True
                     if self._coin_entry_price > 0 and price_store:
                         current_price = self.balance_manager._get_any_price(price_store, self._current_coin)
@@ -756,7 +788,7 @@ class SignalAllocator:
                         
                         logger.info(
                             f"🔄 SMART SWITCH: {old_base} → {new_base} "
-                            f"(silence {silence_duration:.0f}s, {len(alternatives)} alternatives, "
+                            f"({trigger_reason}, {len(alternatives)} alternatives, "
                             f"best score {new_score:.2f})"
                         )
                         
@@ -825,7 +857,7 @@ class SignalAllocator:
                             )
                 else:
                     logger.debug(
-                        f"⏸️ {self._current_coin} no profit {silence_duration:.0f}s but only "
+                        f"⏸️ {self._current_coin} {trigger_reason} but only "
                         f"{len(alternatives)} alternatives (need {self.MIN_ALTERNATIVES})"
                     )
         
@@ -1106,7 +1138,18 @@ class SignalAllocator:
                 if order:
                     executed.append(order)
                 else:
-                    logger.warning(f"  ❌ {exchange}: Failed to sell {amount:.6g} {asset} (${usdt_value:.2f})")
+                    # Retry once with fresh price after 1 second
+                    logger.warning(f"  ⚠️ {exchange}: First sell attempt failed for {asset}, retrying in 1s...")
+                    await asyncio.sleep(1.0)
+                    # Try again — price might have changed slightly
+                    retry_order = await self._execute_sell_order(
+                        exchange, symbol, asset, amount, usdt_value, price,
+                        f'SHUTDOWN RETRY: sell all {asset} to USDT', rest_clients
+                    )
+                    if retry_order:
+                        executed.append(retry_order)
+                    else:
+                        logger.warning(f"  ❌ {exchange}: Failed to sell {amount:.6g} {asset} (${usdt_value:.2f}) after 2 attempts")
         
         total_usdt = sum(o.get('amount_usdt', 0) for o in executed)
         if executed:
