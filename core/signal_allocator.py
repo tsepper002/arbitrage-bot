@@ -88,6 +88,9 @@ class SignalAllocator:
     # Pre-fund: use 50% of USDT for ONE coin on each exchange
     # Example: $14/exchange − $2 reserve = $12 available → $6 for coin (above $5 min)
     MAX_PREPOSITION_PCT = 0.50
+    # Initial pre-fund uses higher % (positioning is the priority at startup)
+    MAX_PREFUND_PCT = 0.75
+    DEFAULT_MIN_ORDER_USDT = 5.0  # Fallback exchange minimum order size
 
     # Maximum allocation to any single symbol
     MAX_SINGLE_SYMBOL_PCT = 0.40  # At small capital, focus on 1 coin
@@ -692,9 +695,9 @@ class SignalAllocator:
                 
                 # For initial pre-fund, use up to 75% of available USDT
                 # (higher than normal 50% because positioning is the priority)
-                buy_usdt = available * 0.75
+                buy_usdt = available * self.MAX_PREFUND_PCT
                 # Ensure we meet exchange minimum order size
-                min_order = self.MIN_ORDER_USDT.get(exchange, 5.0)
+                min_order = self.MIN_ORDER_USDT.get(exchange, self.DEFAULT_MIN_ORDER_USDT)
                 if buy_usdt < min_order and available >= min_order:
                     buy_usdt = min_order  # Use exactly the minimum
                 if buy_usdt < self.MIN_PREPOSITION_USDT:
@@ -996,7 +999,7 @@ class SignalAllocator:
         fee_rate = EXCHANGE_PARAMS.get(exchange, {}).get('taker', 0.001)
         
         # Enforce exchange minimum order amount
-        min_order = self.MIN_ORDER_USDT.get(exchange, 5.0)
+        min_order = self.MIN_ORDER_USDT.get(exchange, self.DEFAULT_MIN_ORDER_USDT)
         if usdt_amount < min_order:
             logger.debug(f"  ⏭️ {exchange}: Skip buy — ${usdt_amount:.2f} < ${min_order} minimum")
             return None
