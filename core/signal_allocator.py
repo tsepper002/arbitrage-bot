@@ -670,7 +670,7 @@ class SignalAllocator:
                 try:
                     await self.balance_manager.sync_balances()
                 except Exception as e:
-                    logger.debug(f"Balance refresh after sell failed: {e}")
+                    logger.warning(f"⚠️ Balance refresh after sell failed (will use cached): {e}")
             
             # ── Step 2: Buy target coin on all exchanges ──
             already_positioned = 0
@@ -864,10 +864,15 @@ class SignalAllocator:
                             f"best score {new_score:.2f})"
                         )
                         # Log top-3 alternatives so user can see WHY this coin was chosen
+                        # Pre-compute signal counts to avoid repeated full list iteration
+                        top_syms = {alt_sym for alt_sym, _ in alternatives[:3]}
+                        sig_counts = {s: 0 for s in top_syms}
+                        for sig in self._signals:
+                            if sig.symbol in top_syms and sig.strategy == 'CROSS_EXCHANGE':
+                                sig_counts[sig.symbol] += 1
                         for i, (alt_sym, alt_score) in enumerate(alternatives[:3]):
                             alt_base = alt_sym.split('-')[0] if '-' in alt_sym else alt_sym.replace('USDT', '')
-                            alt_sigs = sum(1 for s in self._signals if s.symbol == alt_sym and s.strategy == 'CROSS_EXCHANGE')
-                            logger.info(f"  #{i+1} {alt_base}: score={alt_score:.2f}, arb_signals={alt_sigs}")
+                            logger.info(f"  #{i+1} {alt_base}: score={alt_score:.2f}, arb_signals={sig_counts.get(alt_sym, 0)}")
                         
                         # Sell old coin on all exchanges
                         for exchange in exchanges:
@@ -899,7 +904,7 @@ class SignalAllocator:
                         try:
                             await self.balance_manager.sync_balances()
                         except Exception as e:
-                            logger.debug(f"Balance refresh after switch sell failed: {e}")
+                            logger.warning(f"⚠️ Balance refresh after switch sell failed (will use cached): {e}")
                         
                         # Buy new coin on all exchanges
                         for exchange in exchanges:

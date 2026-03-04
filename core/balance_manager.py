@@ -47,7 +47,12 @@ class BalanceManager:
         logger.info("✅ BalanceManager initialized")
     
     def set_price_store(self, price_store):
-        """Set price store reference for equity estimation during balance sync."""
+        """Set price store reference for equity estimation during balance sync.
+        
+        Must be called before sync_balances() for accurate equity calculations.
+        Without this, balance exclusion falls back to _asset_prices cache which
+        may be empty on first sync (exchanges would be incorrectly excluded).
+        """
         self._price_store_ref = price_store
     
     async def initialize(self):
