@@ -1313,7 +1313,9 @@ class IntegratedArbitrageBot:
                     else:
                         # Check if the best spread is for the CURRENT coin
                         current_coin = sa.get_current_coin() if sa else None
-                        if current_coin and best_net_info and current_coin.split('-')[0] not in best_net_info:
+                        # best_net_info format: "FIL-USDT KuCoin→MEXC"
+                        best_net_symbol = best_net_info.split(' ')[0] if best_net_info else ''
+                        if current_coin and best_net_symbol and best_net_symbol != current_coin:
                             L(f"  >>> SPREAD ABOVE THRESHOLD on {best_net_info} — switching coin soon!")
                         else:
                             L(f"  >>> SPREAD ABOVE THRESHOLD — TRADES POSSIBLE!")
@@ -1327,7 +1329,8 @@ class IntegratedArbitrageBot:
                         L(f"  GAP:          {gap:.4f}%  (need {gap:.4f}% more spread)")
                     else:
                         current_coin = sa.get_current_coin() if sa else None
-                        if current_coin and best_info and current_coin.split('-')[0] not in best_info:
+                        best_info_symbol = best_info.split(' ')[0] if best_info else ''
+                        if current_coin and best_info_symbol and best_info_symbol != current_coin:
                             L(f"  >>> SPREAD ABOVE THRESHOLD on {best_info} — switching coin soon!")
                         else:
                             L(f"  >>> SPREAD ABOVE THRESHOLD — TRADES POSSIBLE!")
