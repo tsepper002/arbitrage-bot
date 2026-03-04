@@ -178,6 +178,7 @@ class OrderExecutor:
             if is_triangular:
                 # Triangular: all legs on same exchange, starts with USDT buy.
                 # No pre-positioned base coin needed.
+                available_sell = 0.0  # Not used for triangular
                 adjusted_qty = min(qty, max_qty_from_usdt)
             else:
                 available_sell = self.balance_manager.get_balance(sell_ex, base_currency)
@@ -185,17 +186,15 @@ class OrderExecutor:
             
             if adjusted_qty <= 0 or (adjusted_qty * buy_price) < min_order:
                 # Not enough balance for any meaningful trade
-                if not is_triangular:
-                    available_sell = self.balance_manager.get_balance(sell_ex, base_currency)
-                    if available_sell <= 0:
-                        self._blocked_cooldown[symbol] = time.time()
-                        return {
-                            'status': 'blocked',
-                            'reason': f'No {base_currency} on {sell_ex}: have {available_sell:.6f}',
-                            'missed_symbol': symbol,
-                            'missed_exchange': sell_ex,
-                            'missed_side': 'sell',
-                        }
+                if not is_triangular and available_sell <= 0:
+                    self._blocked_cooldown[symbol] = time.time()
+                    return {
+                        'status': 'blocked',
+                        'reason': f'No {base_currency} on {sell_ex}: have {available_sell:.6f}',
+                        'missed_symbol': symbol,
+                        'missed_exchange': sell_ex,
+                        'missed_side': 'sell',
+                    }
                 self._blocked_cooldown[symbol] = time.time()
                 return {
                     'status': 'blocked',
@@ -391,7 +390,6 @@ class OrderExecutor:
                     if is_triangular:
                         reason = f"Insufficient USDT: {buy_ex} USDT=${available_usdt:.2f} (need ${self.MIN_ORDER_USDT:.2f})"
                     else:
-                        available_base = self.balance_manager.get_balance(sell_ex, base_currency)
                         reason = (f"Insufficient balance: {buy_ex} USDT=${available_usdt:.2f}, "
                                   f"{sell_ex} {base_currency}={available_base:.6f}")
                     logger.warning(f"⚠️  {reason}")
