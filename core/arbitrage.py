@@ -818,13 +818,10 @@ class ArbitrageEngine:
                     except (AttributeError, ValueError, TypeError) as e:
                         logger.debug(f"ML spread predictor error: {e}")
                 
-                # P5: Market Regime Detection — adjust min ROI based on cached regime
+                # P5: Market Regime Detection — advisory only
+                # TOP BOT PATTERN: Arb is market-neutral, vol regime doesn't affect min ROI.
+                # The dynamic_threshold already accounts for market conditions.
                 regime_min_roi = self.min_net_pct
-                if _cached_regime:
-                    if _cached_regime == 'VOLATILE':
-                        regime_min_roi = self.min_net_pct * 1.5
-                    elif _cached_regime == 'CALM':
-                        regime_min_roi = self.min_net_pct * 0.8
                 
                 # P6: Fee Optimizer — record trade fee for VIP tier analysis
                 if self.fee_optimizer:
@@ -914,7 +911,7 @@ class ArbitrageEngine:
                     key = f"{symbol}:{buy_ex}->{sell_ex}:{round(buy_avg,6)}:{round(sell_avg,6)}"
                     now = time.time()
                     last_ts = self.recent_cache.get(key, 0)
-                    if now - last_ts > 5.0:
+                    if now - last_ts > 2.0:
                         self.recent_cache[key] = now
                         self._persist_opportunity(info)
                         res.append(info)
@@ -1025,10 +1022,11 @@ class ArbitrageEngine:
                     if nm > 0:
                         self.strategy_dispatcher.record_engine_near_misses(nm)
                         self._near_miss_count = 0  # Reset after feeding
-                engine_trade_this_cycle = False  # ONE trade per scan cycle
+                trades_this_cycle = 0
+                MAX_TRADES_PER_CYCLE = 2  # Allow 2 trades/cycle (different pairs)
                 for o in opps:
-                    # LIMIT: one trade per cycle to avoid balance race conditions
-                    if engine_trade_this_cycle:
+                    # LIMIT: max trades per cycle to avoid balance race conditions
+                    if trades_this_cycle >= MAX_TRADES_PER_CYCLE:
                         break
                     
                     # Skip trade execution if coins not yet positioned
@@ -1064,7 +1062,7 @@ class ArbitrageEngine:
                     result = await self.executor.execute_arbitrage(o)
                     
                     if result.get('status') in ('success', 'simulated'):
-                        engine_trade_this_cycle = True
+                        trades_this_cycle += 1
                     
                     # PRE-FUNDED MODEL: No JIT — too expensive.
                     # Instead, record the miss so rebalancer can top up if needed.

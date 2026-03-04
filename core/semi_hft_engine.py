@@ -498,14 +498,15 @@ class SemiHFTEngine:
                              buy_exchange: str, sell_exchange: str,
                              capital_manager=None) -> float:
         """
-        Dynamic threshold 2.0:
-            threshold = fees
-                      + p95_slippage
-                      + (latency × volatility_per_ms)
-                      + execution_failure_rate_buffer
-                      + capital_manager cushion (if available)
+        Dynamic threshold 2.0 — aligned with top arb bots (CCXT/Barbotine):
+            threshold = fees + level-specific cushion (from CapitalManager)
+
+        TOP BOT PATTERN: Simple threshold = fees + small buffer.
+        Previous version added p95_slippage + failure_rate + vol_regime on top,
+        which inflated the threshold by 0.03-0.10% and blocked profitable trades.
+        These are now DATA COLLECTION ONLY (logged, not added to threshold).
         """
-        # Base threshold from CapitalManager if available
+        # Base threshold from CapitalManager: fees + cushion (0.008-0.015%)
         buy_lat = self.get_exchange_latency_ms(buy_exchange)
         sell_lat = self.get_exchange_latency_ms(sell_exchange)
         avg_latency = (buy_lat + sell_lat) / 2.0
@@ -513,28 +514,27 @@ class SemiHFTEngine:
         if capital_manager:
             base = capital_manager.dynamic_threshold(total_fee_pct, avg_latency)
         else:
-            base = total_fee_pct + 0.15  # fallback
+            base = total_fee_pct + 0.02  # fallback: fees + 0.02%
 
-        # Add p95 slippage from history
+        # --- DATA COLLECTION (advisory only, NOT added to threshold) ---
+
+        # Track p95 slippage for monitoring
         if self._slippage_history:
             sorted_slip = sorted(self._slippage_history)
             p95_idx = int(len(sorted_slip) * 0.95)
             p95_slip = sorted_slip[min(p95_idx, len(sorted_slip) - 1)]
-            base += p95_slip * self.P95_SLIPPAGE_WEIGHT
+            logger.debug(f"p95 slippage: {p95_slip:.4f}% (monitoring only)")
 
-        # Add execution failure buffer
+        # Track failure rate for monitoring
         pair_key = f"{buy_exchange}->{sell_exchange}"
         pair_stats = self._pair_scores.get(pair_key)
         if pair_stats and pair_stats.total >= 5:
             failure_rate = 1.0 - (pair_stats.wins / pair_stats.total)
-            # Scale failure rate impact: e.g. 30% failures × 0.02 × 10 = +0.06% threshold
-            base += failure_rate * self.EXECUTION_FAILURE_BUFFER * self.FAILURE_RATE_SCALE
+            logger.debug(f"Pair {pair_key} failure rate: {failure_rate:.1%} (monitoring only)")
 
-        # Volatility regime adjustment
-        if self._vol_regime.regime == "TRENDING":
-            base += 0.03  # +0.03% in trending markets
-        elif self._vol_regime.regime == "PANIC":
-            base += 0.10  # +0.10% in panic (much more protective)
+        # ONLY in PANIC regime do we raise the threshold (market structure broken)
+        if self._vol_regime.regime == "PANIC":
+            base += 0.05  # +0.05% in panic only (market structure may be broken)
 
         return base
 
