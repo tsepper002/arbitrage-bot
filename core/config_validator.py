@@ -41,12 +41,13 @@ def validate_config() -> Dict[str, List[str]]:
     # ========================================================================
     # 1. API Key Validation
     # ========================================================================
+    # Must match env var names used in settings.py (ARB_* prefix)
     exchanges = {
-        'Bybit': ('BYBIT_API_KEY', 'BYBIT_API_SECRET'),
-        'KuCoin': ('KUCOIN_API_KEY', 'KUCOIN_API_SECRET', 'KUCOIN_PASSPHRASE'),
-        'HTX': ('HTX_API_KEY', 'HTX_API_SECRET'),
-        'MEXC': ('MEXC_API_KEY', 'MEXC_API_SECRET'),
-        'Binance': ('BINANCE_API_KEY', 'BINANCE_API_SECRET'),
+        'Bybit': ('ARB_BYBIT_KEY', 'ARB_BYBIT_SECRET'),
+        'KuCoin': ('ARB_KUCOIN_KEY', 'ARB_KUCOIN_SECRET', 'ARB_KUCOIN_PASSPHRASE'),
+        'HTX': ('ARB_HTX_KEY', 'ARB_HTX_SECRET'),
+        'MEXC': ('ARB_MEXC_KEY', 'ARB_MEXC_SECRET'),
+        'Binance': ('ARB_BINANCE_KEY', 'ARB_BINANCE_SECRET'),
     }
 
     configured_exchanges = 0

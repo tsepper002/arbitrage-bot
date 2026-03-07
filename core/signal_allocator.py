@@ -759,6 +759,45 @@ class SignalAllocator:
                 logger.warning("⚠️ Pre-fund failed on ALL exchanges. Will retry next cycle.")
             return executed
         
+        # ========== PHASE 1.5: RETRY PRE-FUND for missed exchanges ==========
+        # After initial setup completes (4/5 exchanges), some may have failed.
+        # Those exchanges sit idle with USDT but 0 of the current coin.
+        # Retry buying on them so they can participate in arb trades.
+        if self._current_coin and self._initial_setup_done:
+            base_coin = self._current_coin.split('-')[0] if '-' in self._current_coin else self._current_coin.replace('USDT', '')
+            for exchange in exchanges:
+                coin_balance = self.balance_manager.get_balance(exchange, base_coin)
+                if coin_balance > 0:
+                    continue  # Already has the coin — skip
+                usdt_balance = self.balance_manager.get_balance(exchange, 'USDT')
+                reserve = getattr(settings, 'BALANCE_RESERVE_USDT', 2.0)
+                available = usdt_balance - reserve
+                min_order = getattr(settings, 'MIN_ORDER_USDT', self.DEFAULT_MIN_ORDER_USDT)
+                if available < min_order:
+                    continue  # Not enough USDT to buy
+                
+                # Get current price
+                price = 0.0
+                if price_store:
+                    price = self.balance_manager._get_any_price(price_store, self._current_coin)
+                if price <= 0:
+                    price = self._last_prices.get(self._current_coin, 0.0)
+                if price <= 0:
+                    continue  # No price available
+                
+                buy_usdt = available * self.MAX_PREFUND_PCT
+                if buy_usdt < min_order:
+                    continue
+                buy_qty = buy_usdt / price
+                logger.info(f"🔄 Retrying pre-fund {base_coin} on {exchange} (had 0, USDT={usdt_balance:.2f})")
+                order = await self._execute_buy_order(
+                    exchange, self._current_coin, base_coin, buy_qty, buy_usdt, price,
+                    f'Retry pre-fund {base_coin}', rest_clients
+                )
+                if order:
+                    executed.append(order)
+                    logger.info(f"✅ {exchange}: Retry pre-fund succeeded — now has {base_coin}!")
+        
         # ========== PHASE 2A: EMERGENCY EXIT on price crash ==========
         # If coin dropped >3% from entry AND enough time has passed to avoid false triggers
         if self._current_coin and self._coin_entry_price > 0 and price_store:

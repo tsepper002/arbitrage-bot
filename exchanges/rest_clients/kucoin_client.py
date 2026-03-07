@@ -138,12 +138,16 @@ class KuCoinRESTClient(BaseRESTClient):
                 if not price or price <= 0:
                     raise ValueError(f"Market buy requires valid price, got: {price}")
                 funds = quantity * price
-                # KuCoin requires funds rounded to quoteIncrement (0.0001 for most USDT pairs)
-                # Floor to 4 decimal places to avoid "Funds increment invalid"
-                funds = math.floor(funds * 10000) / 10000
+                # KuCoin requires funds rounded to quoteIncrement per trading pair.
+                # quoteIncrement varies: AVAX/USDT=0.01, BTC/USDT=0.0001, etc.
+                # Floor to 2 decimal places (0.01) is ALWAYS safe because:
+                # - All USDT pairs have quoteIncrement >= 0.01
+                # - 0.01 is a multiple of 0.0001 (no precision loss for fine increments)
+                # - Was 4 decimals (0.0001), which broke AVAX with 0.01 increment
+                funds = math.floor(funds * 100) / 100
                 if funds < 0.1:
                     raise ValueError(f"Market buy funds ${funds} below KuCoin minimum $0.10")
-                order_data["funds"] = f"{funds:.4f}"
+                order_data["funds"] = f"{funds:.2f}"
             else:
                 # Market sell: truncate to max decimal places as safety net
                 # (proper rounding by exchange step_size happens in order_executor)
