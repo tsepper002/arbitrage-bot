@@ -121,6 +121,9 @@ class BinanceRESTClient(BaseRESTClient):
         session = await self._get_session()
 
         async with session.post(f"{url}?{query}", headers=headers) as resp:
+            if resp.status != 200:
+                text = await resp.text()
+                raise Exception(f"Binance HTTP {resp.status}: {text[:200]}")
             data = await resp.json()
 
             if "code" in data and data.get("code", 0) < 0:
