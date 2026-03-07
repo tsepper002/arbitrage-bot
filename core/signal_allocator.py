@@ -937,6 +937,7 @@ class SignalAllocator:
                         for exchange in exchanges:
                             amount = self.balance_manager.get_balance(exchange, old_base)
                             if amount <= 0:
+                                logger.info(f"  ⏭️ {exchange}: Skip sell — 0 {old_base}")
                                 continue
                             price = 0.0
                             if price_store:
@@ -944,10 +945,12 @@ class SignalAllocator:
                                 if price <= 0:
                                     price = self.balance_manager._get_any_price(price_store, old_coin)
                             if price <= 0:
+                                logger.info(f"  ⏭️ {exchange}: Skip sell — no price for {old_coin}")
                                 continue
                             
                             sell_usdt = amount * price
                             if sell_usdt < self.MIN_PREPOSITION_USDT:
+                                logger.info(f"  ⏭️ {exchange}: Skip sell — ${sell_usdt:.2f} < ${self.MIN_PREPOSITION_USDT} min")
                                 continue
                             
                             sell_qty = amount * self.LIQUIDATION_PCT
@@ -966,15 +969,23 @@ class SignalAllocator:
                             logger.warning(f"⚠️ Balance refresh after switch sell failed (will use cached): {e}")
                         
                         # Buy new coin on all exchanges
+                        # Uses same safety net as pre-fund (Step 2): bump to min_order if possible
                         for exchange in exchanges:
                             usdt_balance = self.balance_manager.get_balance(exchange, 'USDT')
                             reserve = getattr(settings, 'BALANCE_RESERVE_USDT', 2.0)
                             available = usdt_balance - reserve
                             if available < self.MIN_PREPOSITION_USDT:
+                                logger.info(f"  ⏭️ {exchange}: Skip buy — USDT ${usdt_balance:.2f} - ${reserve:.0f} reserve = ${available:.2f} < ${self.MIN_PREPOSITION_USDT} min")
                                 continue
                             
-                            buy_usdt = available * self.MAX_PREPOSITION_PCT
+                            # Use MAX_PREFUND_PCT (same as initial pre-fund) — switch IS a pre-fund
+                            buy_usdt = available * self.MAX_PREFUND_PCT
+                            # Safety net: bump to exchange minimum if we have enough USDT
+                            min_order = self.MIN_ORDER_USDT.get(exchange, self.DEFAULT_MIN_ORDER_USDT)
+                            if buy_usdt < min_order and available >= min_order:
+                                buy_usdt = min_order
                             if buy_usdt < self.MIN_PREPOSITION_USDT:
+                                logger.info(f"  ⏭️ {exchange}: Skip buy — buy_usdt ${buy_usdt:.2f} < ${self.MIN_PREPOSITION_USDT} min")
                                 continue
                             
                             price = 0.0
@@ -983,6 +994,7 @@ class SignalAllocator:
                                 if price <= 0:
                                     price = self.balance_manager._get_any_price(price_store, new_coin)
                             if price <= 0:
+                                logger.info(f"  ⏭️ {exchange}: Skip buy — no price for {new_coin}")
                                 continue
                             
                             buy_qty = buy_usdt / price
@@ -1102,12 +1114,13 @@ class SignalAllocator:
         # Enforce exchange minimum order amount
         min_order = self.MIN_ORDER_USDT.get(exchange, self.DEFAULT_MIN_ORDER_USDT)
         if usdt_amount < min_order:
-            logger.debug(f"  ⏭️ {exchange}: Skip buy — ${usdt_amount:.2f} < ${min_order} minimum")
+            logger.info(f"  ⏭️ {exchange}: Skip buy — ${usdt_amount:.2f} < ${min_order} minimum")
             return None
         
         # Round quantity to exchange LOT_SIZE step size
         qty = self._round_qty(exchange, base_coin, qty)
         if qty <= 0:
+            logger.info(f"  ⏭️ {exchange}: Skip buy — qty rounded to 0")
             return None
         
         order = {
