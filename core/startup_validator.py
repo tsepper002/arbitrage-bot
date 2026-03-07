@@ -452,7 +452,9 @@ class StartupValidator:
         """Check 8: Verify DRY_RUN mode setting"""
         logger.info("Checking DRY_RUN mode...")
         
-        dry_run = os.getenv('ARB_DRY_RUN', 'true').lower() == 'true'
+        # Use settings.DRY_RUN which respects --mode real CLI flag,
+        # not os.getenv which misses the runtime override.
+        dry_run = getattr(settings, 'DRY_RUN', True)
         
         if dry_run:
             self.validation_results.append(ValidationResult(
