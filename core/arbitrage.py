@@ -176,7 +176,7 @@ class ArbitrageEngine:
 
         # Spread persistence filter: only trade spreads that survive long enough
         self._spread_first_seen: Dict[str, float] = {}  # key -> first_seen_ms
-        self.MIN_SPREAD_HOLD_MS = 500  # Spread must hold for 500ms before trading
+        self.MIN_SPREAD_HOLD_MS = 30  # Spread must hold for 30ms (1-2 scan cycles)
         # Strong spread bypass: skip persistence if spread is this many times above cushion
         self.STRONG_SPREAD_MULTIPLIER = 3.0
         # Default strong cushion when no CapitalManager (= Level 1 cushion + margin)
@@ -694,14 +694,14 @@ class ArbitrageEngine:
                 # (e.g., 3× above threshold cushion — clearly real, not a glitch)
                 strong_threshold = dynamic_min_spread * self.STRONG_SPREAD_MULTIPLIER
                 if gross_spread_pct < strong_threshold:
-                    # Normal spreads: 30ms persistence check catches data glitches
+                    # Normal spreads: persistence check catches data glitches
                     spread_key = f"{symbol}:{buy_ex}->{sell_ex}"
                     now_ms = time.time() * 1000
                     if spread_key not in self._spread_first_seen:
                         self._spread_first_seen[spread_key] = now_ms
-                        continue  # First observation: wait 30ms to confirm
-                    elif now_ms - self._spread_first_seen[spread_key] < 30:
-                        continue  # Not yet confirmed (30ms minimum)
+                        continue  # First observation: wait to confirm
+                    elif now_ms - self._spread_first_seen[spread_key] < self.MIN_SPREAD_HOLD_MS:
+                        continue  # Not yet confirmed
 
                 # LATENCY CHECK: Skip if combined exchange latency exceeds spread lifetime
                 buy_latency = self._exchange_latency_ms.get(buy_ex, self.DEFAULT_EXCHANGE_LATENCY_MS)
@@ -765,8 +765,9 @@ class ArbitrageEngine:
 
                 invested = buy_avg * filled
                 roi_pct = (net / invested) * 100 if invested else 0.0
-                # §12: Apply lead-lag timing boost
-                roi_pct += lead_lag_boost
+                # §12: Lead-lag timing — advisory data only, NOT added to ROI.
+                # Adding a fixed boost to ROI would cause the bot to execute trades
+                # that are net-negative after real execution costs.
                 
                 # PROFESSIONAL RISK CHECKS
                 # P1: Flash Crash Protection - Check if market is safe to trade

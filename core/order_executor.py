@@ -278,7 +278,9 @@ class OrderExecutor:
     # passes the dollar gate but percentage is essentially zero (e.g., very large qty)
     MIN_LIVE_ROI_PCT = 0.01
     # Minimum ratio of adjusted qty vs requested qty to proceed
-    QTY_ADJUST_THRESHOLD = 0.95  # Proceed if ≥95% of requested qty available
+    # Execute even if only 50% of ideal qty is available — a smaller profitable
+    # trade is better than no trade. Pre-funded inventory may not perfectly match.
+    QTY_ADJUST_THRESHOLD = 0.50  # Proceed if ≥50% of requested qty available
 
     async def _execute_live(self, opp: Dict) -> Dict:
         """
@@ -322,12 +324,17 @@ class OrderExecutor:
         
         # EXPOSURE CAPS: per-exchange AND per-coin limits
         if self.balance_manager:
-            total_capital = sum(
-                self.balance_manager.get_balance(ex, 'USDT')
-                for ex in self.balance_manager.balances.keys()
-            )
+            # Use total equity (USDT + coin value), not just USDT.
+            # With pre-funded inventory, most capital is in coins.
+            total_capital = self.balance_manager.get_total_balance_usdt()
             if total_capital <= 0:
-                logger.warning("⚠️  Exposure cap: total USDT capital is 0 — balance manager may not be initialized")
+                # Fallback: sum USDT only
+                total_capital = sum(
+                    self.balance_manager.get_balance(ex, 'USDT')
+                    for ex in self.balance_manager.balances.keys()
+                )
+            if total_capital <= 0:
+                logger.warning("⚠️  Exposure cap: total capital is 0 — balance manager may not be initialized")
                 total_capital = 1.0
             trade_value = qty * buy_price
             

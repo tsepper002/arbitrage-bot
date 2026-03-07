@@ -242,7 +242,10 @@ WORKING_CAPITAL_PCT = _get_env_float("ARB_WORKING_CAPITAL_PCT", 85.0)
 # ============================================================================
 # ENGINE 2.0 — ORDERBOOK STALENESS PROTECTION
 # ============================================================================
-MAX_ORDERBOOK_AGE_MS = _get_env_int("ARB_MAX_ORDERBOOK_AGE_MS", 200)
+# 2000ms (2s) is realistic for home PC with 200-400ms network latency.
+# WS updates arrive every 100-500ms; processing adds 50-200ms.
+# 200ms was rejecting virtually ALL data — no trades could execute.
+MAX_ORDERBOOK_AGE_MS = _get_env_int("ARB_MAX_ORDERBOOK_AGE_MS", 2000)
 
 # ============================================================================
 # ENGINE 2.0 — DEPTH IMPACT PROTECTION

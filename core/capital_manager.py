@@ -168,7 +168,10 @@ class CapitalManager:
 
     # Overtrading control
     OVERTRADING_WINDOW = 10           # Last N trades to check
-    OVERTRADING_MIN_AVG_PROFIT = 0.20 # 0.20%
+    # With micro-capital (~$70), typical profit is ~0.05% ROI per trade.
+    # 0.20% threshold would trigger on EVERY trade → permanent bump.
+    # Scaled to 0.03% which is 60% of typical micro-arb edge.
+    OVERTRADING_MIN_AVG_PROFIT = 0.03 # 0.03%
     OVERTRADING_THRESHOLD_BUMP = 0.05 # +0.05% when overtrading detected
     OVERTRADING_BUMP_DECAY_SEC = 300.0  # Bump decays after 5 minutes
 
