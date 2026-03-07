@@ -2314,8 +2314,11 @@ async def main():
         # Suppress the known ProactorEventLoop socket shutdown error
         if isinstance(exc, OSError) and getattr(exc, "winerror", None) == 10022:
             return  # Silently ignore — already-closed socket, harmless
+        # Only suppress ConnectionResetError from ProactorEventLoop internals
         if isinstance(exc, ConnectionResetError):
-            return  # Silently ignore — connection already reset, harmless
+            ctx_str = str(context.get("message", "")) + str(context.get("handle", ""))
+            if "_call_connection_lost" in ctx_str or "Proactor" in ctx_str:
+                return  # ProactorEventLoop internal cleanup, harmless
         # For all other exceptions, use default handler
         if _original_handler:
             _original_handler(loop, context)
