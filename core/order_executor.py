@@ -410,9 +410,8 @@ class OrderExecutor:
                 
                 if adjusted_qty < qty * self.QTY_ADJUST_THRESHOLD:
                     logger.info(f"📏 Adjusted qty: {qty:.6f} → {adjusted_qty:.6f} (balance limited)")
-                    # Recalculate expected_net proportionally to new qty
-                    if qty > 0:
-                        expected_net = expected_net * (adjusted_qty / qty)
+                    # Recalculate expected_net proportionally to new qty (ROI% unchanged)
+                    expected_net = expected_net * (adjusted_qty / qty)
                     qty = adjusted_qty
             
             logger.info(
