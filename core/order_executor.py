@@ -524,11 +524,13 @@ class OrderExecutor:
                 sell_result_final = sell_result
             else:
                 # Standard parallel market orders
-                # Round qty for BOTH exchanges, then use the SMALLER to avoid imbalance
+                # Round qty for BOTH exchanges, then use the SMALLER to avoid imbalance.
+                # Re-rounding qty_to_trade for each exchange ensures step_size compliance.
+                # Final quantities may differ slightly (e.g., MEXC step=0.0001 vs Binance=0.01)
+                # but the difference is always < 1 step_size — acceptable for market orders.
                 buy_qty_rounded = round_qty(buy_ex, symbol, qty)
                 sell_qty_rounded = round_qty(sell_ex, symbol, qty)
                 qty_to_trade = min(buy_qty_rounded, sell_qty_rounded)
-                # Re-round to ensure each exchange's step size is respected
                 buy_qty_final = round_qty(buy_ex, symbol, qty_to_trade)
                 sell_qty_final = round_qty(sell_ex, symbol, qty_to_trade)
                 buy_task = buy_client.place_order(symbol, 'buy', 'market', buy_qty_final, buy_price)
@@ -793,10 +795,13 @@ class OrderExecutor:
         """
         # Round qty to exchange step_size — prevents "Order size increment invalid"
         qty = round_qty(exchange, symbol, qty)
-        # Validate qty is large enough to place order
+        # Validate qty is large enough to place order.
+        # Use 50% of min_trade_size as cutoff: emergency close is critical,
+        # so we attempt even smaller-than-normal orders to reduce exposure.
         min_order_usdt = getattr(settings, 'MIN_TRADE_SIZE_USDT', 3.0)
+        emergency_min = min_order_usdt * 0.5  # Lower bar for emergency orders
         notional = qty * price if price > 0 else 0
-        if qty <= 0 or notional < min_order_usdt * 0.5:
+        if qty <= 0 or notional < emergency_min:
             logger.error(
                 f"🚨 Emergency close SKIPPED: {side} {qty} {symbol} on {exchange} "
                 f"(notional ${notional:.4f} < min ${min_order_usdt * 0.5:.2f})"

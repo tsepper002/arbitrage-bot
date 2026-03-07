@@ -1000,14 +1000,19 @@ class SignalAllocator:
                     if order:
                         executed.append(order)
                         # Update weighted average entry price after top-up
-                        if price > 0 and self._coin_entry_price > 0:
-                            old_value = coin_value
-                            new_value = buy_usdt
-                            total = old_value + new_value
-                            if total > 0:
-                                self._coin_entry_price = (
-                                    self._coin_entry_price * old_value + price * new_value
-                                ) / total
+                        if price > 0:
+                            if self._coin_entry_price <= 0:
+                                # First purchase — set entry price directly
+                                self._coin_entry_price = price
+                            else:
+                                # Subsequent: weighted average of existing + new
+                                old_value = coin_value
+                                new_value = buy_usdt
+                                total = old_value + new_value
+                                if total > 0:
+                                    self._coin_entry_price = (
+                                        self._coin_entry_price * old_value + price * new_value
+                                    ) / total
         
         # Sync real balances after rebalance
         if executed and not settings.DRY_RUN and self.balance_manager and rest_clients:

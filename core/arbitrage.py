@@ -456,7 +456,10 @@ class ArbitrageEngine:
         if keys_to_remove:
             logger.debug(f"Cleaned {len(keys_to_remove)} old entries from recent_cache")
 
-        # Cleanup stale spread observations (>5 seconds old)
+        # Cleanup stale spread observations (>5s old).
+        # 5s matches exchange WS heartbeat cycle — any spread older than this
+        # is from a different price regime and shouldn't bypass the 30ms
+        # persistence check on a new observation.
         spread_cutoff = now * 1000 - 5000
         stale_spreads = [k for k, ts in self._spread_first_seen.items() if ts < spread_cutoff]
         for k in stale_spreads:
