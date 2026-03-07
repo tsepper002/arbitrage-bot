@@ -88,8 +88,11 @@ class SignalAllocator:
     # Pre-fund: use 50% of USDT for ONE coin on each exchange
     # Example: $14/exchange − $2 reserve = $12 available → $6 for coin (above $5 min)
     MAX_PREPOSITION_PCT = 0.50
-    # Initial pre-fund uses higher % (positioning is the priority at startup)
-    MAX_PREFUND_PCT = 0.75
+    # Initial pre-fund uses moderate % — must leave enough USDT for buy orders.
+    # With $14/exchange: $14 - $2 reserve = $12. At 55%: $6.60 coins + $5.40 USDT.
+    # $5.40 > $5 MIN_ORDER_USDT → buy orders can execute!
+    # Old value 75% left only $3 USDT → below $5 minimum → ALL buys blocked.
+    MAX_PREFUND_PCT = 0.55
     DEFAULT_MIN_ORDER_USDT = 5.0  # Fallback exchange minimum order size
 
     # Maximum allocation to any single symbol

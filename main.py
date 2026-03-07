@@ -1620,9 +1620,24 @@ class IntegratedArbitrageBot:
                                         f"{order['symbol']} on {order['exchange']} "
                                         f"(${order['amount_usdt']:.2f}) — {order['reason']}"
                                     )
+                                # Always sync executor with current pre-funded coin
+                                if self.engine and self.engine.executor and self.signal_allocator:
+                                    self.engine.executor._current_prefunded_coin = self.signal_allocator.get_current_coin()
                                 if not first_coin_found:
                                     first_coin_found = True
                                     logger.info("✅ First coin positioned! Switching to normal 5-min rebalance interval")
+                                    # Update executor: tell it which coin is pre-funded
+                                    # so per-coin exposure cap is skipped for inventory coin
+                                    if self.engine and self.engine.executor and self.signal_allocator:
+                                        self.engine.executor._current_prefunded_coin = self.signal_allocator.get_current_coin()
+                                    # Update max_exposure_usdt from real balance (not stale VIRTUAL_CAPITAL)
+                                    if self.engine and self.balance_manager:
+                                        real_total = self.balance_manager.get_total_balance_usdt()
+                                        if real_total > 0:
+                                            per_exchange_avg = real_total / max(len(self.balance_manager.balances), 1)
+                                            new_exposure = per_exchange_avg * 0.6
+                                            self.engine.max_exposure_usdt = max(new_exposure, settings.MAX_EXPOSURE_USDT)
+                                            logger.info(f"📊 Updated max_exposure_usdt: ${self.engine.max_exposure_usdt:.2f} (from real balance ${real_total:.2f})")
                                     # Event Bus: notify all components of coin switch
                                     if self.event_bus and self.signal_allocator:
                                         coin = self.signal_allocator.get_current_coin() or 'unknown'

@@ -48,6 +48,7 @@ class OrderExecutor:
         self._blocked_cooldown: Dict[str, float] = {}  # symbol → last blocked time
         self.BLOCKED_COOLDOWN_SEC = 3.0  # Short cooldown — pre-fund reacts in ~10s
         self._open_orders: List[Dict] = []  # Track open limit orders for shutdown cancellation
+        self._current_prefunded_coin: Optional[str] = None  # Set by main to exempt pre-funded coin from per-coin cap
         
         if self.dry_run:
             logger.info("🔵 OrderExecutor initialized in DRY RUN mode (safe simulation)")
@@ -349,21 +350,26 @@ class OrderExecutor:
                     return {'status': 'blocked', 'reason': f'Exposure cap: would exceed {settings.MAX_EXPOSURE_PER_EXCHANGE_PCT}% on {buy_ex}'}
                 logger.debug(f"📏 Exchange cap: {old_qty:.6f} → {qty:.6f} ({settings.MAX_EXPOSURE_PER_EXCHANGE_PCT}% limit)")
             
-            # Per-coin cap: total exposure to this coin across ALL exchanges
-            # Handle symbol formats: "BTC-USDT", "BTC/USDT", "BTCUSDT"
+            # Per-coin cap: total exposure to this coin across ALL exchanges.
+            # EXCEPTION: Skip for the pre-funded inventory coin. The pre-funded
+            # model deliberately concentrates capital in ONE coin across all
+            # exchanges — the 15% cap would block every single arb trade.
             base_coin = symbol.split('-')[0] if '-' in symbol else symbol.split('/')[0] if '/' in symbol else symbol.replace('USDT', '')
-            coin_exposure = sum(
-                self.balance_manager.get_balance(ex, base_coin) * buy_price  # Use buy_price as approximate valuation
-                for ex in self.balance_manager.balances.keys()
-            )
-            max_per_coin = total_capital * (settings.MAX_EXPOSURE_PER_COIN_PCT / 100.0)
-            if coin_exposure + trade_value > max_per_coin:
-                allowed_value = max(0, max_per_coin - coin_exposure)
-                if allowed_value < self.MIN_ORDER_USDT:
-                    return {'status': 'blocked', 'reason': f'Coin exposure cap: {base_coin} at ${coin_exposure:.2f} ({coin_exposure/total_capital*100:.1f}% of {settings.MAX_EXPOSURE_PER_COIN_PCT}% max)'}
-                old_qty = qty
-                qty = allowed_value / buy_price if buy_price > 0 else 0
-                logger.info(f"📏 Coin cap: {old_qty:.6f} → {qty:.6f} ({base_coin} at {coin_exposure/total_capital*100:.1f}% exposure)")
+            is_prefunded_coin = (self._current_prefunded_coin and
+                                 symbol == self._current_prefunded_coin)
+            if not is_prefunded_coin:
+                coin_exposure = sum(
+                    self.balance_manager.get_balance(ex, base_coin) * buy_price
+                    for ex in self.balance_manager.balances.keys()
+                )
+                max_per_coin = total_capital * (settings.MAX_EXPOSURE_PER_COIN_PCT / 100.0)
+                if coin_exposure + trade_value > max_per_coin:
+                    allowed_value = max(0, max_per_coin - coin_exposure)
+                    if allowed_value < self.MIN_ORDER_USDT:
+                        return {'status': 'blocked', 'reason': f'Coin exposure cap: {base_coin} at ${coin_exposure:.2f} ({coin_exposure/total_capital*100:.1f}% of {settings.MAX_EXPOSURE_PER_COIN_PCT}% max)'}
+                    old_qty = qty
+                    qty = allowed_value / buy_price if buy_price > 0 else 0
+                    logger.info(f"📏 Coin cap: {old_qty:.6f} → {qty:.6f} ({base_coin} at {coin_exposure/total_capital*100:.1f}% exposure)")
 
         try:
             # Step 1: Get REST clients
