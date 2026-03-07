@@ -772,7 +772,7 @@ class SignalAllocator:
                 usdt_balance = self.balance_manager.get_balance(exchange, 'USDT')
                 reserve = getattr(settings, 'BALANCE_RESERVE_USDT', 2.0)
                 available = usdt_balance - reserve
-                min_order = getattr(settings, 'MIN_ORDER_USDT', self.DEFAULT_MIN_ORDER_USDT)
+                min_order = self.MIN_ORDER_USDT.get(exchange, self.DEFAULT_MIN_ORDER_USDT)
                 if available < min_order:
                     continue  # Not enough USDT to buy
                 
@@ -1123,6 +1123,12 @@ class SignalAllocator:
             logger.info(f"  ⏭️ {exchange}: Skip buy — qty rounded to 0")
             return None
         
+        # Recalculate notional after rounding — may have dropped below exchange min
+        actual_notional = qty * price if price > 0 else 0
+        if actual_notional < min_order:
+            logger.info(f"  ⏭️ {exchange}: Skip buy — post-rounding notional ${actual_notional:.2f} < ${min_order} min")
+            return None
+        
         order = {
             'exchange': exchange, 'symbol': symbol, 'side': 'buy',
             'qty': qty, 'price': price, 'amount_usdt': round(usdt_amount, 2),
@@ -1182,6 +1188,13 @@ class SignalAllocator:
         # Round quantity to exchange LOT_SIZE step size
         qty = self._round_qty(exchange, base_coin, qty)
         if qty <= 0:
+            return None
+        
+        # Recalculate notional after rounding — may have dropped below exchange min
+        min_order = self.MIN_ORDER_USDT.get(exchange, self.DEFAULT_MIN_ORDER_USDT)
+        actual_notional = qty * price if price > 0 else 0
+        if actual_notional < min(min_order, 1.0):
+            logger.info(f"  ⏭️ {exchange}: Skip sell — post-rounding notional ${actual_notional:.2f} too small")
             return None
         
         order = {

@@ -153,14 +153,16 @@ class HTXRESTClient(BaseRESTClient):
 
     @staticmethod
     def _truncate_qty(quantity: float) -> str:
-        """Truncate quantity to max decimal places and format as clean string.
+        """Format quantity as clean string without floating-point artifacts.
 
         Prevents floating-point artifacts like 5.890000000000001
         from being sent to HTX API.
+        NOTE: round_qty() in exchange_config already floors to step_size,
+        so we only need to format cleanly here, not re-floor.
         """
-        factor = 10 ** HTXRESTClient.HTX_QTY_MAX_DECIMALS
-        truncated = math.floor(quantity * factor) / factor
-        formatted = f"{truncated:.{HTXRESTClient.HTX_QTY_MAX_DECIMALS}f}".rstrip('0').rstrip('.')
+        formatted = f"{quantity:.{HTXRESTClient.HTX_QTY_MAX_DECIMALS}f}"
+        if '.' in formatted:
+            formatted = formatted.rstrip('0').rstrip('.')
         return formatted if formatted else "0"
 
     async def place_order(

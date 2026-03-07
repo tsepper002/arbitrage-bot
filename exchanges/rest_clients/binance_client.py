@@ -83,6 +83,21 @@ class BinanceRESTClient(BaseRESTClient):
         """Convert BTC-USDT to BTCUSDT."""
         return symbol.replace("-", "")
 
+    BINANCE_QTY_MAX_DECIMALS = 8
+
+    @staticmethod
+    def _truncate_qty(quantity: float) -> str:
+        """Format quantity as clean string without floating-point artifacts.
+
+        Prevents LOT_SIZE filter failures from artifacts like 15.984000000000002.
+        round_qty() in exchange_config already floors to step_size,
+        so we only need to format cleanly here.
+        """
+        formatted = f"{quantity:.{BinanceRESTClient.BINANCE_QTY_MAX_DECIMALS}f}"
+        if '.' in formatted:
+            formatted = formatted.rstrip('0').rstrip('.')
+        return formatted if formatted else "0"
+
     async def place_order(
         self,
         symbol: str,
@@ -110,7 +125,7 @@ class BinanceRESTClient(BaseRESTClient):
             usdt_amount = round(quantity * price, 2)
             params["quoteOrderQty"] = f"{usdt_amount:.2f}"
         else:
-            params["quantity"] = f"{quantity:.8f}"
+            params["quantity"] = self._truncate_qty(quantity)
 
         if order_type == "limit" and price:
             params["price"] = f"{price:.8f}"

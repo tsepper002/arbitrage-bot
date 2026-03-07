@@ -88,6 +88,14 @@ _KNOWN_STEP_SIZES = {
     "ATOM": 0.01, "FIL": 0.01, "APT": 0.01, "ARB": 0.1,
     "OP": 0.01, "LINK": 0.01, "UNI": 0.01, "ADA": 0.1,
     "LTC": 0.001, "BNB": 0.001, "TRX": 0.1,
+    # New coins (conservative: use largest step across all 5 exchanges)
+    "ETC": 0.01, "MATIC": 0.1, "SUI": 0.01, "INJ": 0.01,
+    "ICP": 0.01, "HBAR": 1.0, "VET": 1.0, "ALGO": 0.1,
+    "AAVE": 0.001, "CRV": 0.1, "SNX": 0.01, "RUNE": 0.1,
+    "FTM": 1.0, "FLOW": 0.1, "CHZ": 1.0, "GALA": 1.0,
+    "SAND": 0.1, "AXS": 0.01, "PEPE": 1.0, "SHIB": 1.0,
+    "FLOKI": 1.0, "BLUR": 0.1, "GMX": 0.01, "DYDX": 0.01,
+    "ENS": 0.01, "LDO": 0.01, "STX": 0.1,
 }
 
 _KNOWN_TICK_SIZES = {
@@ -96,6 +104,14 @@ _KNOWN_TICK_SIZES = {
     "ATOM": 0.001, "FIL": 0.001, "APT": 0.0001, "ARB": 0.0001,
     "OP": 0.0001, "LINK": 0.001, "UNI": 0.001, "ADA": 0.0001,
     "LTC": 0.01, "BNB": 0.01, "TRX": 0.0001,
+    # New coins
+    "ETC": 0.01, "MATIC": 0.0001, "SUI": 0.0001, "INJ": 0.001,
+    "ICP": 0.01, "HBAR": 0.00001, "VET": 0.00001, "ALGO": 0.0001,
+    "AAVE": 0.01, "CRV": 0.0001, "SNX": 0.001, "RUNE": 0.001,
+    "FTM": 0.0001, "FLOW": 0.0001, "CHZ": 0.00001, "GALA": 0.00001,
+    "SAND": 0.0001, "AXS": 0.001, "PEPE": 0.0000001, "SHIB": 0.00000001,
+    "FLOKI": 0.0000001, "BLUR": 0.0001, "GMX": 0.01, "DYDX": 0.001,
+    "ENS": 0.01, "LDO": 0.001, "STX": 0.001,
 }
 
 _KNOWN_MIN_NOTIONAL = {

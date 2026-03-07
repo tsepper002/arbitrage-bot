@@ -116,77 +116,90 @@ class BalanceManager:
     
     async def _fetch_balance(self, exchange_name: str, client) -> Dict[str, float]:
         """
-        Fetch balance from a single exchange.
+        Fetch balance from a single exchange with retry for transient errors.
         Syncs server time first to prevent timestamp errors.
         
         Returns:
             Dict of {currency: amount}
         """
-        try:
-            if not hasattr(client, 'get_balance'):
-                logger.warning(f"⚠️  {exchange_name} client has no get_balance method")
-                return {}
-            
-            # Sync time before balance fetch to prevent recvWindow errors
-            if hasattr(client, 'sync_server_time'):
-                try:
-                    await client.sync_server_time()
-                except Exception as e:
-                    logger.debug(f"{exchange_name}: time sync before balance failed: {e}")
-            
-            balance = await client.get_balance()
-            
-            # Protect against balance wipeout: if API returns completely empty
-            # but we had real assets before, keep the old cache and warn.
-            # This prevents a single bad API response from erasing all positions.
-            old_balance = self.balances.get(exchange_name, {})
-            WIPEOUT_PROTECTION_THRESHOLD = 1.0  # Min cached value ($) to trigger protection
-            if not balance and old_balance:
-                old_total = sum(old_balance.values())
-                if old_total > WIPEOUT_PROTECTION_THRESHOLD:
-                    logger.warning(
-                        f"⚠️ {exchange_name}: API returned empty balance but had "
-                        f"${old_total:.2f} cached — keeping old cache (possible API error)"
-                    )
-                    return old_balance
-            
-            self.balances[exchange_name] = balance
-            self.last_sync[exchange_name] = time.time()
-            
-            # Check if exchange should be excluded based on TOTAL equity
-            # (USDT + coin holdings), not just USDT.
-            # After pre-fund, most equity is in coins — checking only USDT
-            # would exclude all exchanges!
-            usdt_balance = balance.get('USDT', 0)
-            total_equity = usdt_balance
-            # First try price_store for accurate prices
-            if self._price_store_ref:
-                total_equity = self._exchange_balance_usdt(exchange_name, balance, self._price_store_ref)
-            else:
-                # Fallback to cached prices
-                for asset, amount in balance.items():
-                    if asset != 'USDT' and amount > 0:
-                        total_equity += amount * self._estimate_asset_value(asset)
-            
-            if total_equity < settings.MIN_BALANCE_PER_EXCHANGE:
-                if exchange_name not in self.excluded_exchanges:
-                    logger.warning(
-                        f"⚠️  {exchange_name} excluded: total equity ${total_equity:.2f} "
-                        f"(USDT ${usdt_balance:.2f} + coins) "
-                        f"< minimum ${settings.MIN_BALANCE_PER_EXCHANGE:.2f}"
-                    )
-                    self.excluded_exchanges.add(exchange_name)
-            else:
-                if exchange_name in self.excluded_exchanges:
-                    logger.info(f"✅ {exchange_name} re-enabled: equity ${total_equity:.2f}")
-                    self.excluded_exchanges.discard(exchange_name)
-            
-            logger.debug(f"{exchange_name} balance: {balance}")
-            return balance
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to fetch balance from {exchange_name}: {e}")
-            return {}
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                if not hasattr(client, 'get_balance'):
+                    logger.warning(f"⚠️  {exchange_name} client has no get_balance method")
+                    return {}
+                
+                # Sync time before balance fetch to prevent recvWindow errors
+                if hasattr(client, 'sync_server_time'):
+                    try:
+                        await client.sync_server_time()
+                    except Exception as e:
+                        logger.debug(f"{exchange_name}: time sync before balance failed: {e}")
+                
+                balance = await client.get_balance()
+                
+                # Protect against balance wipeout: if API returns completely empty
+                # but we had real assets before, keep the old cache and warn.
+                # This prevents a single bad API response from erasing all positions.
+                old_balance = self.balances.get(exchange_name, {})
+                WIPEOUT_PROTECTION_THRESHOLD = 1.0  # Min cached value ($) to trigger protection
+                if not balance and old_balance:
+                    old_total = sum(old_balance.values())
+                    if old_total > WIPEOUT_PROTECTION_THRESHOLD:
+                        logger.warning(
+                            f"⚠️ {exchange_name}: API returned empty balance but had "
+                            f"${old_total:.2f} cached — keeping old cache (possible API error)"
+                        )
+                        return old_balance
+                
+                self.balances[exchange_name] = balance
+                self.last_sync[exchange_name] = time.time()
+                
+                # Check if exchange should be excluded based on TOTAL equity
+                # (USDT + coin holdings), not just USDT.
+                # After pre-fund, most equity is in coins — checking only USDT
+                # would exclude all exchanges!
+                usdt_balance = balance.get('USDT', 0)
+                total_equity = usdt_balance
+                # First try price_store for accurate prices
+                if self._price_store_ref:
+                    total_equity = self._exchange_balance_usdt(exchange_name, balance, self._price_store_ref)
+                else:
+                    # Fallback to cached prices
+                    for asset, amount in balance.items():
+                        if asset != 'USDT' and amount > 0:
+                            total_equity += amount * self._estimate_asset_value(asset)
+                
+                if total_equity < settings.MIN_BALANCE_PER_EXCHANGE:
+                    if exchange_name not in self.excluded_exchanges:
+                        logger.warning(
+                            f"⚠️  {exchange_name} excluded: total equity ${total_equity:.2f} "
+                            f"(USDT ${usdt_balance:.2f} + coins) "
+                            f"< minimum ${settings.MIN_BALANCE_PER_EXCHANGE:.2f}"
+                        )
+                        self.excluded_exchanges.add(exchange_name)
+                else:
+                    if exchange_name in self.excluded_exchanges:
+                        logger.info(f"✅ {exchange_name} re-enabled: equity ${total_equity:.2f}")
+                        self.excluded_exchanges.discard(exchange_name)
+                
+                logger.debug(f"{exchange_name} balance: {balance}")
+                return balance
+                
+            except Exception as e:
+                is_transient = any(kw in str(e).lower() for kw in [
+                    'timeout', 'connect', 'reset', 'refused', 'unavailable', 'ssl'
+                ])
+                if attempt < max_retries - 1 and is_transient:
+                    logger.debug(f"{exchange_name}: balance fetch failed (retry {attempt+1}): {e}")
+                    await asyncio.sleep(2)  # Brief pause before retry
+                    continue
+                # Final attempt or non-transient error
+                if is_transient:
+                    logger.warning(f"⚠️ {exchange_name}: balance fetch timeout (using cached)")
+                else:
+                    logger.error(f"❌ Failed to fetch balance from {exchange_name}: {e}")
+                return self.balances.get(exchange_name, {})
     
     def _estimate_asset_value(self, asset: str) -> float:
         """Estimate USD value of 1 unit of an asset using cached prices."""
