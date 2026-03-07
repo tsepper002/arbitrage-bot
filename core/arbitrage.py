@@ -1088,6 +1088,8 @@ class ArbitrageEngine:
                                 o['buy_ex'], o['symbol'], 'buy',
                                 total_quantity=o['qty'], duration_seconds=30
                             )
+                            # TWAP engine handles execution internally — use estimated profit
+                            # from opportunity for tracking (actual fill prices may differ slightly)
                             result = {'status': 'success', 'trade_info': {'net_profit': o.get('net', 0)}}
                         except Exception as e:
                             logger.debug(f"TWAP execution error: {e}, falling back to standard execution")
