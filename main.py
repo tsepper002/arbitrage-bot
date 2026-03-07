@@ -48,6 +48,8 @@ from core.startup_validator import get_startup_validator
 from core.windows_optimizer import setup_windows_optimizations, WindowsOptimizer
 from core.smart_capital_allocator import get_smart_allocator
 from core.exchange_config import EXCHANGE_PARAMS
+from core.event_bus import EventBus, TRADE_EXECUTED, TRADE_FAILED, BALANCE_CHANGED, COIN_SWITCHED
+from core.config_validator import validate_config, print_validation_report
 from core.strategy_dispatcher import StrategyDispatcher  # NEW: All 14 strategies!
 from core.signal_allocator import SignalAllocator  # Signal-based inventory management
 from core.capital_manager import CapitalManager  # Engine 2.0: capital-level mode selection
@@ -337,6 +339,9 @@ class IntegratedArbitrageBot:
         # Engine 2.0: Capital Manager
         self.capital_manager = None
         
+        # Architecture: Event Bus for component decoupling
+        self.event_bus = None
+        
         self.engine = None
         self.tasks = []
         
@@ -355,6 +360,18 @@ class IntegratedArbitrageBot:
         
         # Print configuration
         logger.info("\n" + settings.get_config_summary())
+        
+        # Phase 0: Validate configuration
+        logger.info("\n🔍 Phase 0: Validating Configuration...")
+        config_issues = validate_config()
+        config_ok = print_validation_report(config_issues)
+        if not config_ok:
+            return False
+        logger.info("✅ Configuration validation passed")
+        
+        # Architecture: Initialize Event Bus
+        self.event_bus = EventBus()
+        logger.info("✅ Event Bus initialized (pub/sub component decoupling)")
         
         # Phase 1: Windows Optimization
         logger.info("\n📊 Phase 1: Applying Windows Optimizations...")
@@ -1606,6 +1623,12 @@ class IntegratedArbitrageBot:
                                 if not first_coin_found:
                                     first_coin_found = True
                                     logger.info("✅ First coin positioned! Switching to normal 5-min rebalance interval")
+                                    # Event Bus: notify all components of coin switch
+                                    if self.event_bus:
+                                        coin = self.signal_allocator.get_current_coin() if self.signal_allocator else ''
+                                        await self.event_bus.publish(COIN_SWITCHED, {
+                                            'new_coin': coin, 'old_coin': '', 'reason': 'first_coin'
+                                        }, source='rebalancer')
                             else:
                                 logger.debug("Rebalance: no orders needed (inventory balanced)")
                     elif not first_coin_found:
@@ -1834,6 +1857,16 @@ class IntegratedArbitrageBot:
                                             asyncio.create_task(self.telegram_bot.notify_trade_executed(trade_info))
                                         except Exception:
                                             pass
+                                    # Event Bus: publish trade_executed for decoupled consumers
+                                    if self.event_bus:
+                                        await self.event_bus.publish(TRADE_EXECUTED, {
+                                            'symbol': trade_info['symbol'],
+                                            'strategy': opp['strategy'],
+                                            'buy_ex': trade_info.get('buy_ex', ''),
+                                            'sell_ex': trade_info.get('sell_ex', ''),
+                                            'net': trade_info.get('net', 0),
+                                            'roi_pct': trade_info.get('roi_pct', 0),
+                                        }, source='main')
                             else:
                                 # Signal didn't produce a trade but still useful for allocation
                                 if hasattr(self, 'signal_allocator') and self.signal_allocator:
@@ -2127,6 +2160,12 @@ class IntegratedArbitrageBot:
         self._shutdown_complete = True
         
         logger.info("\n🛑 Shutting down gracefully...")
+        
+        # Stop EventBus first — prevent new events during shutdown
+        if self.event_bus:
+            self.event_bus.stop()
+            stats = self.event_bus.get_stats()
+            logger.info(f"📊 EventBus stats: {stats.get('total_events', 0)} events published")
         
         # ========== §9.1 CANCEL ALL OPEN LIMIT ORDERS ==========
         # Do this FIRST — prevent stale limit orders from filling

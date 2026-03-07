@@ -1,0 +1,46 @@
+# Docker Compose for crypto arbitrage trading bot
+# Usage:
+#   docker-compose up -d          # Start in background (dry-run by default)
+#   docker-compose up              # Start with live logs
+#   docker-compose down            # Stop gracefully (sells coins to USDT)
+#   docker-compose logs -f bot     # Follow logs
+#
+# For LIVE trading:
+#   ARB_DRY_RUN=false docker-compose up -d
+
+version: "3.8"
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: arbitrage-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Override specific settings via environment
+      - ARB_DRY_RUN=${ARB_DRY_RUN:-true}
+    volumes:
+      # Persist state across restarts (trade history, bot state)
+      - ./bot_state.json:/app/bot_state.json
+      - ./logs:/app/logs
+      - ./trade_journal.json:/app/trade_journal.json
+    # Graceful shutdown: send SIGINT (Ctrl+C) → bot sells coins → saves state
+    stop_signal: SIGINT
+    stop_grace_period: 60s
+    # Resource limits (prevent runaway CPU/memory)
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
