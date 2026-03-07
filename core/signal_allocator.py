@@ -1191,9 +1191,11 @@ class SignalAllocator:
             return None
         
         # Recalculate notional after rounding — may have dropped below exchange min
+        # For sells, use $1 floor (not full min_order) since we're liquidating positions
         min_order = self.MIN_ORDER_USDT.get(exchange, self.DEFAULT_MIN_ORDER_USDT)
+        sell_floor = min(min_order, 1.0)  # Sells can be smaller than buy minimums
         actual_notional = qty * price if price > 0 else 0
-        if actual_notional < min(min_order, 1.0):
+        if actual_notional < sell_floor:
             logger.info(f"  ⏭️ {exchange}: Skip sell — post-rounding notional ${actual_notional:.2f} too small")
             return None
         

@@ -114,6 +114,8 @@ class BalanceManager:
             logger.info(f"   {exchange_name:12s} ✅ ${capital:.2f} USDT (virtual)")
         logger.info(f"✅ Virtual balances ready for simulation")
     
+    BALANCE_RETRY_DELAY_SEC = 2  # Seconds between retry attempts
+
     async def _fetch_balance(self, exchange_name: str, client) -> Dict[str, float]:
         """
         Fetch balance from a single exchange with retry for transient errors.
@@ -192,7 +194,7 @@ class BalanceManager:
                 ])
                 if attempt < max_retries - 1 and is_transient:
                     logger.debug(f"{exchange_name}: balance fetch failed (retry {attempt+1}): {e}")
-                    await asyncio.sleep(2)  # Brief pause before retry
+                    await asyncio.sleep(self.BALANCE_RETRY_DELAY_SEC)
                     continue
                 # Final attempt or non-transient error
                 if is_transient:
