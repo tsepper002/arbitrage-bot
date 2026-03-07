@@ -355,8 +355,11 @@ class OrderExecutor:
             # model deliberately concentrates capital in ONE coin across all
             # exchanges — the 15% cap would block every single arb trade.
             base_coin = symbol.split('-')[0] if '-' in symbol else symbol.split('/')[0] if '/' in symbol else symbol.replace('USDT', '')
-            is_prefunded_coin = (self._current_prefunded_coin and
-                                 symbol == self._current_prefunded_coin)
+            # Compare both full symbol ("APT-USDT") and base coin ("APT") to handle
+            # any format inconsistency between opp dict and signal_allocator.
+            prefunded = self._current_prefunded_coin or ''
+            prefunded_base = prefunded.split('-')[0] if '-' in prefunded else prefunded.split('/')[0] if '/' in prefunded else prefunded.replace('USDT', '')
+            is_prefunded_coin = bool(prefunded and (symbol == prefunded or base_coin == prefunded_base))
             if not is_prefunded_coin:
                 coin_exposure = sum(
                     self.balance_manager.get_balance(ex, base_coin) * buy_price

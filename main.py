@@ -1626,10 +1626,6 @@ class IntegratedArbitrageBot:
                                 if not first_coin_found:
                                     first_coin_found = True
                                     logger.info("✅ First coin positioned! Switching to normal 5-min rebalance interval")
-                                    # Update executor: tell it which coin is pre-funded
-                                    # so per-coin exposure cap is skipped for inventory coin
-                                    if self.engine and self.engine.executor and self.signal_allocator:
-                                        self.engine.executor._current_prefunded_coin = self.signal_allocator.get_current_coin()
                                     # Update max_exposure_usdt from real balance (not stale VIRTUAL_CAPITAL)
                                     if self.engine and self.balance_manager:
                                         real_total = self.balance_manager.get_total_balance_usdt()
