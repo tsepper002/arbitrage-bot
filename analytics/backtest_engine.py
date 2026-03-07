@@ -218,8 +218,8 @@ class BacktestEngine:
                 price = bar.get('price', 0)
                 if price <= 0:
                     continue
-                amount = capital * 0.10  # 10 % per trade
-                cost = amount * (1 + 0.001)  # 0.1 % fee
+                amount = capital * 0.10  # 10% per trade
+                cost = amount * (1 + 0.001)  # 0.1% fee
                 if cost <= capital:
                     capital -= cost
                     self.trades.append(SimTrade(
