@@ -340,6 +340,16 @@ class OrderExecutor:
                 total_capital = 1.0
             trade_value = qty * buy_price
             
+            # Per-trade cap: max 5% of total capital per single trade
+            max_per_trade = total_capital * (settings.MAX_EXPOSURE_PER_TRADE_PCT / 100.0)
+            if trade_value > max_per_trade:
+                old_qty = qty
+                qty = max_per_trade / buy_price if buy_price > 0 else 0
+                trade_value = qty * buy_price
+                if trade_value < self.MIN_ORDER_USDT:
+                    return {'status': 'blocked', 'reason': f'Trade cap: would exceed {settings.MAX_EXPOSURE_PER_TRADE_PCT}% per trade'}
+                logger.debug(f"📏 Trade cap: {old_qty:.6f} → {qty:.6f} ({settings.MAX_EXPOSURE_PER_TRADE_PCT}% limit)")
+            
             # Per-exchange cap
             max_per_exchange = total_capital * (settings.MAX_EXPOSURE_PER_EXCHANGE_PCT / 100.0)
             if trade_value > max_per_exchange:

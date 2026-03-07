@@ -124,9 +124,9 @@ MAX_CONCURRENT_OPPORTUNITIES = _get_env_int("ARB_MAX_CONCURRENT_OPPS", 3)
 # Auto-scale risk limits based on total capital (virtual or live)
 # ============================================================================
 NUM_EXCHANGES = 5
-DAILY_LOSS_PCT = 0.10        # Max daily loss = 10% of total capital
+DAILY_LOSS_PCT = 0.03        # Max daily loss = 3% of total capital (tight risk control)
 SINGLE_TRADE_LOSS_PCT = 0.05 # Max loss per trade = 5% of total capital
-HOURLY_LOSS_PCT = 0.05       # Max hourly loss = 5% of total capital
+HOURLY_LOSS_PCT = 0.03       # Max hourly loss = 3% of total capital
 OPEN_EXPOSURE_PCT = 0.60     # Max open exposure = 60% of total capital
 
 _total_capital = VIRTUAL_CAPITAL_PER_EXCHANGE * NUM_EXCHANGES
@@ -154,21 +154,22 @@ STRATEGY_PRIORITY = {
     # Tier 1: Works with ANY capital ($5+) — pure cross-exchange spread
     'CROSS_EXCHANGE':  {'min_capital': 5,    'priority': 1, 'edge_pct': 0.05},
     'SMART_ORDER':     {'min_capital': 5,    'priority': 2, 'edge_pct': 0.04},
+    'MAKER_MAKER':     {'min_capital': 5,    'priority': 3, 'edge_pct': 0.06},
     # Tier 2: Works with small capital ($10+) — statistical signals
-    'FUNDING_RATE':    {'min_capital': 10,   'priority': 3, 'edge_pct': 0.08},
-    'INDEX_ARB':       {'min_capital': 10,   'priority': 4, 'edge_pct': 0.06},
-    'VOLATILITY_ARB':  {'min_capital': 10,   'priority': 5, 'edge_pct': 0.05},
-    'VOLATILITY':      {'min_capital': 10,   'priority': 6, 'edge_pct': 0.03},
+    'FUNDING_RATE':    {'min_capital': 10,   'priority': 4, 'edge_pct': 0.08},
+    'INDEX_ARB':       {'min_capital': 10,   'priority': 5, 'edge_pct': 0.06},
+    'VOLATILITY_ARB':  {'min_capital': 10,   'priority': 6, 'edge_pct': 0.05},
+    'VOLATILITY':      {'min_capital': 10,   'priority': 7, 'edge_pct': 0.03},
     # Tier 3: Medium capital ($25+) — needs multiple positions
-    'PAIRS_TRADING':   {'min_capital': 25,   'priority': 7, 'edge_pct': 0.10},
-    'SPREAD_BETTING':  {'min_capital': 25,   'priority': 8, 'edge_pct': 0.08},
-    'MARKET_MAKING':   {'min_capital': 25,   'priority': 9, 'edge_pct': 0.06},
-    'MOMENTUM':        {'min_capital': 25,   'priority': 10, 'edge_pct': 0.12},
+    'PAIRS_TRADING':   {'min_capital': 25,   'priority': 8, 'edge_pct': 0.10},
+    'SPREAD_BETTING':  {'min_capital': 25,   'priority': 9, 'edge_pct': 0.08},
+    'MARKET_MAKING':   {'min_capital': 25,   'priority': 10, 'edge_pct': 0.06},
+    'MOMENTUM':        {'min_capital': 25,   'priority': 11, 'edge_pct': 0.12},
     # Tier 4: Larger capital ($50+) — long-term hold strategies
-    'DCA':             {'min_capital': 50,   'priority': 11, 'edge_pct': 0.15},
-    'GRID_TRADING':    {'min_capital': 50,   'priority': 12, 'edge_pct': 0.10},
-    'BREAKOUT':        {'min_capital': 50,   'priority': 13, 'edge_pct': 0.20},
-    'TRIANGULAR':      {'min_capital': 100,  'priority': 14, 'edge_pct': 0.15},
+    'DCA':             {'min_capital': 50,   'priority': 12, 'edge_pct': 0.15},
+    'GRID_TRADING':    {'min_capital': 50,   'priority': 13, 'edge_pct': 0.10},
+    'BREAKOUT':        {'min_capital': 50,   'priority': 14, 'edge_pct': 0.20},
+    'TRIANGULAR':      {'min_capital': 100,  'priority': 15, 'edge_pct': 0.15},
 }
 
 # ============================================================================
@@ -176,7 +177,8 @@ STRATEGY_PRIORITY = {
 # ============================================================================
 # Market-neutral strategies: can execute in arb mode (hedge both sides)
 ARB_STRATEGIES = frozenset({'CROSS_EXCHANGE', 'TRIANGULAR', 'SMART_ORDER', 'FUNDING_RATE', 
-                            'INDEX_ARB', 'VOLATILITY_ARB', 'SPREAD_BETTING', 'PAIRS_TRADING'})
+                            'INDEX_ARB', 'VOLATILITY_ARB', 'SPREAD_BETTING', 'PAIRS_TRADING',
+                            'MAKER_MAKER'})
 
 # Directional strategies: SIGNAL ONLY, NEVER execute trades.
 # These are DISABLED from scanning to save CPU for the arb strategies that
@@ -185,13 +187,11 @@ ARB_STRATEGIES = frozenset({'CROSS_EXCHANGE', 'TRIANGULAR', 'SMART_ORDER', 'FUND
 #   2. They hit DIRECTIONAL_STRATEGIES block in _build_trade_from_signal()
 # CPU savings: ~30% less scanning overhead → faster arb detection
 DIRECTIONAL_STRATEGIES = frozenset({'VOLATILITY', 'MOMENTUM', 'BREAKOUT', 'DCA', 
-                                    'GRID_TRADING', 'MARKET_MAKING'})
+                                    'GRID_TRADING'})
 
 # DISABLED_STRATEGIES: strategies excluded from scanning entirely.
-# Currently mirrors DIRECTIONAL_STRATEGIES because none of them can execute
-# arb trades. Kept as a separate set so that in the future, individual
-# directional strategies could be re-enabled (e.g., MARKET_MAKING at $1000+)
-# without changing the classification logic.
+# MARKET_MAKING is enabled for Level 4+ ($1000+) via capital_manager.
+# MAKER_MAKER is always enabled (uses limit orders on both sides).
 DISABLED_STRATEGIES = frozenset(DIRECTIONAL_STRATEGIES)
 
 # ============================================================================
@@ -202,6 +202,9 @@ MAX_EXPOSURE_PER_COIN_PCT = _get_env_float("ARB_MAX_EXPOSURE_PER_COIN_PCT", 15.0
 
 # Maximum percentage of total capital on any single exchange  
 MAX_EXPOSURE_PER_EXCHANGE_PCT = _get_env_float("ARB_MAX_EXPOSURE_PER_EXCHANGE_PCT", 30.0)
+
+# Maximum percentage of total capital per single trade (position size limit)
+MAX_EXPOSURE_PER_TRADE_PCT = _get_env_float("ARB_MAX_EXPOSURE_PER_TRADE_PCT", 5.0)
 
 # Maximum inventory imbalance per coin across exchanges (USDT equivalent)
 # If imbalance exceeds this, stop trading that direction
@@ -407,8 +410,19 @@ STRATEGY_SWITCH_THRESHOLD = _get_env_float("ARB_STRATEGY_SWITCH_THRESHOLD", 0.1)
 # ============================================================================
 # Symbols to trade (can be extended)
 # Trading symbols (comma-separated, no spaces)
-# Expanded from 10 to 20 pairs for more opportunities
-TRADING_SYMBOLS = _get_env_str("ARB_SYMBOLS", "BTC-USDT,ETH-USDT,SOL-USDT,BNB-USDT,XRP-USDT,DOGE-USDT,LTC-USDT,ADA-USDT,MATIC-USDT,DOT-USDT,LINK-USDT,AVAX-USDT,UNI-USDT,ATOM-USDT,FIL-USDT,APT-USDT,ARB-USDT,OP-USDT,TRX-USDT,NEAR-USDT").split(",")
+# Expanded to 46 pairs for maximum opportunity detection
+TRADING_SYMBOLS = _get_env_str("ARB_SYMBOLS", (
+    "BTC-USDT,ETH-USDT,SOL-USDT,BNB-USDT,XRP-USDT,"
+    "DOGE-USDT,LTC-USDT,ADA-USDT,MATIC-USDT,DOT-USDT,"
+    "LINK-USDT,AVAX-USDT,UNI-USDT,ATOM-USDT,FIL-USDT,"
+    "APT-USDT,ARB-USDT,OP-USDT,TRX-USDT,NEAR-USDT,"
+    "ETC-USDT,SUI-USDT,INJ-USDT,ICP-USDT,HBAR-USDT,"
+    "VET-USDT,ALGO-USDT,AAVE-USDT,CRV-USDT,SNX-USDT,"
+    "RUNE-USDT,FTM-USDT,FLOW-USDT,CHZ-USDT,GALA-USDT,"
+    "SAND-USDT,AXS-USDT,PEPE-USDT,SHIB-USDT,FLOKI-USDT,"
+    "BLUR-USDT,GMX-USDT,DYDX-USDT,ENS-USDT,LDO-USDT,"
+    "STX-USDT"
+)).split(",")
 
 # Top-K orderbook levels to consider for liquidity
 ORDERBOOK_TOP_K = _get_env_int("ARB_ORDERBOOK_TOP_K", 20)

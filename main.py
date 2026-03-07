@@ -50,7 +50,7 @@ from core.smart_capital_allocator import get_smart_allocator
 from core.exchange_config import EXCHANGE_PARAMS
 from core.event_bus import EventBus, TRADE_EXECUTED, TRADE_FAILED, BALANCE_CHANGED, COIN_SWITCHED
 from core.config_validator import validate_config, print_validation_report
-from core.strategy_dispatcher import StrategyDispatcher  # NEW: All 14 strategies!
+from core.strategy_dispatcher import StrategyDispatcher  # NEW: All 15 strategies!
 from core.signal_allocator import SignalAllocator  # Signal-based inventory management
 from core.capital_manager import CapitalManager  # Engine 2.0: capital-level mode selection
 from core.semi_hft_engine import SemiHFTEngine  # Semi-HFT: professional execution layer
@@ -333,7 +333,7 @@ class IntegratedArbitrageBot:
         self.market_adaptive_strategy = None
         self.ml_model_trainer = None
         
-        # Strategy Dispatcher (NEW: All 14 strategies!)
+        # Strategy Dispatcher (NEW: All 15 strategies!)
         self.strategy_dispatcher = None
         
         # Engine 2.0: Capital Manager
@@ -965,7 +965,7 @@ class IntegratedArbitrageBot:
                 self.iceberg_detector, self.order_flow_tracker] if x is not None)
             logger.info(f"{'✅' if _exec_count == 4 else '⚠️'} Execution Modules: {_exec_count}/4 initialized")
             
-            # Initialize Strategy Dispatcher (NEW: Manages all 14 strategies!)
+            # Initialize Strategy Dispatcher (NEW: Manages all 15 strategies!)
             logger.info("\n🎯 Initializing Strategy Dispatcher (All 14 Strategies)...")
             self.strategy_dispatcher = StrategyDispatcher(self)
             logger.info("✅ Strategy Dispatcher initialized - ALL 14 STRATEGIES ACTIVE!")
@@ -1125,7 +1125,7 @@ class IntegratedArbitrageBot:
             if self.strategy_dispatcher:
                 strategy_task = asyncio.create_task(self._strategy_dispatcher_loop())
                 self.tasks.append(strategy_task)
-                logger.info("✅ Strategy dispatcher task started (14 strategies)")
+                logger.info("✅ Strategy dispatcher task started (15 strategies)")
             
             # Periodic latency re-ping task (updates exchange latency every 60s)
             if hasattr(self, 'semi_hft_engine') and self.semi_hft_engine and self.rest_clients:
@@ -1740,7 +1740,7 @@ class IntegratedArbitrageBot:
     async def _strategy_dispatcher_loop(self):
         """Background task for running strategy dispatcher scans.
         
-        Scans all 14 strategies and routes executable opportunities
+        Scans all 15 strategies and routes executable opportunities
         to OrderExecutor for trade execution (dry-run or live).
         """
         try:

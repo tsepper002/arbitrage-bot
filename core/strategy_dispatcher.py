@@ -30,7 +30,7 @@ DEFAULT_Z_ENTRY = 2.0          # z-score threshold (higher = fewer but stronger 
 
 class StrategyDispatcher:
     """
-    Dispatcher for all 14 trading strategies.
+    Dispatcher for all 15 trading strategies.
     Manages fast (arbitrage) and slow (position) strategy scanning.
     
     Uses PriceStore data to feed analysis into each strategy, allowing
@@ -67,6 +67,7 @@ class StrategyDispatcher:
             'GRID_TRADING': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
             'DCA': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
             'MARKET_MAKING': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
+            'MAKER_MAKER': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
             'PAIRS_TRADING': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
             'FUNDING_RATE': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
             'VOLATILITY_ARB': {'calls': 0, 'opportunities': 0, 'signals': 0, 'trades': 0},
@@ -438,6 +439,7 @@ class StrategyDispatcher:
                 ('GRID_TRADING', self._scan_grid_trading),
                 ('DCA', self._scan_dca),
                 ('MARKET_MAKING', self._scan_market_making),
+                ('MAKER_MAKER', self._scan_maker_maker),
                 ('PAIRS_TRADING', self._scan_pairs_trading),
                 ('FUNDING_RATE', self._scan_funding_rate),
                 ('VOLATILITY_ARB', self._scan_volatility_arb),
@@ -609,6 +611,67 @@ class StrategyDispatcher:
                     })
                     self.strategy_stats['MARKET_MAKING']['opportunities'] += 1
                     logger.info(f"   📊 MM: {symbol} cross-spread {spread_pct*100:.3f}% ({ask_ex}→{bid_ex})")
+                    break  # One signal per scan
+        
+        return opportunities
+    
+    async def _scan_maker_maker(self) -> List[Dict[str, Any]]:
+        """Maker-Maker Arbitrage: place limit buy on cheapest exchange, limit sell on most expensive.
+        
+        Unlike taker-taker (market orders), this uses limit orders on BOTH sides:
+          1. Place limit buy at best_ask on cheapest exchange (maker fee)
+          2. Place limit sell at best_bid on most expensive exchange (maker fee)
+        
+        Advantage: pays maker fees on both sides (often 0% on MEXC, 0.02% on others)
+        Disadvantage: fill risk — orders may not fill if price moves
+        
+        Requires spread > maker_fee_buy + maker_fee_sell + min_profit.
+        """
+        self.strategy_stats['MAKER_MAKER']['calls'] += 1
+        opportunities = []
+        
+        store = self._get_price_store()
+        if not store:
+            return opportunities
+        snap = store.snapshot()
+        from core.exchange_config import EXCHANGE_PARAMS
+        
+        for symbol, exmap in snap.items():
+            if len(exmap) < 2:
+                continue
+            best_bid, best_ask = 0.0, float('inf')
+            bid_ex, ask_ex = '', ''
+            for ex, rec in exmap.items():
+                b, a = rec.get("bid", 0), rec.get("ask", 0)
+                if b and b > best_bid:
+                    best_bid, bid_ex = b, ex
+                if a and a < best_ask:
+                    best_ask, ask_ex = a, ex
+            if best_bid > best_ask and bid_ex != ask_ex:
+                spread_pct = (best_bid - best_ask) / best_ask
+                # Use MAKER fees (not taker) — both sides are limit orders
+                buy_maker_fee = EXCHANGE_PARAMS.get(ask_ex, {}).get("maker", 0.001)
+                sell_maker_fee = EXCHANGE_PARAMS.get(bid_ex, {}).get("maker", 0.001)
+                total_maker_fees = buy_maker_fee + sell_maker_fee
+                min_profit = 0.0005  # 0.05% minimum profit after maker fees
+                if spread_pct > total_maker_fees + min_profit:
+                    roi_pct = (spread_pct - total_maker_fees) * 100
+                    opportunities.append({
+                        'strategy': 'MAKER_MAKER',
+                        'type': 'maker_arb',
+                        'symbol': symbol,
+                        'data': {
+                            'spread_pct': spread_pct * 100,
+                            'roi_pct': roi_pct,
+                            'buy_ex': ask_ex,
+                            'sell_ex': bid_ex,
+                            'buy_maker_fee': buy_maker_fee * 100,
+                            'sell_maker_fee': sell_maker_fee * 100,
+                        }
+                    })
+                    self.strategy_stats['MAKER_MAKER']['opportunities'] += 1
+                    self.record_signal('MAKER_MAKER', symbol)
+                    logger.info(f"   📊 MAKER²: {symbol} spread {spread_pct*100:.3f}% maker_fees {total_maker_fees*100:.3f}% ROI {roi_pct:.3f}% ({ask_ex}→{bid_ex})")
                     break  # One signal per scan
         
         return opportunities

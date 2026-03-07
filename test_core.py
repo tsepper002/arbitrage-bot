@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Comprehensive tests for the unified arbitrage bot.
-Tests all 200+ modules, 14 strategies, E2E flow.
+Tests all 200+ modules, 15 strategies, E2E flow.
 """
 import sys, os, asyncio, time, glob, socket
 
@@ -250,7 +250,7 @@ def test_core_managers():
 def test_strategy_dispatcher():
     """TEST 9: Strategy Dispatcher"""
     print("\n" + "=" * 60)
-    print("TEST 9: Strategy Dispatcher (14 strategies)")
+    print("TEST 9: Strategy Dispatcher (15 strategies)")
     print("=" * 60)
     from core.strategy_dispatcher import StrategyDispatcher
     class MockBot:
@@ -263,7 +263,7 @@ def test_strategy_dispatcher():
                          'wash_trading_filter', 'orderbook_imbalance_detector']:
                 setattr(self, attr, None)
     dispatcher = StrategyDispatcher(MockBot())
-    assert len(dispatcher.strategy_stats) == 14
+    assert len(dispatcher.strategy_stats) == 15
     print(f"  ✅ StrategyDispatcher: {len(dispatcher.strategy_stats)} strategies")
     for name in dispatcher.strategy_stats:
         print(f"    - {name}")
