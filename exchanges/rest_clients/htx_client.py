@@ -7,6 +7,7 @@ import asyncio
 import time
 import hmac
 import hashlib
+import math
 import base64
 import urllib.parse
 import socket
@@ -148,6 +149,20 @@ class HTXRESTClient(BaseRESTClient):
         """Convert BTC-USDT to btcusdt (lowercase, no hyphen)."""
         return symbol.replace("-", "").lower()
     
+    HTX_QTY_MAX_DECIMALS = 8
+
+    @staticmethod
+    def _truncate_qty(quantity: float) -> str:
+        """Truncate quantity to max decimal places and format as clean string.
+
+        Prevents floating-point artifacts like 5.890000000000001
+        from being sent to HTX API.
+        """
+        factor = 10 ** HTXRESTClient.HTX_QTY_MAX_DECIMALS
+        truncated = math.floor(quantity * factor) / factor
+        formatted = f"{truncated:.{HTXRESTClient.HTX_QTY_MAX_DECIMALS}f}".rstrip('0').rstrip('.')
+        return formatted if formatted else "0"
+
     async def place_order(
         self,
         symbol: str,
@@ -184,7 +199,7 @@ class HTXRESTClient(BaseRESTClient):
                 )
             order_data["amount"] = str(round(usdt_amount, 2))
         else:
-            order_data["amount"] = str(quantity)
+            order_data["amount"] = self._truncate_qty(quantity)
         
         if order_type == "limit" and price:
             order_data["price"] = str(price)

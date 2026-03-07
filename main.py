@@ -2303,6 +2303,27 @@ async def main():
     MAX_RESTARTS = 5
     RESTART_DELAYS = [5, 15, 30, 60, 120]  # Exponential backoff
     
+    # Suppress known Windows ProactorEventLoop errors:
+    # _call_connection_lost raises OSError when socket.shutdown() is called
+    # on an already-closed socket. This is a Python bug on Windows, not ours.
+    loop = asyncio.get_running_loop()
+    _original_handler = loop.get_exception_handler()
+
+    def _windows_exception_handler(loop, context):
+        exc = context.get("exception")
+        # Suppress the known ProactorEventLoop socket shutdown error
+        if isinstance(exc, OSError) and getattr(exc, "winerror", None) == 10022:
+            return  # Silently ignore — already-closed socket, harmless
+        if isinstance(exc, ConnectionResetError):
+            return  # Silently ignore — connection already reset, harmless
+        # For all other exceptions, use default handler
+        if _original_handler:
+            _original_handler(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(_windows_exception_handler)
+    
     for attempt in range(MAX_RESTARTS + 1):
         bot = IntegratedArbitrageBot()
         try:

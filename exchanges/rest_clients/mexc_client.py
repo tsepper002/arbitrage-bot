@@ -7,6 +7,7 @@ Note: MEXC has 0% maker fees - prioritize limit orders!
 import time
 import hmac
 import hashlib
+import math
 import socket
 from typing import Dict, Any, Optional, List
 import aiohttp
@@ -102,6 +103,21 @@ class MEXCRESTClient(BaseRESTClient):
         ).hexdigest()
         return f"{qs}&signature={signature}"
 
+    MEXC_QTY_MAX_DECIMALS = 8
+
+    @staticmethod
+    def _truncate_qty(quantity: float) -> str:
+        """Truncate quantity to max decimal places and format as clean string.
+
+        Prevents 'quantity scale is invalid' errors.
+        Python float arithmetic can produce 5.890000000000001 from
+        math.floor(5.89/0.01)*0.01 — this cleans it.
+        """
+        factor = 10 ** MEXCRESTClient.MEXC_QTY_MAX_DECIMALS
+        truncated = math.floor(quantity * factor) / factor
+        formatted = f"{truncated:.{MEXCRESTClient.MEXC_QTY_MAX_DECIMALS}f}".rstrip('0').rstrip('.')
+        return formatted if formatted else "0"
+
     async def place_order(
         self,
         symbol: str,
@@ -129,7 +145,7 @@ class MEXCRESTClient(BaseRESTClient):
             # MEXC market buy: use quoteOrderQty (USDT amount)
             params["quoteOrderQty"] = str(round(quantity * price, 2))
         else:
-            params["quantity"] = f"{quantity:.8f}"
+            params["quantity"] = self._truncate_qty(quantity)
         
         if order_type == "limit" and price:
             params["price"] = str(price)

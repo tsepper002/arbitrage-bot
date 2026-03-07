@@ -142,7 +142,7 @@ class SignalAllocator:
 
     # Exchange minimum order amounts in USDT
     MIN_ORDER_USDT = {
-        'Binance': 5.0, 'HTX': 5.0,
+        'Binance': 5.0, 'HTX': 10.0,
         'KuCoin': 0.1,   # KuCoin accepts very small market orders (funds-based)
         'Bybit': 5.0, 'MEXC': 5.0,
     }

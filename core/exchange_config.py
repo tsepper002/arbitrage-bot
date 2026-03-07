@@ -40,7 +40,7 @@ EXCHANGE_PARAMS: Dict[str, Dict[str, Any]] = {
         "withdraw_fee": 1.25, # USDT TRC20 withdrawal fee
         "withdraw_fee_currency": "USDT",
         "withdraw_network": "TRC20",
-        "min_notional": 1.0,
+        "min_notional": 10.0,
         "min_size": 0.0001,
         "supports_depth": True,
     },
@@ -99,7 +99,7 @@ _KNOWN_TICK_SIZES = {
 }
 
 _KNOWN_MIN_NOTIONAL = {
-    "Binance": 5.0, "MEXC": 1.0, "KuCoin": 0.1, "Bybit": 1.0, "HTX": 1.0,
+    "Binance": 5.0, "MEXC": 1.0, "KuCoin": 0.1, "Bybit": 1.0, "HTX": 10.0,
 }
 
 
