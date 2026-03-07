@@ -1225,15 +1225,13 @@ class SignalAllocator:
                 
                 symbol = f"{asset}-USDT"
                 
-                # Get current price — try multiple sources
+                # Get current price — try multiple sources (freshest first)
                 price = 0.0
                 if price_store:
                     price = self.balance_manager._get_price_from_store(price_store, symbol, exchange)
                     if price <= 0:
                         price = self.balance_manager._get_any_price(price_store, symbol)
-                if price <= 0:
-                    price = self._last_prices.get(symbol, 0.0)
-                # Last resort: try to get price from REST client orderbook
+                # REST orderbook is more reliable than cached _last_prices
                 if price <= 0 and rest_clients and not settings.DRY_RUN:
                     client = rest_clients.get(exchange)
                     if client and hasattr(client, 'get_orderbook'):
@@ -1243,6 +1241,11 @@ class SignalAllocator:
                                 price = float(ob['bids'][0][0])
                         except Exception as e:
                             logger.debug(f"  ⚠️ {exchange}: Orderbook fetch failed for {symbol}: {e}")
+                # Last resort: cached price (may be stale during shutdown)
+                if price <= 0:
+                    price = self._last_prices.get(symbol, 0.0)
+                    if price > 0:
+                        logger.warning(f"  ⚠️ {exchange}: Using cached price for {symbol}: ${price:.4f} (may be stale)")
                 if price <= 0:
                     logger.warning(f"  ⚠️ {exchange}: Cannot sell {amount:.6g} {asset} — no price available")
                     continue

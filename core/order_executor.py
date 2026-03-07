@@ -276,7 +276,7 @@ class OrderExecutor:
     PROFIT_TOLERANCE = 0.001
     # Minimum ROI % to execute a LIVE trade — catches cases where net profit
     # passes the dollar gate but percentage is essentially zero (e.g., very large qty)
-    MIN_LIVE_ROI_PCT = 0.01
+    MIN_LIVE_ROI_PCT = settings.MIN_LIVE_ROI_PCT
     # Minimum ratio of adjusted qty vs requested qty to proceed
     # Execute even if only 50% of ideal qty is available — a smaller profitable
     # trade is better than no trade. Pre-funded inventory may not perfectly match.
@@ -410,6 +410,9 @@ class OrderExecutor:
                 
                 if adjusted_qty < qty * self.QTY_ADJUST_THRESHOLD:
                     logger.info(f"📏 Adjusted qty: {qty:.6f} → {adjusted_qty:.6f} (balance limited)")
+                    # Recalculate expected_net proportionally to new qty
+                    if qty > 0:
+                        expected_net = expected_net * (adjusted_qty / qty)
                     qty = adjusted_qty
             
             logger.info(
