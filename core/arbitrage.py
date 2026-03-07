@@ -998,10 +998,12 @@ class ArbitrageEngine:
             
             # SYMBOL RANKING: Scan highest-signal symbols first.
             # This ensures the most profitable symbols get processed first in each cycle.
-            SYMBOL_RANKING_WINDOW = 300  # Score symbols based on last 5 minutes of signals
+            SYMBOL_RANKING_WINDOW_SEC = 300  # Score symbols based on last 5 minutes
             if self.signal_allocator and ready_symbols:
                 ready_symbols.sort(
-                    key=lambda s: self.signal_allocator._score_symbol_recent(s, SYMBOL_RANKING_WINDOW),
+                    key=lambda s: self.signal_allocator._score_symbol_recent(
+                        s, last_n=50, max_age_sec=SYMBOL_RANKING_WINDOW_SEC
+                    ),
                     reverse=True
                 )
             
@@ -1034,7 +1036,11 @@ class ArbitrageEngine:
                         self.strategy_dispatcher.record_engine_near_misses(nm)
                         self._near_miss_count = 0  # Reset after feeding
                 trades_this_cycle = 0
-                MAX_TRADES_PER_CYCLE = 2  # Allow 2 trades/cycle (different pairs)
+                # Scale max trades per cycle with capital level:
+                # Level 1 (MicroArb): 1 parallel trade → 1 per cycle
+                # Level 2+: match max_parallel_trades from level params
+                cm = self.capital_manager
+                MAX_TRADES_PER_CYCLE = cm.level.max_parallel_trades if cm else 2
                 for o in opps:
                     # LIMIT: max trades per cycle to avoid balance race conditions
                     if trades_this_cycle >= MAX_TRADES_PER_CYCLE:
@@ -1082,9 +1088,12 @@ class ArbitrageEngine:
                                 o['buy_ex'], o['symbol'], 'buy',
                                 total_quantity=o['qty'], duration_seconds=30
                             )
+                            result = {'status': 'success', 'trade_info': {'net_profit': o.get('net', 0)}}
                         except Exception as e:
-                            logger.debug(f"TWAP execution error: {e}")
-                    result = await self.executor.execute_arbitrage(o)
+                            logger.debug(f"TWAP execution error: {e}, falling back to standard execution")
+                            result = await self.executor.execute_arbitrage(o)
+                    else:
+                        result = await self.executor.execute_arbitrage(o)
                     
                     if result.get('status') in ('success', 'simulated'):
                         trades_this_cycle += 1

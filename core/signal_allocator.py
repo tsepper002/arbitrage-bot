@@ -332,19 +332,27 @@ class SignalAllocator:
             return self._last_prices[symbol]
         return 0.0
 
-    def _score_symbol_recent(self, symbol: str, last_n: int = 30) -> float:
-        """Score a symbol by frequency × avg_roi from the last N CROSS_EXCHANGE signals.
+    def _score_symbol_recent(self, symbol: str, last_n: int = 30,
+                             max_age_sec: float = 300.0) -> float:
+        """Score a symbol by frequency × avg_roi from recent CROSS_EXCHANGE signals.
         
         Only counts CROSS_EXCHANGE signals (actual arb opportunities).
         SMART_ORDER signals are excluded to avoid coin selection based on
         single-exchange observations that don't represent arb potential.
         
+        Args:
+            last_n: Maximum number of signals to consider
+            max_age_sec: Only consider signals from the last N seconds
+        
         Returns: score = signal_count × avg_roi_pct (higher = better)
         """
-        # Get last N CROSS_EXCHANGE signals for this symbol
+        now = time.time()
+        # Get last N CROSS_EXCHANGE signals for this symbol within time window
         symbol_signals = [
             s for s in reversed(self._signals) 
-            if s.symbol == symbol and s.strategy == 'CROSS_EXCHANGE'
+            if s.symbol == symbol 
+            and s.strategy == 'CROSS_EXCHANGE'
+            and (now - s.timestamp) <= max_age_sec
         ][:last_n]
         if not symbol_signals:
             return 0.0
@@ -614,7 +622,9 @@ class SignalAllocator:
         # This picks the coin with BOTH frequent signals AND high average ROI
         symbol_scores = {}
         for symbol in allocation:
-            symbol_scores[symbol] = self._score_symbol_recent(symbol, self.INITIAL_SIGNAL_WINDOW)
+            symbol_scores[symbol] = self._score_symbol_recent(
+                symbol, last_n=self.INITIAL_SIGNAL_WINDOW, max_age_sec=600.0
+            )
         best_coin = max(symbol_scores, key=symbol_scores.get) if symbol_scores else None
         if not best_coin or symbol_scores.get(best_coin, 0) <= 0:
             # Fallback to allocation-based if no ROI data yet
@@ -864,15 +874,22 @@ class SignalAllocator:
                             f"best score {new_score:.2f})"
                         )
                         # Log top-3 alternatives so user can see WHY this coin was chosen
-                        # Pre-compute signal counts to avoid repeated full list iteration
+                        # Pre-compute signal counts and exchange diversity
                         top_syms = {alt_sym for alt_sym, _ in alternatives[:3]}
                         sig_counts = {s: 0 for s in top_syms}
+                        sig_exchanges = {s: set() for s in top_syms}
                         for sig in self._signals:
                             if sig.symbol in top_syms and sig.strategy == 'CROSS_EXCHANGE':
                                 sig_counts[sig.symbol] += 1
+                                if sig.exchange:
+                                    sig_exchanges[sig.symbol].add(sig.exchange)
                         for i, (alt_sym, alt_score) in enumerate(alternatives[:3]):
                             alt_base = alt_sym.split('-')[0] if '-' in alt_sym else alt_sym.replace('USDT', '')
-                            logger.info(f"  #{i+1} {alt_base}: score={alt_score:.2f}, arb_signals={sig_counts.get(alt_sym, 0)}")
+                            n_exch = len(sig_exchanges.get(alt_sym, set()))
+                            logger.info(
+                                f"  #{i+1} {alt_base}: score={alt_score:.2f}, "
+                                f"arb_signals={sig_counts.get(alt_sym, 0)}, exchanges={n_exch}"
+                            )
                         
                         # Sell old coin on all exchanges
                         for exchange in exchanges:
