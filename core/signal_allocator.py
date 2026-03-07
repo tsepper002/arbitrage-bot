@@ -978,7 +978,7 @@ class SignalAllocator:
                                 logger.info(f"  ⏭️ {exchange}: Skip buy — USDT ${usdt_balance:.2f} - ${reserve:.0f} reserve = ${available:.2f} < ${self.MIN_PREPOSITION_USDT} min")
                                 continue
                             
-                            # Use MAX_PREFUND_PCT (same as initial pre-fund) — switch IS a pre-fund
+                            # Use MAX_PREFUND_PCT (same % as initial pre-fund for consistency)
                             buy_usdt = available * self.MAX_PREFUND_PCT
                             # Safety net: bump to exchange minimum if we have enough USDT
                             min_order = self.MIN_ORDER_USDT.get(exchange, self.DEFAULT_MIN_ORDER_USDT)

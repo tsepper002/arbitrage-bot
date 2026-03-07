@@ -140,9 +140,10 @@ class BalanceManager:
             # but we had real assets before, keep the old cache and warn.
             # This prevents a single bad API response from erasing all positions.
             old_balance = self.balances.get(exchange_name, {})
+            WIPEOUT_PROTECTION_THRESHOLD = 1.0  # Min cached value ($) to trigger protection
             if not balance and old_balance:
                 old_total = sum(old_balance.values())
-                if old_total > 1.0:
+                if old_total > WIPEOUT_PROTECTION_THRESHOLD:
                     logger.warning(
                         f"⚠️ {exchange_name}: API returned empty balance but had "
                         f"${old_total:.2f} cached — keeping old cache (possible API error)"
