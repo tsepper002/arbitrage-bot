@@ -128,8 +128,8 @@ def validate_config() -> Dict[str, List[str]]:
     slippage = getattr(settings, 'GLOBAL_SLIPPAGE_PER_LEG_PCT', 0.01)
     if slippage > 0.1:
         warnings.append(
-            f"GLOBAL_SLIPPAGE_PER_LEG_PCT={slippage}% is very high — "
-            f"this adds {slippage * 2}% to every trade's cost"
+            f"GLOBAL_SLIPPAGE_PER_LEG_PCT={slippage} is very high — "
+            f"this adds {slippage * 2} pct points to every trade's cost"
         )
 
     # ========================================================================

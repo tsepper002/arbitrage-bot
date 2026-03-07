@@ -1624,8 +1624,8 @@ class IntegratedArbitrageBot:
                                     first_coin_found = True
                                     logger.info("✅ First coin positioned! Switching to normal 5-min rebalance interval")
                                     # Event Bus: notify all components of coin switch
-                                    if self.event_bus:
-                                        coin = self.signal_allocator.get_current_coin() if self.signal_allocator else ''
+                                    if self.event_bus and self.signal_allocator:
+                                        coin = self.signal_allocator.get_current_coin() or 'unknown'
                                         await self.event_bus.publish(COIN_SWITCHED, {
                                             'new_coin': coin, 'old_coin': '', 'reason': 'first_coin'
                                         }, source='rebalancer')
