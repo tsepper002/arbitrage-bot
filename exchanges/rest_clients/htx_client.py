@@ -171,8 +171,10 @@ class HTXRESTClient(BaseRESTClient):
             if price and price > 0:
                 usdt_amount = quantity * price
             else:
-                # Fallback: assume quantity is already USDT amount (caller should ensure this)
-                usdt_amount = quantity
+                raise ValueError(
+                    f"HTX market buy requires price for quote conversion. "
+                    f"Got quantity={quantity}, price={price}"
+                )
             order_data["amount"] = str(round(usdt_amount, 2))
         else:
             order_data["amount"] = str(quantity)
@@ -310,7 +312,7 @@ class HTXRESTClient(BaseRESTClient):
             
             async with session.get(url, params=params) as resp:
                 data = await resp.json()
-                if data.get("code") == 200:
+                if data.get("status") == "ok" or data.get("code") == 200:
                     return data.get("data", {})
                 else:
                     logger.error(f"Error getting HTX deposit address for {currency}: {data}")

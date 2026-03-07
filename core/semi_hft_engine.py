@@ -514,14 +514,14 @@ class SemiHFTEngine:
         if capital_manager:
             base = capital_manager.dynamic_threshold(total_fee_pct, avg_latency)
         else:
-            base = total_fee_pct + 0.02  # fallback: fees + 0.02%
+            base = total_fee_pct + 0.015  # fallback: fees + 0.015% (Level 1 cushion)
 
         # --- DATA COLLECTION (advisory only, NOT added to threshold) ---
 
         # Track p95 slippage for monitoring
         if self._slippage_history:
             sorted_slip = sorted(self._slippage_history)
-            p95_idx = int(len(sorted_slip) * 0.95)
+            p95_idx = max(0, int(len(sorted_slip) * 0.95) - 1)
             p95_slip = sorted_slip[min(p95_idx, len(sorted_slip) - 1)]
             logger.debug(f"p95 slippage: {p95_slip:.4f}% (monitoring only)")
 
@@ -533,8 +533,10 @@ class SemiHFTEngine:
             logger.debug(f"Pair {pair_key} failure rate: {failure_rate:.1%} (monitoring only)")
 
         # ONLY in PANIC regime do we raise the threshold (market structure broken)
+        # Note: this is the ONLY non-data addition — justified because PANIC means
+        # orderbooks are unreliable and fills are unpredictable
         if self._vol_regime.regime == "PANIC":
-            base += 0.10  # +0.10% in panic (market structure broken, wider protection)
+            base += 0.05  # +0.05% in panic (reduced from 0.10%: still trades wide spreads)
 
         return base
 

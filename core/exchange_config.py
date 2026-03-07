@@ -99,7 +99,7 @@ _KNOWN_TICK_SIZES = {
 }
 
 _KNOWN_MIN_NOTIONAL = {
-    "Binance": 5.0, "MEXC": 1.0, "KuCoin": 0.1, "Bybit": 1.0, "HTX": 5.0,
+    "Binance": 5.0, "MEXC": 1.0, "KuCoin": 0.1, "Bybit": 1.0, "HTX": 1.0,
 }
 
 

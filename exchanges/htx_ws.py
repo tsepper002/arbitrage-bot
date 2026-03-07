@@ -250,7 +250,7 @@ class HtxWS:
                 self._ws = ws
                 # Use WebSocket-level ping to detect dead connections
                 # HTX also uses application-level ping/pong (handled in _on_message)
-                ws.run_forever(ping_interval=30, ping_timeout=10)
+                ws.run_forever(ping_interval=30, ping_timeout=15)
                 logger.warning(f"{self.exchange}: run_forever returned, will reconnect")
             except Exception:
                 logger.exception("HTX run error - reconnecting")

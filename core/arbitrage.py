@@ -456,8 +456,8 @@ class ArbitrageEngine:
         if keys_to_remove:
             logger.debug(f"Cleaned {len(keys_to_remove)} old entries from recent_cache")
 
-        # Cleanup stale spread observations (>10 seconds old)
-        spread_cutoff = now * 1000 - 10000
+        # Cleanup stale spread observations (>5 seconds old)
+        spread_cutoff = now * 1000 - 5000
         stale_spreads = [k for k, ts in self._spread_first_seen.items() if ts < spread_cutoff]
         for k in stale_spreads:
             del self._spread_first_seen[k]
@@ -650,7 +650,9 @@ class ArbitrageEngine:
                     if ('HTX' in (buy_ex, sell_ex)) and not cm.should_use_htx(gross_spread_pct):
                         continue
                 else:
-                    dynamic_min_spread = sum_fees_pct * 0.8  # fallback: static 80% of fees
+                    # Fallback when no CapitalManager: fees + Level 1 cushion (0.015%)
+                    # CRITICAL: old value (fees × 0.8) was BELOW fees → guaranteed loss!
+                    dynamic_min_spread = sum_fees_pct + 0.015
                 
                 # SIGNAL COLLECTION: Record signals BEFORE threshold gate
                 # This is critical: coin selection needs signal data even when
@@ -685,15 +687,18 @@ class ArbitrageEngine:
                     continue
 
                 # TOP BOT PATTERN: Execute quickly if spread > threshold.
-                # Minimal 30ms persistence check catches obvious data glitches
-                # without the 150ms delay that was killing real opportunities.
-                spread_key = f"{symbol}:{buy_ex}->{sell_ex}"
-                now_ms = time.time() * 1000
-                if spread_key not in self._spread_first_seen:
-                    self._spread_first_seen[spread_key] = now_ms
-                    continue  # First observation: wait 30ms to confirm
-                elif now_ms - self._spread_first_seen[spread_key] < 30:
-                    continue  # Not yet confirmed (30ms minimum)
+                # Strong spread bypass: skip persistence check for very wide spreads
+                # (e.g., 3× above threshold cushion — clearly real, not a glitch)
+                strong_threshold = dynamic_min_spread * self.STRONG_SPREAD_MULTIPLIER
+                if gross_spread_pct < strong_threshold:
+                    # Normal spreads: 30ms persistence check catches data glitches
+                    spread_key = f"{symbol}:{buy_ex}->{sell_ex}"
+                    now_ms = time.time() * 1000
+                    if spread_key not in self._spread_first_seen:
+                        self._spread_first_seen[spread_key] = now_ms
+                        continue  # First observation: wait 30ms to confirm
+                    elif now_ms - self._spread_first_seen[spread_key] < 30:
+                        continue  # Not yet confirmed (30ms minimum)
 
                 # LATENCY CHECK: Skip if combined exchange latency exceeds spread lifetime
                 buy_latency = self._exchange_latency_ms.get(buy_ex, self.DEFAULT_EXCHANGE_LATENCY_MS)

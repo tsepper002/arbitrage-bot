@@ -122,7 +122,7 @@ class MEXCRESTClient(BaseRESTClient):
             # MEXC market buy: use quoteOrderQty (USDT amount)
             params["quoteOrderQty"] = str(round(quantity * price, 2))
         else:
-            params["quantity"] = str(quantity)
+            params["quantity"] = f"{quantity:.8f}"
         
         if order_type == "limit" and price:
             params["price"] = str(price)

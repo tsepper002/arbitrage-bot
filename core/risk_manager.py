@@ -6,7 +6,7 @@ Protects against excessive losses and anomalous conditions.
 import time
 import logging
 from typing import Dict, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import settings
 
 logger = logging.getLogger("risk_manager")
@@ -62,9 +62,9 @@ class RiskManager:
     
     def _get_next_reset_time(self) -> float:
         """Get timestamp for next daily reset (midnight UTC)."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         tomorrow = now + timedelta(days=1)
-        midnight = datetime(tomorrow.year, tomorrow.month, tomorrow.day)
+        midnight = datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=timezone.utc)
         return midnight.timestamp()
     
     def _check_daily_reset(self):

@@ -1178,7 +1178,8 @@ class SignalAllocator:
         if rest_clients and not settings.DRY_RUN:
             logger.info("💱 SHUTDOWN: Refreshing balances from exchanges...")
             try:
-                await self.balance_manager.initialize_balances(rest_clients)
+                # Use sync_balances() — not initialize_balances() which doesn't exist
+                await self.balance_manager.sync_balances()
                 exchanges = list(self.balance_manager.balances.keys())
             except Exception as e:
                 logger.warning(f"  ⚠️ Balance refresh failed, using cached: {e}")

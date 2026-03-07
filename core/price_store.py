@@ -120,18 +120,19 @@ class PriceStore:
         result = {}
         for ex, rec in exmap.items():
             entry = rec.copy()
-            age = now - entry.get('ts', 0)
-            entry['stale'] = age > self.STALE_THRESHOLD_SEC
+            ts = entry.get('ts')
+            if ts is None or ts == 0:
+                entry['stale'] = True  # No timestamp → treat as stale
+            else:
+                age = now - ts
+                entry['stale'] = age > self.STALE_THRESHOLD_SEC
             result[ex] = entry
         return result
     
     def snapshot(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         """
         Get full snapshot - deep copy for thread safety.
-        Each record dict is independently copied so mutations
-        in the live store don't affect the snapshot.
+        Uses copy.deepcopy to properly clone nested lists (bids_levels, asks_levels).
         """
-        return {
-            s: {ex: dict(rec) for ex, rec in exmap.items()}
-            for s, exmap in self._data.items()
-        }
+        import copy
+        return copy.deepcopy(dict(self._data))

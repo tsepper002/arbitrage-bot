@@ -273,7 +273,7 @@ class KucoinWS:
             endpoint = self._prepare_endpoint()
             if not endpoint:
                 time.sleep(backoff)
-                backoff = min(backoff * 2, 60.0)
+                backoff = min(backoff * 1.5, 30.0)  # Cap at 30s, slower growth
                 continue
             try:
                 logger.info(f"{self.exchange}: connecting to {endpoint}")
@@ -290,7 +290,7 @@ class KucoinWS:
             except Exception as e:
                 logger.exception(f"KuCoin run error - reconnecting: {e}")
             time.sleep(backoff)
-            backoff = min(backoff * 2, 60.0)
+            backoff = min(backoff * 1.5, 30.0)  # Cap at 30s, slower growth
 
     def stop(self):
         self._stop.set()

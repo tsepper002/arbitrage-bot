@@ -523,11 +523,16 @@ class OrderExecutor:
                 buy_result_final = buy_result
                 sell_result_final = sell_result
             else:
-                # Standard parallel market orders — round qty for BOTH exchanges
+                # Standard parallel market orders
+                # Round qty for BOTH exchanges, then use the SMALLER to avoid imbalance
                 buy_qty_rounded = round_qty(buy_ex, symbol, qty)
                 sell_qty_rounded = round_qty(sell_ex, symbol, qty)
-                buy_task = buy_client.place_order(symbol, 'buy', 'market', buy_qty_rounded, buy_price)
-                sell_task = sell_client.place_order(symbol, 'sell', 'market', sell_qty_rounded, sell_price)
+                qty_to_trade = min(buy_qty_rounded, sell_qty_rounded)
+                # Re-round to ensure each exchange's step size is respected
+                buy_qty_final = round_qty(buy_ex, symbol, qty_to_trade)
+                sell_qty_final = round_qty(sell_ex, symbol, qty_to_trade)
+                buy_task = buy_client.place_order(symbol, 'buy', 'market', buy_qty_final, buy_price)
+                sell_task = sell_client.place_order(symbol, 'sell', 'market', sell_qty_final, sell_price)
                 results = await asyncio.gather(buy_task, sell_task, return_exceptions=True)
                 buy_result_final, sell_result_final = results
             
@@ -788,6 +793,24 @@ class OrderExecutor:
         """
         # Round qty to exchange step_size — prevents "Order size increment invalid"
         qty = round_qty(exchange, symbol, qty)
+        # Validate qty is large enough to place order
+        min_order_usdt = getattr(settings, 'MIN_TRADE_SIZE_USDT', 3.0)
+        notional = qty * price if price > 0 else 0
+        if qty <= 0 or notional < min_order_usdt * 0.5:
+            logger.error(
+                f"🚨 Emergency close SKIPPED: {side} {qty} {symbol} on {exchange} "
+                f"(notional ${notional:.4f} < min ${min_order_usdt * 0.5:.2f})"
+            )
+            # Still persist for manual intervention
+            if self.state_manager:
+                import uuid
+                self.state_manager.add_pending_order({
+                    'id': str(uuid.uuid4())[:8],
+                    'exchange': exchange, 'symbol': symbol,
+                    'side': side, 'qty': qty, 'price': price,
+                    'reason': f'Too small for emergency close: ${notional:.4f}'
+                })
+            return None
         for attempt in range(1, self.EMERGENCY_CLOSE_MAX_RETRIES + 1):
             try:
                 logger.warning(f"🚨 EMERGENCY CLOSE (attempt {attempt}/{self.EMERGENCY_CLOSE_MAX_RETRIES}): {side} {qty} {symbol} on {exchange}")
