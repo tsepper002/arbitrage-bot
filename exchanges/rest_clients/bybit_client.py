@@ -37,7 +37,7 @@ class BybitRESTClient(BaseRESTClient):
         try:
             session = await self._get_session()
             async with session.get(f"{self.BASE_URL}/v5/market/time") as resp:
-                data = await resp.json()
+                data = await self._check_response(resp)
                 server_time = int(data.get("result", {}).get("timeNano", "0")) // 1_000_000
                 if server_time > 0:
                     self._time_offset_ms = server_time - int(time.time() * 1000)
@@ -61,6 +61,13 @@ class BybitRESTClient(BaseRESTClient):
         """Close the aiohttp session."""
         if self._session and not self._session.closed:
             await self._session.close()
+    
+    async def _check_response(self, resp: aiohttp.ClientResponse) -> dict:
+        """Check HTTP status before parsing JSON. Raises on non-200 with clear error."""
+        if resp.status != 200:
+            text = await resp.text()
+            raise Exception(f"Bybit HTTP {resp.status}: {text[:200]}")
+        return await resp.json()
     
     def _generate_signature(self, timestamp: str, query_string: str) -> str:
         """Generate HMAC SHA256 signature for Bybit v5 API.
@@ -146,7 +153,7 @@ class BybitRESTClient(BaseRESTClient):
         
         session = await self._get_session()
         async with session.post(url, data=body_str, headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("retCode") != 0:
                 raise Exception(f"Bybit order failed: {data}")
             return data.get("result", {})
@@ -167,7 +174,7 @@ class BybitRESTClient(BaseRESTClient):
         
         session = await self._get_session()
         async with session.post(url, data=body_str, headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("retCode") != 0:
                 raise Exception(f"Bybit cancel failed: {data}")
             return data.get("result", {})
@@ -181,7 +188,7 @@ class BybitRESTClient(BaseRESTClient):
         
         session = await self._get_session()
         async with session.get(f"{url}?{query_string}", headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("retCode") != 0:
                 raise Exception(f"Bybit get order failed: {data}")
             return data.get("result", {})
@@ -202,7 +209,7 @@ class BybitRESTClient(BaseRESTClient):
             
             session = await self._get_session()
             async with session.get(f"{url}?{query_string}", headers=headers) as resp:
-                data = await resp.json()
+                data = await self._check_response(resp)
                 if data.get("retCode") != 0:
                     logger.debug(f"Bybit {account_type} balance query failed: {data.get('retMsg', '')}")
                     continue
@@ -243,7 +250,7 @@ class BybitRESTClient(BaseRESTClient):
         
         session = await self._get_session()
         async with session.get(url, params=params) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("retCode") != 0:
                 raise Exception(f"Bybit get pairs failed: {data}")
             return data.get("result", {}).get("list", [])
@@ -276,7 +283,7 @@ class BybitRESTClient(BaseRESTClient):
         
         session = await self._get_session()
         async with session.post(url, data=body_str, headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("retCode") != 0:
                 raise Exception(f"Bybit withdraw failed: {data}")
             return data.get("result", {})
@@ -293,7 +300,7 @@ class BybitRESTClient(BaseRESTClient):
         
         session = await self._get_session()
         async with session.get(f"{url}?{query_string}", headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("retCode") != 0:
                 raise Exception(f"Bybit get deposit address failed: {data}")
             

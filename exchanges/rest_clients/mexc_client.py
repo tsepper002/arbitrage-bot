@@ -35,7 +35,7 @@ class MEXCRESTClient(BaseRESTClient):
         try:
             session = await self._get_session()
             async with session.get(f"{self.BASE_URL}/api/v3/time") as resp:
-                data = await resp.json()
+                data = await self._check_response(resp)
                 server_time = int(data.get("serverTime", 0))
                 if server_time > 0:
                     self._time_offset_ms = server_time - int(time.time() * 1000)
@@ -63,6 +63,13 @@ class MEXCRESTClient(BaseRESTClient):
         """Close the aiohttp session."""
         if self._session and not self._session.closed:
             await self._session.close()
+    
+    async def _check_response(self, resp: aiohttp.ClientResponse) -> dict:
+        """Check HTTP status before parsing JSON. Raises on non-200 with clear error."""
+        if resp.status != 200:
+            text = await resp.text()
+            raise Exception(f"MEXC HTTP {resp.status}: {text[:200]}")
+        return await resp.json()
     
     def _get_headers(self) -> Dict[str, str]:
         """Get common headers for API requests.
@@ -136,7 +143,7 @@ class MEXCRESTClient(BaseRESTClient):
         session = await self._get_session()
         
         async with session.post(url, headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if "code" in data and data["code"] != 200:
                 raise Exception(f"MEXC order failed: {data}")
             return data
@@ -160,7 +167,7 @@ class MEXCRESTClient(BaseRESTClient):
         session = await self._get_session()
         
         async with session.delete(url, headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if "code" in data and data["code"] != 200:
                 raise Exception(f"MEXC cancel failed: {data}")
             return data
@@ -184,7 +191,7 @@ class MEXCRESTClient(BaseRESTClient):
         session = await self._get_session()
         
         async with session.get(url, headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if "code" in data and data["code"] != 200:
                 raise Exception(f"MEXC get order failed: {data}")
             return data
@@ -203,7 +210,7 @@ class MEXCRESTClient(BaseRESTClient):
         session = await self._get_session()
         
         async with session.get(url, headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             
             if "code" in data and data["code"] != 200:
                 raise Exception(f"MEXC get balance failed: {data}")
@@ -247,7 +254,7 @@ class MEXCRESTClient(BaseRESTClient):
         session = await self._get_session()
         
         async with session.post(url, headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if "code" in data and data["code"] != 200:
                 raise Exception(f"MEXC withdrawal failed: {data}")
             return data
@@ -276,7 +283,7 @@ class MEXCRESTClient(BaseRESTClient):
             session = await self._get_session()
             
             async with session.get(url, headers=headers) as resp:
-                data = await resp.json()
+                data = await self._check_response(resp)
                 if "code" in data and data["code"] == 200:
                     return data
                 else:
@@ -299,7 +306,7 @@ class MEXCRESTClient(BaseRESTClient):
             session = await self._get_session()
             
             async with session.get(url) as resp:
-                data = await resp.json()
+                data = await self._check_response(resp)
                 if "symbols" in data:
                     return data.get("symbols", [])
                 else:

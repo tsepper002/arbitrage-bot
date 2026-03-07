@@ -40,7 +40,7 @@ class HTXRESTClient(BaseRESTClient):
                 try:
                     local_before = time.time() * 1000
                     async with session.get(f"{base_url}/v1/common/timestamp") as resp:
-                        data = await resp.json()
+                        data = await self._check_response(resp)
                         if data.get("status") == "ok":
                             server_time_ms = int(data.get("data", 0))
                             self._time_offset_sec = int((server_time_ms - local_before) / 1000)
@@ -71,6 +71,13 @@ class HTXRESTClient(BaseRESTClient):
         """Close the aiohttp session."""
         if self._session and not self._session.closed:
             await self._session.close()
+    
+    async def _check_response(self, resp: aiohttp.ClientResponse) -> dict:
+        """Check HTTP status before parsing JSON. Raises on non-200 with clear error."""
+        if resp.status != 200:
+            text = await resp.text()
+            raise Exception(f"HTX HTTP {resp.status}: {text[:200]}")
+        return await resp.json()
     
     def _generate_signature(self, method: str, host: str, path: str, params: Dict[str, Any]) -> str:
         """Generate HMAC SHA256 signature for HTX API."""
@@ -115,7 +122,7 @@ class HTXRESTClient(BaseRESTClient):
                 session = await self._get_session()
                 
                 async with session.get(url, params=params) as resp:
-                    data = await resp.json()
+                    data = await self._check_response(resp)
                     if data.get("status") != "ok":
                         logger.warning(f"HTX {host} account query failed: {data.get('err-msg', data.get('status', 'unknown'))}")
                         continue
@@ -191,10 +198,13 @@ class HTXRESTClient(BaseRESTClient):
         
         # HTX wants params in URL and data in body
         async with session.post(url, params=params, json=order_data) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("status") != "ok":
                 raise Exception(f"HTX order failed: {data}")
-            return {"orderId": data.get("data")}
+            order_id = data.get("data")
+            if not order_id:
+                raise Exception(f"HTX order succeeded but returned no orderId: {data}")
+            return {"orderId": str(order_id)}
     
     async def cancel_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
         """Cancel an order on HTX. Symbol accepted for interface compatibility but not used (order_id is sufficient)."""
@@ -207,7 +217,7 @@ class HTXRESTClient(BaseRESTClient):
         session = await self._get_session()
         
         async with session.post(url, params=params) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("status") != "ok":
                 raise Exception(f"HTX cancel failed: {data}")
             return data.get("data", {})
@@ -223,7 +233,7 @@ class HTXRESTClient(BaseRESTClient):
         session = await self._get_session()
         
         async with session.get(url, params=params) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("status") != "ok":
                 raise Exception(f"HTX get order failed: {data}")
             return data.get("data", {})
@@ -241,7 +251,7 @@ class HTXRESTClient(BaseRESTClient):
         session = await self._get_session()
         
         async with session.get(url, params=params) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("status") != "ok":
                 raise Exception(f"HTX get balance failed: {data}")
             
@@ -286,7 +296,7 @@ class HTXRESTClient(BaseRESTClient):
         session = await self._get_session()
         
         async with session.post(url, params=params, json=withdrawal_data) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("status") != "ok":
                 raise Exception(f"HTX withdrawal failed: {data}")
             return data.get("data", {})
@@ -311,7 +321,7 @@ class HTXRESTClient(BaseRESTClient):
             session = await self._get_session()
             
             async with session.get(url, params=params) as resp:
-                data = await resp.json()
+                data = await self._check_response(resp)
                 if data.get("status") == "ok" or data.get("code") == 200:
                     return data.get("data", {})
                 else:
@@ -334,7 +344,7 @@ class HTXRESTClient(BaseRESTClient):
             session = await self._get_session()
             
             async with session.get(url) as resp:
-                data = await resp.json()
+                data = await self._check_response(resp)
                 if data.get("status") == "ok":
                     return data.get("data", [])
                 else:

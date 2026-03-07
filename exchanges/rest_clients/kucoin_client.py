@@ -38,7 +38,7 @@ class KuCoinRESTClient(BaseRESTClient):
         try:
             session = await self._get_session()
             async with session.get(f"{self.BASE_URL}/api/v1/timestamp") as resp:
-                data = await resp.json()
+                data = await self._check_response(resp)
                 server_time = int(data.get("data", 0))
                 if server_time > 0:
                     self._time_offset_ms = server_time - int(time.time() * 1000)
@@ -62,6 +62,13 @@ class KuCoinRESTClient(BaseRESTClient):
         """Close the aiohttp session."""
         if self._session and not self._session.closed:
             await self._session.close()
+    
+    async def _check_response(self, resp: aiohttp.ClientResponse) -> dict:
+        """Check HTTP status before parsing JSON. Raises on non-200 with clear error."""
+        if resp.status != 200:
+            text = await resp.text()
+            raise Exception(f"KuCoin HTTP {resp.status}: {text[:200]}")
+        return await resp.json()
     
     def _generate_signature(self, timestamp: str, method: str, endpoint: str, body: str = "") -> str:
         """Generate HMAC SHA256 signature for KuCoin API."""
@@ -163,7 +170,7 @@ class KuCoinRESTClient(BaseRESTClient):
         
         session = await self._get_session()
         async with session.post(url, data=body, headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("code") != "200000":
                 raise Exception(f"KuCoin order failed: {data}")
             return data.get("data", {})
@@ -177,7 +184,7 @@ class KuCoinRESTClient(BaseRESTClient):
         
         session = await self._get_session()
         async with session.delete(url, headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("code") != "200000":
                 raise Exception(f"KuCoin cancel failed: {data}")
             return data.get("data", {})
@@ -191,7 +198,7 @@ class KuCoinRESTClient(BaseRESTClient):
         
         session = await self._get_session()
         async with session.get(url, headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("code") != "200000":
                 raise Exception(f"KuCoin get order failed: {data}")
             return data.get("data", {})
@@ -205,7 +212,7 @@ class KuCoinRESTClient(BaseRESTClient):
         
         session = await self._get_session()
         async with session.get(url, headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("code") != "200000":
                 raise Exception(f"KuCoin get balance failed: {data}")
             
@@ -249,7 +256,7 @@ class KuCoinRESTClient(BaseRESTClient):
         
         session = await self._get_session()
         async with session.post(url, data=body, headers=headers) as resp:
-            data = await resp.json()
+            data = await self._check_response(resp)
             if data.get("code") != "200000":
                 raise Exception(f"KuCoin withdrawal failed: {data}")
             return data.get("data", {})
@@ -273,7 +280,7 @@ class KuCoinRESTClient(BaseRESTClient):
             
             session = await self._get_session()
             async with session.get(url, headers=headers, params=params) as resp:
-                data = await resp.json()
+                data = await self._check_response(resp)
                 if data.get("code") != "200000":
                     logger.error(f"KuCoin get deposit address failed: {data}")
                     return {}
@@ -297,7 +304,7 @@ class KuCoinRESTClient(BaseRESTClient):
             
             session = await self._get_session()
             async with session.get(url, headers=headers) as resp:
-                data = await resp.json()
+                data = await self._check_response(resp)
                 if data.get("code") != "200000":
                     logger.error(f"KuCoin get trading pairs failed: {data}")
                     return []
