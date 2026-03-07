@@ -181,7 +181,7 @@ class ArbitrageEngine:
         self._spread_first_seen: Dict[str, float] = {}  # key -> first_seen_ms
         self.MIN_SPREAD_HOLD_MS = 30  # 30ms persistence before execution
         # Strong spread bypass: skip persistence if spread is this many times above cushion
-        self.STRONG_SPREAD_MULTIPLIER = 3.0
+        self.STRONG_SPREAD_MULTIPLIER = 2.0
         # Default strong cushion when no CapitalManager (= Level 1 cushion + margin)
         self.DEFAULT_STRONG_CUSHION_PCT = 0.18
 

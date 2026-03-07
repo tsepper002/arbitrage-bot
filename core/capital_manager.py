@@ -45,7 +45,7 @@ LEVEL_1_MICRO = LevelParams(
     name="MicroArb",
     min_equity=0,          # Default for any capital
     spread_persistence_ms=150,
-    spread_threshold_above_fees=0.015,  # Pre-positioned arb: only sell-side slippage (~0.01-0.02%)
+    spread_threshold_above_fees=0.010,  # Pre-positioned arb: only sell-side slippage (~0.01%)
     max_slippage_pct=0.15,
     min_net_profit_pct=0.01,   # Micro-profits: $5 × 0.01% = $0.0005 (volume-based)
     min_net_profit_usdt=0.001, # $0.001 minimum (many small trades add up)
@@ -55,7 +55,7 @@ LEVEL_1_MICRO = LevelParams(
     coin_limit=1,
     working_capital_pct=85.0,
     position_size_pct=35.0,
-    htx_min_spread_pct=0.30,   # HTX allowed above 0.30% (pre-positioned)
+    htx_min_spread_pct=0.20,   # HTX allowed above 0.20% (pre-positioned: only sell-side latency matters)
 )
 
 LEVEL_2_MULTI = LevelParams(
@@ -106,7 +106,7 @@ LEVEL_4_MM = LevelParams(
     coin_limit=6,
     working_capital_pct=85.0,
     position_size_pct=25.0,
-    htx_min_spread_pct=0.30,
+    htx_min_spread_pct=0.20,   # Pre-positioned: only sell-side latency matters
 )
 
 ALL_LEVELS = [LEVEL_4_MM, LEVEL_3_STAT, LEVEL_2_MULTI, LEVEL_1_MICRO]
@@ -173,7 +173,7 @@ class CapitalManager:
     # by 5 bps for 5 minutes to force wider spread requirements.
     # At higher capital levels (Level 3-4), edges are wider so this
     # threshold naturally becomes less restrictive.
-    OVERTRADING_MIN_AVG_PROFIT = 0.03 # 0.03% (3 bps)
+    OVERTRADING_MIN_AVG_PROFIT = 0.01 # 0.01% (1 bp) — only trigger when actually losing
     OVERTRADING_THRESHOLD_BUMP = 0.05 # +0.05% when overtrading detected
     OVERTRADING_BUMP_DECAY_SEC = 300.0  # Bump decays after 5 minutes
 
