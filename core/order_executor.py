@@ -324,11 +324,12 @@ class OrderExecutor:
         
         # EXPOSURE CAPS: per-exchange AND per-coin limits
         if self.balance_manager:
-            # Use total equity (USDT + coin value), not just USDT.
-            # With pre-funded inventory, most capital is in coins.
+            # Use total equity (USDT + coin value estimated from cached prices),
+            # not just USDT. With pre-funded inventory, most capital is in coins.
+            # See balance_manager.get_total_balance_usdt() for valuation logic.
             total_capital = self.balance_manager.get_total_balance_usdt()
             if total_capital <= 0:
-                # Fallback: sum USDT only
+                # Fallback: sum USDT only (prices may not be available yet)
                 total_capital = sum(
                     self.balance_manager.get_balance(ex, 'USDT')
                     for ex in self.balance_manager.balances.keys()

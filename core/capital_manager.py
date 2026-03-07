@@ -166,12 +166,14 @@ class CapitalManager:
     COMPOUND_SCALE_FACTOR = 1.05      # +5% per step
     MAX_COMPOUND_MULTIPLIER = 2.0     # Cap at 2× base position size
 
-    # Overtrading control
+    # Overtrading control — prevents grinding on sub-breakeven trades.
     OVERTRADING_WINDOW = 10           # Last N trades to check
-    # With micro-capital (~$70), typical profit is ~0.05% ROI per trade.
-    # 0.20% threshold would trigger on EVERY trade → permanent bump.
-    # Scaled to 0.03% which is 60% of typical micro-arb edge.
-    OVERTRADING_MIN_AVG_PROFIT = 0.03 # 0.03%
+    # Set to 0.03% (3 bps) — typical micro-arb edge is ~0.05% ROI.
+    # If average profit drops below 60% of typical edge, bump threshold
+    # by 5 bps for 5 minutes to force wider spread requirements.
+    # At higher capital levels (Level 3-4), edges are wider so this
+    # threshold naturally becomes less restrictive.
+    OVERTRADING_MIN_AVG_PROFIT = 0.03 # 0.03% (3 bps)
     OVERTRADING_THRESHOLD_BUMP = 0.05 # +0.05% when overtrading detected
     OVERTRADING_BUMP_DECAY_SEC = 300.0  # Bump decays after 5 minutes
 

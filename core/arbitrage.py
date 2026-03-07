@@ -174,9 +174,12 @@ class ArbitrageEngine:
         self._low_fee_exchanges = ['MEXC']  # Exchanges with lowest taker fees
         self._low_fee_proximity = self.LOW_FEE_PROXIMITY_PCT / 100.0
 
-        # Spread persistence filter: only trade spreads that survive long enough
+        # Spread persistence filter: only trade spreads that survive long enough.
+        # 30ms ≈ 1-2 scan cycles at 150ms interval (scan_once runs every 150ms).
+        # This catches single-tick glitches without blocking real opportunities.
+        # Combined with 2s staleness (MAX_ORDERBOOK_AGE_MS) for data quality.
         self._spread_first_seen: Dict[str, float] = {}  # key -> first_seen_ms
-        self.MIN_SPREAD_HOLD_MS = 30  # Spread must hold for 30ms (1-2 scan cycles)
+        self.MIN_SPREAD_HOLD_MS = 30  # 30ms persistence before execution
         # Strong spread bypass: skip persistence if spread is this many times above cushion
         self.STRONG_SPREAD_MULTIPLIER = 3.0
         # Default strong cushion when no CapitalManager (= Level 1 cushion + margin)
