@@ -211,6 +211,33 @@ MAX_EXPOSURE_PER_TRADE_PCT = _get_env_float("ARB_MAX_EXPOSURE_PER_TRADE_PCT", 5.
 MAX_INVENTORY_SKEW_USDT = _get_env_float("ARB_MAX_INVENTORY_SKEW_USDT", 20.0)
 
 # ============================================================================
+# CAPITAL DISTRIBUTION — target allocation per exchange (Phase 26)
+# ============================================================================
+# MEXC gets highest share (0% maker fees = more profitable arb legs)
+# Bybit/Binance share equally (liquid, fast, low fees)
+# KuCoin/HTX get less (higher fees/latency)
+EXCHANGE_TARGET_PCT = {
+    'MEXC': 30,
+    'Bybit': 25,
+    'Binance': 25,
+    'KuCoin': 10,
+    'HTX': 10,
+}
+
+# ============================================================================
+# MINIMUM 24H VOLUME FILTER — reject illiquid pairs (Phase 31)
+# ============================================================================
+MIN_24H_VOLUME_USDT = _get_env_float("ARB_MIN_24H_VOLUME_USDT", 10_000_000)  # 10M USDT
+
+# Pairs known to frequently have <10M 24h volume on smaller exchanges.
+# Updated periodically. The 20 core pairs (BTC, ETH, SOL, etc.) are always liquid.
+# These low-cap/low-volume tokens may lack sufficient depth for safe arb execution.
+LOW_VOLUME_SYMBOLS = frozenset({
+    "FLOW-USDT", "CHZ-USDT", "SAND-USDT", "AXS-USDT",
+    "BLUR-USDT", "SNX-USDT", "CRV-USDT",
+})
+
+# ============================================================================
 # GLOBAL SLIPPAGE BUFFER
 # ============================================================================
 # Applied to ALL strategy ROI calculations before trade execution.
@@ -369,7 +396,7 @@ MEMORY_MAX_MB = _get_env_int("ARB_MEMORY_MAX_MB", 512)  # Target max memory usag
 # ============================================================================
 # AUTO-REBALANCING (Strategy A3)
 # ============================================================================
-REBALANCE_INTERVAL_SEC = _get_env_float("ARB_REBALANCE_INTERVAL_SEC", 1800)  # 30 minutes
+REBALANCE_INTERVAL_SEC = _get_env_float("ARB_REBALANCE_INTERVAL_SEC", 600)  # 10 minutes (Phase 27)
 REBALANCE_MIN_THRESHOLD = _get_env_float("ARB_REBALANCE_MIN_THRESHOLD", 0.15)  # <15% triggers rebalance
 REBALANCE_MAX_THRESHOLD = _get_env_float("ARB_REBALANCE_MAX_THRESHOLD", 0.30)  # >30% is source
 REBALANCE_MIN_AMOUNT = _get_env_float("ARB_REBALANCE_MIN_AMOUNT", 50.0)  # Min transfer amount

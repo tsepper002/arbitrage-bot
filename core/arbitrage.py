@@ -540,6 +540,11 @@ class ArbitrageEngine:
         if cm and not cm.is_coin_enabled(symbol):
             return res  # Coin disabled by kill-logic
 
+        # Phase 31: Volume/Liquidity Filter — skip pairs with known low 24h volume (<10M USDT)
+        low_vol = getattr(settings, 'LOW_VOLUME_SYMBOLS', set())
+        if symbol in low_vol:
+            return res  # Known low-volume pair, skip
+
         # SEMI-HFT: Pre-filter exchanges by latency + stability.
         # IMPORTANT: For cross-exchange arbitrage, we need MANY exchange pairs
         # to find profitable spreads. Tightly-aligned exchanges (e.g. MEXC+Binance)
