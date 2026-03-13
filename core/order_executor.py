@@ -539,12 +539,12 @@ class OrderExecutor:
                             # Order filled between fill-check and cancel → accumulate orphaned qty
                             re_check = await self._verify_fill(buy_client, symbol, oid, 'buy', buy_price, qty / len(slice_order_ids))
                             orphaned_qty += re_check.get('filled_qty', 0)
-                    total_orphaned = total_filled_qty + orphaned_qty
-                    if total_orphaned > 0:
+                    total_buy_filled = total_filled_qty + orphaned_qty
+                    if total_buy_filled > 0:
                         # Orders filled despite our abort — must sell to avoid unhedged position
-                        hedge_qty = round_qty(sell_ex, symbol, total_orphaned)
+                        hedge_qty = round_qty(sell_ex, symbol, total_buy_filled)
                         if hedge_qty > 0:
-                            logger.warning(f"⚠️  Maker abort: {total_orphaned:.6f} filled despite cancel — emergency sell")
+                            logger.warning(f"⚠️  Maker abort: {total_buy_filled:.6f} filled despite cancel — emergency sell")
                             await self._emergency_close(buy_ex, symbol, 'sell', hedge_qty, sell_price, buy_client)
                     else:
                         logger.info(f"📭 Maker buy only {buy_filled_pct:.0f}% filled (need {min_fill_pct}%) — cancelled {len(slice_order_ids)} slices")
@@ -813,8 +813,9 @@ class OrderExecutor:
             err = str(e).lower()
             # Distinguish "already filled" from real errors
             already_filled = any(kw in err for kw in (
-                'filled', 'completed', 'done', 'not found', 'does not exist',
-                'not exist', 'order_not_exist', 'invalid order',
+                'already filled', 'order filled', 'completed', 'done',
+                'not found', 'does not exist', 'not exist',
+                'order_not_exist', 'invalid order', 'order not active',
             ))
             if already_filled:
                 logger.warning(f"⚠️  Cancel {side} order {order_id}: likely already filled ({e})")
