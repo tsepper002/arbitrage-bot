@@ -453,8 +453,8 @@ class OrderExecutor:
             asks_levels = opp.get('asks_levels', [])
             bids_levels = opp.get('bids_levels', [])
             if asks_levels and bids_levels:
-                ask_depth = sum(s for _, s in asks_levels)
-                bid_depth = sum(s for _, s in bids_levels)
+                ask_depth = sum(size for _, size in asks_levels)
+                bid_depth = sum(size for _, size in bids_levels)
                 if ask_depth < qty or bid_depth < qty:
                     return {'status': 'blocked', 'reason': f'Insufficient depth: ask={ask_depth:.4f} bid={bid_depth:.4f} vs qty={qty:.4f}'}
             
