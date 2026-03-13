@@ -448,6 +448,16 @@ class OrderExecutor:
             if order_value_usdt < self.MIN_ORDER_USDT:
                 return {'status': 'blocked', 'reason': f'Order value ${order_value_usdt:.2f} < minimum ${self.MIN_ORDER_USDT}'}
             
+            # Step 2c: Pre-execution orderbook depth check
+            # Verify sufficient liquidity in the snapshot passed from scanner
+            asks_levels = opp.get('asks_levels', [])
+            bids_levels = opp.get('bids_levels', [])
+            if asks_levels and bids_levels:
+                ask_depth = sum(s for _, s in asks_levels)
+                bid_depth = sum(s for _, s in bids_levels)
+                if ask_depth < qty or bid_depth < qty:
+                    return {'status': 'blocked', 'reason': f'Insufficient depth: ask={ask_depth:.4f} bid={bid_depth:.4f} vs qty={qty:.4f}'}
+            
             # Step 3: Place orders — SMART execution mode
             # MEXC has 0% maker fee → use limit buy (saves 0.05% per trade)
             # All other exchanges → simultaneous market orders (no fee advantage)
@@ -803,13 +813,13 @@ class OrderExecutor:
         return {'filled': False, 'avg_price': 0, 'filled_qty': 0}
     
     async def _safe_cancel(self, client, symbol: str, order_id: str, side: str) -> dict:
-        """Try to cancel an unfilled order. Returns {'cancelled': True/False, 'reason': ...}."""
+        """Try to cancel an unfilled order. Returns {'cancelled': True/False, 'reason': ..., 'order_id': ...}."""
         try:
             if hasattr(client, 'cancel_order'):
                 await client.cancel_order(symbol, order_id)
                 logger.info(f"✅ Cancelled {side} order {order_id}")
-                return {'cancelled': True}
-            return {'cancelled': False, 'reason': 'no_cancel_method'}
+                return {'cancelled': True, 'order_id': order_id}
+            return {'cancelled': False, 'reason': 'no_cancel_method', 'order_id': order_id}
         except Exception as e:
             err = str(e).lower()
             # Distinguish "already filled" from real errors
@@ -820,9 +830,9 @@ class OrderExecutor:
             ))
             if already_filled:
                 logger.warning(f"⚠️  Cancel {side} order {order_id}: likely already filled ({e})")
-                return {'cancelled': False, 'reason': 'likely_filled'}
+                return {'cancelled': False, 'reason': 'likely_filled', 'order_id': order_id}
             logger.warning(f"⚠️  Cancel {side} order {order_id} failed: {e}")
-            return {'cancelled': False, 'reason': str(e)}
+            return {'cancelled': False, 'reason': str(e), 'order_id': order_id}
 
     async def cancel_all_open_orders(self):
         """Cancel all tracked open limit orders (called on shutdown)."""
