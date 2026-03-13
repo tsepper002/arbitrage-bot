@@ -345,6 +345,9 @@ class IntegratedArbitrageBot:
         self.engine = None
         self.tasks = []
         
+        # Directional Trade Manager (single-exchange TP/SL trading)
+        self.directional_manager = None
+        
         # Rejection tracking for dashboard visibility
         self._rejection_counts = {}  # {reason: count}
         self._rejection_total = 0
@@ -966,9 +969,23 @@ class IntegratedArbitrageBot:
             logger.info(f"{'✅' if _exec_count == 4 else '⚠️'} Execution Modules: {_exec_count}/4 initialized")
             
             # Initialize Strategy Dispatcher (NEW: Manages all 15 strategies!)
-            logger.info("\n🎯 Initializing Strategy Dispatcher (All 14 Strategies)...")
+            logger.info("\n🎯 Initializing Strategy Dispatcher (All 15 Strategies)...")
             self.strategy_dispatcher = StrategyDispatcher(self)
-            logger.info("✅ Strategy Dispatcher initialized - ALL 14 STRATEGIES ACTIVE!")
+            logger.info("✅ Strategy Dispatcher initialized - ALL 15 STRATEGIES ACTIVE!")
+            
+            # Initialize Directional Trade Manager (single-exchange TP/SL trading)
+            try:
+                from core.directional_manager import DirectionalTradeManager
+                self.directional_manager = DirectionalTradeManager(
+                    rest_clients=self.rest_clients,
+                    price_store=self.store,
+                    balance_manager=self.balance_manager,
+                    settings_mod=settings,
+                )
+                logger.info("✅ Directional Trade Manager initialized (MOMENTUM, BREAKOUT, DCA, GRID, VOLATILITY)")
+            except Exception as e:
+                logger.warning(f"⚠️ DirectionalTradeManager init failed: {e}")
+                self.directional_manager = None
             
             # Triangular Arbitrage Engine
             self.triangular_engine = get_triangular_engine(
@@ -1126,6 +1143,12 @@ class IntegratedArbitrageBot:
                 strategy_task = asyncio.create_task(self._strategy_dispatcher_loop())
                 self.tasks.append(strategy_task)
                 logger.info("✅ Strategy dispatcher task started (15 strategies)")
+            
+            # Directional trade position monitor (check TP/SL every 2s)
+            if self.directional_manager:
+                dir_task = asyncio.create_task(self.directional_manager.monitoring_loop())
+                self.tasks.append(dir_task)
+                logger.info("✅ Directional trade monitor started (TP/SL every 2s)")
             
             # Periodic latency re-ping task (updates exchange latency every 60s)
             if hasattr(self, 'semi_hft_engine') and self.semi_hft_engine and self.rest_clients:
@@ -1771,7 +1794,30 @@ class IntegratedArbitrageBot:
                 
                 # Execute opportunities that have actionable trade data
                 if all_opps and hasattr(self, 'engine') and self.engine:
-                    executable = [o for o in all_opps if self._is_executable(o)]
+                    # Split: arb signals → OrderExecutor, directional → DirectionalTradeManager
+                    arb_opps = []
+                    dir_opps = []
+                    for o in all_opps:
+                        strat = o.get('strategy', '')
+                        if strat in settings.DIRECTIONAL_STRATEGIES:
+                            dir_opps.append(o)
+                        elif self._is_executable(o):
+                            arb_opps.append(o)
+                    
+                    # Route directional signals to DirectionalTradeManager
+                    if dir_opps and self.directional_manager:
+                        for opp in dir_opps[:3]:  # Max 3 directional signals per cycle
+                            try:
+                                pos_id = await self.directional_manager.process_signal(opp)
+                                if pos_id:
+                                    logger.debug(f"📈 Directional signal routed: {opp['strategy']} {opp.get('symbol', '')} → pos:{pos_id}")
+                                    if self.strategy_dispatcher:
+                                        self.strategy_dispatcher.strategy_stats[opp['strategy']]['trades'] += 1
+                            except Exception as e:
+                                logger.debug(f"Directional signal routing error: {e}")
+                    
+                    # Route arb signals through existing execution path
+                    executable = arb_opps
                     if executable:
                         logger.debug(f"🎯 Strategies found {len(executable)} executable opportunities (of {len(all_opps)} signals)")
                         trade_executed_this_cycle = False
@@ -2177,6 +2223,18 @@ class IntegratedArbitrageBot:
             self.event_bus.stop()
             stats = self.event_bus.get_stats()
             logger.info(f"📊 EventBus stats: {stats.get('total_events', 0)} events published")
+        
+        # ========== §9.0 CLOSE ALL DIRECTIONAL POSITIONS ==========
+        if self.directional_manager:
+            try:
+                await asyncio.wait_for(
+                    self.directional_manager._close_all_positions("SHUTDOWN"),
+                    timeout=30,
+                )
+                status = self.directional_manager.get_status()
+                logger.info(f"📊 Directional positions closed: {status['total_trades']} trades, PnL ${status['total_pnl']:.4f}")
+            except Exception as e:
+                logger.error(f"⚠️ Error closing directional positions: {e}")
         
         # ========== §9.1 CANCEL ALL OPEN LIMIT ORDERS ==========
         # Do this FIRST — prevent stale limit orders from filling

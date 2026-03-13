@@ -182,17 +182,46 @@ ARB_STRATEGIES = frozenset({'CROSS_EXCHANGE', 'TRIANGULAR', 'SMART_ORDER', 'FUND
 
 # Directional strategies: SIGNAL ONLY, NEVER execute trades.
 # These are DISABLED from scanning to save CPU for the arb strategies that
-# actually generate profit. They cannot execute because:
-#   1. They fail _is_executable() (no cross-exchange premium)
-#   2. They hit DIRECTIONAL_STRATEGIES block in _build_trade_from_signal()
-# CPU savings: ~30% less scanning overhead → faster arb detection
-DIRECTIONAL_STRATEGIES = frozenset({'VOLATILITY', 'MOMENTUM', 'BREAKOUT', 'DCA', 
+# DIRECTIONAL_STRATEGIES: strategies that execute on a single exchange
+# (buy now, sell later when target hit). These use the DirectionalTradeManager
+# instead of the cross-exchange arbitrage execution path.
+DIRECTIONAL_STRATEGIES = frozenset({'VOLATILITY', 'MOMENTUM', 'BREAKOUT', 'DCA',
                                     'GRID_TRADING'})
 
 # DISABLED_STRATEGIES: strategies excluded from scanning entirely.
+# Directional strategies are now ENABLED — routed to DirectionalTradeManager.
 # MARKET_MAKING is enabled for Level 4+ ($1000+) via capital_manager.
 # MAKER_MAKER is always enabled (uses limit orders on both sides).
-DISABLED_STRATEGIES = frozenset(DIRECTIONAL_STRATEGIES)
+DISABLED_STRATEGIES = frozenset()  # All strategies enabled
+
+# ============================================================================
+# DIRECTIONAL TRADING CONFIGURATION
+# ============================================================================
+# Take-profit and stop-loss per strategy type (percentages)
+DIRECTIONAL_TP_SL = {
+    'MOMENTUM':     {'tp_pct': 1.5, 'sl_pct': 1.0},
+    'BREAKOUT':     {'tp_pct': 3.0, 'sl_pct': 1.5},
+    'DCA':          {'tp_pct': 2.0, 'sl_pct': 1.5},
+    'GRID_TRADING': {'tp_pct': 1.0, 'sl_pct': 0.8},
+    'VOLATILITY':   {'tp_pct': 1.0, 'sl_pct': 0.5},
+}
+MAX_DIRECTIONAL_POSITIONS = _get_env_int("ARB_MAX_DIRECTIONAL_POSITIONS", 8)
+DIRECTIONAL_RISK_PCT = _get_env_float("ARB_DIRECTIONAL_RISK_PCT", 1.5)  # 1.5% of capital per trade
+DIRECTIONAL_CHECK_INTERVAL_SEC = _get_env_float("ARB_DIRECTIONAL_CHECK_INTERVAL", 2.0)
+
+# Strategy capital allocation (percentage of total capital budget)
+STRATEGY_ALLOCATION = {
+    'CROSS_EXCHANGE':  25,  # Core arbitrage
+    'MOMENTUM':        15,  # Trend following (EMA/RSI)
+    'DCA':             15,  # Dip buying (mean reversion)
+    'GRID_TRADING':    10,  # Grid trading around mean
+    'BREAKOUT':         5,  # Volatility breakout
+    'FUNDING_RATE':    10,  # Funding rate arbitrage
+    'SPREAD_BETTING':   5,  # Spread capture
+    'VOLATILITY':       5,  # Volatility exploitation
+    'PAIRS_TRADING':    5,  # Statistical arbitrage
+    'MARKET_MAKING':    5,  # Market making
+}
 
 # ============================================================================
 # EXPOSURE CAPS — per-coin and per-exchange limits
