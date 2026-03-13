@@ -538,7 +538,12 @@ class OrderExecutor:
                         self.semi_hft.record_fill(buy_ex, filled=False, partial=buy_filled_pct > 0)
                     return {'status': 'blocked', 'reason': f'Maker buy fill too low: {buy_filled_pct:.0f}%'}
                 
-                # Buy filled ≥ min_fill_pct → place market sell
+                # Buy filled ≥ min_fill_pct → cancel unfilled slices, then place market sell
+                # Cancel any remaining unfilled limit buy slices before proceeding
+                if buy_filled_pct < 100:
+                    for oid in slice_order_ids:
+                        await self._safe_cancel(buy_client, symbol, oid, 'buy')
+                    logger.debug(f"🧹 Cancelled {len(slice_order_ids)} unfilled maker slices after {buy_filled_pct:.0f}% fill")
                 # Semi-HFT: Record successful fill
                 if self.semi_hft:
                     self.semi_hft.record_fill(buy_ex, filled=True, partial=buy_filled_pct < 95)

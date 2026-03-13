@@ -1131,7 +1131,7 @@ class SignalAllocator:
         
         order = {
             'exchange': exchange, 'symbol': symbol, 'side': 'buy',
-            'qty': qty, 'price': price, 'amount_usdt': round(usdt_amount, 2),
+            'qty': qty, 'price': price, 'amount_usdt': round(actual_notional, 2),
             'reason': reason,
         }
         
@@ -1201,7 +1201,7 @@ class SignalAllocator:
         
         order = {
             'exchange': exchange, 'symbol': symbol, 'side': 'sell',
-            'qty': qty, 'price': price, 'amount_usdt': round(usdt_amount, 2),
+            'qty': qty, 'price': price, 'amount_usdt': round(actual_notional, 2),
             'reason': reason,
         }
         

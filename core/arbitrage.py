@@ -211,8 +211,8 @@ class ArbitrageEngine:
                 w = csv.writer(f)
                 w.writerow([time.time(), info["symbol"], info["buy_ex"], info["sell_ex"],
                             info["qty"], info["buy_avg"], info["sell_avg"], info["net"], info["roi_pct"]])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"CSV persist failed: {e}")
 
     # JIT acquisition constants
     JIT_FEE_SLIPPAGE_BUFFER = 1.003  # 0.3% buffer for fees + slippage on JIT buys
@@ -476,6 +476,11 @@ class ArbitrageEngine:
         if len(exchanges) < 2:
             return res
 
+        # Phase 31: Volume/Liquidity Filter — skip BEFORE any ML computation
+        low_vol = getattr(settings, 'LOW_VOLUME_SYMBOLS', set())
+        if symbol in low_vol:
+            return res  # Known low-volume pair, skip
+
         # --- PER-SYMBOL ML OBSERVATION (runs every scan, regardless of spreads) ---
         # Compute representative mid-price from first exchange with valid data
         _mid_price = 0.0
@@ -539,11 +544,6 @@ class ArbitrageEngine:
         cm = self.capital_manager
         if cm and not cm.is_coin_enabled(symbol):
             return res  # Coin disabled by kill-logic
-
-        # Phase 31: Volume/Liquidity Filter — skip pairs with known low 24h volume (<10M USDT)
-        low_vol = getattr(settings, 'LOW_VOLUME_SYMBOLS', set())
-        if symbol in low_vol:
-            return res  # Known low-volume pair, skip
 
         # SEMI-HFT: Pre-filter exchanges by latency + stability.
         # IMPORTANT: For cross-exchange arbitrage, we need MANY exchange pairs
