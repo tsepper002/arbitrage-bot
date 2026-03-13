@@ -187,8 +187,9 @@ class ArbitrageEngine:
 
         # Exchange latency tracking for execution feasibility checks
         self._exchange_latency_ms: Dict[str, float] = {}  # exchange -> avg round-trip ms
-        self.MAX_COMBINED_LATENCY_MS = 1000  # Skip if combined latency > 1s
-        self.MAX_PER_EXCHANGE_LATENCY_MS = 900  # Phase 18: disable exchange when latency > 900ms
+        self.MAX_COMBINED_LATENCY_MS = 5000  # Phase 3: absolute ceiling for combined latency
+        self.MAX_PER_EXCHANGE_LATENCY_MS = 3000  # Phase 3: allow up to 3000ms (was 900ms hard cutoff)
+        self.LATENCY_BASELINE_MS = 500  # Full trade size at this latency or below
         self.LATENCY_EMA_ALPHA = 0.3  # Smoothing factor for latency EMA
         self.MAX_VWAP_SLIPPAGE_PCT = settings.MAX_VWAP_SLIPPAGE_PCT
         
@@ -714,14 +715,23 @@ class ArbitrageEngine:
                     elif now_ms - self._spread_first_seen[spread_key] < self.MIN_SPREAD_HOLD_MS:
                         continue  # Not yet confirmed
 
-                # LATENCY CHECK: Skip if any exchange latency exceeds per-exchange threshold (Phase 18)
+                # LATENCY CHECK: Phase 3 — Adaptive latency scoring (not hard cutoff)
+                # Allow up to 3000ms per exchange; reduce trade size for high latency
                 buy_latency = self._exchange_latency_ms.get(buy_ex, self.DEFAULT_EXCHANGE_LATENCY_MS)
                 sell_latency = self._exchange_latency_ms.get(sell_ex, self.DEFAULT_EXCHANGE_LATENCY_MS)
                 if buy_latency > self.MAX_PER_EXCHANGE_LATENCY_MS or sell_latency > self.MAX_PER_EXCHANGE_LATENCY_MS:
-                    continue  # Individual exchange too slow
+                    continue  # Absolute ceiling — exchange is unreachable
                 combined_latency = buy_latency + sell_latency
                 if combined_latency > self.MAX_COMBINED_LATENCY_MS:
                     continue
+
+                # Adaptive trade size: reduce qty for high-latency pairs
+                max_leg_latency = max(buy_latency, sell_latency)
+                if max_leg_latency > self.LATENCY_BASELINE_MS:
+                    # Scale from 100% at baseline to 30% at max threshold
+                    latency_ratio = (max_leg_latency - self.LATENCY_BASELINE_MS) / (self.MAX_PER_EXCHANGE_LATENCY_MS - self.LATENCY_BASELINE_MS)
+                    latency_scale = max(0.30, 1.0 - 0.70 * latency_ratio)
+                    qty = qty * latency_scale
 
                 # §11 PAIR SCORING: Only trade top-scoring exchange pairs (after 20+ trades)
                 if hft and settings.SEMI_HFT_ENABLED:

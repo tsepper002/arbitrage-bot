@@ -240,8 +240,8 @@ class CapitalManager:
     # DYNAMIC THRESHOLD  (Section 2.0 PHASE 5)
     # ------------------------------------------------------------------
 
-    # Phase 9: Minimum allowed profit threshold (absolute floor)
-    MIN_PROFIT_THRESHOLD_PCT = 0.03  # 0.03% = 3 basis points minimum
+    # Phase 4: Minimum allowed profit threshold for micro-arbitrage
+    MIN_PROFIT_THRESHOLD_PCT = 0.02  # 0.02% = 2 basis points minimum
 
     def dynamic_threshold(self, total_fee_pct: float,
                           avg_latency_ms: float = 0.0) -> float:
@@ -252,7 +252,7 @@ class CapitalManager:
         The cushion comes from lvl.spread_threshold_above_fees (0.008-0.015%).
         Overtrading bump adds +0.05% for 5 minutes when avg profit of last 10
         trades is below 0.20% (prevents grinding on weak spreads).
-        Phase 9: Floor at 0.03% regardless of fee structure.
+        Phase 4: Floor at 0.02% for micro-arbitrage on small capital.
         """
         lvl = self._current_level
         threshold = total_fee_pct + lvl.spread_threshold_above_fees

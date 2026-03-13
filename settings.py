@@ -92,9 +92,9 @@ TELEGRAM_CHAT_ID = _get_env_str("ARB_TELEGRAM_CHAT_ID", "")
 # RISK MANAGEMENT PARAMETERS
 # ============================================================================
 # Minimum net ROI percentage required to execute trade (after fees & slippage)
-# Minimum percentage ROI after fees to consider executing (0.03 = 0.03%)
-# Phase 9: minimum allowed profit = 0.03% to avoid marginal trades
-MIN_NET_ROI_PCT = _get_env_float("ARB_MIN_NET_ROI_PCT", 0.03)
+# Minimum percentage ROI after fees to consider executing (0.02 = 0.02%)
+# Phase 4: micro-arbitrage optimized for small capital — profit > fees + 0.01%
+MIN_NET_ROI_PCT = _get_env_float("ARB_MIN_NET_ROI_PCT", 0.02)
 
 # Maximum exposure per trade in USDT
 # Auto-scales to 60% of per-exchange capital (works for any balance size)
@@ -137,7 +137,7 @@ MAX_OPEN_EXPOSURE = _get_env_float("ARB_MAX_OPEN_EXPOSURE", _total_capital * OPE
 MAX_CONSECUTIVE_LOSSES = _get_env_int("ARB_MAX_CONSECUTIVE_LOSSES", 5)  # Pause after N losses
 ANOMALOUS_SPREAD_PCT = _get_env_float("ARB_ANOMALOUS_SPREAD_PCT", 5.0)  # Skip spreads above this
 MAX_DATA_AGE_SEC = _get_env_float("ARB_MAX_DATA_AGE_SEC", 2.0)  # Aligned with MAX_ORDERBOOK_AGE_MS (2s). 0.5s was too aggressive for home PCs.
-MIN_LIVE_ROI_PCT = _get_env_float("ARB_MIN_LIVE_ROI_PCT", 0.03)  # Min ROI% to execute live (Phase 9: floor at 0.03%)
+MIN_LIVE_ROI_PCT = _get_env_float("ARB_MIN_LIVE_ROI_PCT", 0.02)  # Min ROI% to execute live (Phase 4: micro-arb floor 0.02%)
 MIN_BALANCE_PER_EXCHANGE = _get_env_float("ARB_MIN_BALANCE_PER_EXCHANGE", 8.0)  # Min balance to trade (lowered for small accounts)
 MIN_TRADE_SIZE_USDT = _get_env_float("ARB_MIN_TRADE_SIZE_USDT", 8.0)  # Target trade size 8-12 USDT (Phase 8)
 BALANCE_RESERVE_USDT = _get_env_float("ARB_BALANCE_RESERVE_USDT", 2.0)  # Keep reserve on each exchange
@@ -228,15 +228,13 @@ EXCHANGE_TARGET_PCT = {
 # ============================================================================
 # MINIMUM 24H VOLUME FILTER — reject illiquid pairs (Phase 31)
 # ============================================================================
-MIN_24H_VOLUME_USDT = _get_env_float("ARB_MIN_24H_VOLUME_USDT", 10_000_000)  # 10M USDT
+MIN_24H_VOLUME_USDT = _get_env_float("ARB_MIN_24H_VOLUME_USDT", 5_000_000)  # 5M USDT (Phase 15)
 
-# Pairs known to frequently have <10M 24h volume on smaller exchanges.
+# Pairs known to frequently have <5M 24h volume on smaller exchanges.
 # Review quarterly or when adding new pairs. Last updated: 2026-03.
-# The 20 core pairs (BTC, ETH, SOL, etc.) are always liquid.
-# These low-cap/low-volume tokens may lack sufficient depth for safe arb execution.
+# With 5M threshold (lowered from 10M), only truly illiquid pairs are blocked.
 LOW_VOLUME_SYMBOLS = frozenset({
-    "FLOW-USDT", "CHZ-USDT", "SAND-USDT", "AXS-USDT",
-    "BLUR-USDT", "SNX-USDT", "CRV-USDT",
+    "FLOW-USDT", "BLUR-USDT",
 })
 
 # ============================================================================
