@@ -216,6 +216,7 @@ MAX_INVENTORY_SKEW_USDT = _get_env_float("ARB_MAX_INVENTORY_SKEW_USDT", 20.0)
 # MEXC gets highest share (0% maker fees = more profitable arb legs)
 # Bybit/Binance share equally (liquid, fast, low fees)
 # KuCoin/HTX get less (higher fees/latency)
+# Values are percentages (30 = 30%). Divide by 100 for decimal form.
 EXCHANGE_TARGET_PCT = {
     'MEXC': 30,
     'Bybit': 25,
@@ -230,7 +231,8 @@ EXCHANGE_TARGET_PCT = {
 MIN_24H_VOLUME_USDT = _get_env_float("ARB_MIN_24H_VOLUME_USDT", 10_000_000)  # 10M USDT
 
 # Pairs known to frequently have <10M 24h volume on smaller exchanges.
-# Updated periodically. The 20 core pairs (BTC, ETH, SOL, etc.) are always liquid.
+# Review quarterly or when adding new pairs. Last updated: 2026-03.
+# The 20 core pairs (BTC, ETH, SOL, etc.) are always liquid.
 # These low-cap/low-volume tokens may lack sufficient depth for safe arb execution.
 LOW_VOLUME_SYMBOLS = frozenset({
     "FLOW-USDT", "CHZ-USDT", "SAND-USDT", "AXS-USDT",
