@@ -169,6 +169,9 @@ class BinanceRESTClient(BaseRESTClient):
         session = await self._get_session()
 
         async with session.delete(f"{url}?{query}", headers=headers) as resp:
+            if resp.status != 200:
+                text = await resp.text()
+                raise Exception(f"Binance HTTP {resp.status}: {text[:200]}")
             data = await resp.json()
             if "code" in data and data.get("code", 0) < 0:
                 raise Exception(f"Binance cancel failed: {data}")
@@ -189,6 +192,9 @@ class BinanceRESTClient(BaseRESTClient):
         session = await self._get_session()
 
         async with session.get(f"{url}?{query}", headers=headers) as resp:
+            if resp.status != 200:
+                text = await resp.text()
+                raise Exception(f"Binance HTTP {resp.status}: {text[:200]}")
             data = await resp.json()
             return {
                 "order_id": str(data.get("orderId", "")),
@@ -211,6 +217,9 @@ class BinanceRESTClient(BaseRESTClient):
         session = await self._get_session()
 
         async with session.get(f"{url}?{query}", headers=headers) as resp:
+            if resp.status != 200:
+                text = await resp.text()
+                raise Exception(f"Binance HTTP {resp.status}: {text[:200]}")
             data = await resp.json()
 
             if "code" in data and data.get("code", 0) < 0:

@@ -512,7 +512,7 @@ class OrderExecutor:
                 maker_buy_price = slices[0][0] if slices else buy_price
                 total_filled_qty = 0.0
                 for oid in slice_order_ids:
-                    fill_result = await self._verify_fill(buy_client, symbol, oid, 'buy', maker_buy_price, qty / len(slice_order_ids))
+                    fill_result = await self._verify_fill(buy_client, symbol, oid, 'buy', maker_buy_price, qty / len(slice_order_ids), timeout_sec=fill_timeout_sec)
                     total_filled_qty += fill_result.get('filled_qty', 0)
                 buy_fill = {'filled': total_filled_qty > 0, 'filled_qty': total_filled_qty}
                 buy_filled_pct = (total_filled_qty / qty * 100) if qty > 0 else 0
@@ -769,13 +769,14 @@ class OrderExecutor:
                     return str(val)
         return ""
     
-    async def _verify_fill(self, client, symbol: str, order_id: str, side: str, expected_price: float, expected_qty: float = 0) -> Dict:
+    async def _verify_fill(self, client, symbol: str, order_id: str, side: str, expected_price: float, expected_qty: float = 0, timeout_sec: float = 0) -> Dict:
         """Poll order status until filled or timeout."""
         if not order_id or not hasattr(client, 'get_order_status'):
             # Can't verify — assume filled at expected values
             return {'filled': True, 'avg_price': expected_price, 'filled_qty': expected_qty}
         
-        deadline = time.time() + self.FILL_TIMEOUT_SEC
+        actual_timeout = timeout_sec if timeout_sec > 0 else self.FILL_TIMEOUT_SEC
+        deadline = time.time() + actual_timeout
         while time.time() < deadline:
             try:
                 status = await client.get_order_status(symbol, order_id)
@@ -798,7 +799,7 @@ class OrderExecutor:
             
             await asyncio.sleep(self.FILL_POLL_INTERVAL)
         
-        logger.warning(f"⏰ {side} order {order_id} fill timeout after {self.FILL_TIMEOUT_SEC}s")
+        logger.warning(f"⏰ {side} order {order_id} fill timeout after {actual_timeout}s")
         return {'filled': False, 'avg_price': 0, 'filled_qty': 0}
     
     async def _safe_cancel(self, client, symbol: str, order_id: str, side: str) -> dict:
