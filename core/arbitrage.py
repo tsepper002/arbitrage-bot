@@ -727,9 +727,10 @@ class ArbitrageEngine:
 
                 # Adaptive trade size: reduce qty for high-latency pairs
                 max_leg_latency = max(buy_latency, sell_latency)
-                if max_leg_latency > self.LATENCY_BASELINE_MS:
+                latency_range = self.MAX_PER_EXCHANGE_LATENCY_MS - self.LATENCY_BASELINE_MS
+                if max_leg_latency > self.LATENCY_BASELINE_MS and latency_range > 0:
                     # Scale from 100% at baseline to 30% at max threshold
-                    latency_ratio = (max_leg_latency - self.LATENCY_BASELINE_MS) / (self.MAX_PER_EXCHANGE_LATENCY_MS - self.LATENCY_BASELINE_MS)
+                    latency_ratio = (max_leg_latency - self.LATENCY_BASELINE_MS) / latency_range
                     latency_scale = max(0.30, 1.0 - 0.70 * latency_ratio)
                     qty = qty * latency_scale
 
