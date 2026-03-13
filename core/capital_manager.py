@@ -240,15 +240,19 @@ class CapitalManager:
     # DYNAMIC THRESHOLD  (Section 2.0 PHASE 5)
     # ------------------------------------------------------------------
 
+    # Phase 9: Minimum allowed profit threshold (absolute floor)
+    MIN_PROFIT_THRESHOLD_PCT = 0.03  # 0.03% = 3 basis points minimum
+
     def dynamic_threshold(self, total_fee_pct: float,
                           avg_latency_ms: float = 0.0) -> float:
         """Compute the dynamic minimum spread required for a profitable trade.
 
-        threshold = total_fees + level cushion + overtrading bump (with decay)
+        threshold = max(total_fees + level cushion + overtrading bump, MIN_PROFIT_THRESHOLD)
 
         The cushion comes from lvl.spread_threshold_above_fees (0.008-0.015%).
         Overtrading bump adds +0.05% for 5 minutes when avg profit of last 10
         trades is below 0.20% (prevents grinding on weak spreads).
+        Phase 9: Floor at 0.03% regardless of fee structure.
         """
         lvl = self._current_level
         threshold = total_fee_pct + lvl.spread_threshold_above_fees
@@ -262,7 +266,8 @@ class CapitalManager:
                 self._overtrading_bump = 0.0
                 self._overtrading_bump_set_time = 0.0
 
-        return threshold
+        # Phase 9: Enforce minimum profit floor (fees + 0.01%, but never below 0.03%)
+        return max(threshold, self.MIN_PROFIT_THRESHOLD_PCT)
 
     def update_volatility(self, volatility_pct: float):
         """Update current market volatility (e.g. 10-period ATR %)."""

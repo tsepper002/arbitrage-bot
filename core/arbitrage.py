@@ -188,6 +188,7 @@ class ArbitrageEngine:
         # Exchange latency tracking for execution feasibility checks
         self._exchange_latency_ms: Dict[str, float] = {}  # exchange -> avg round-trip ms
         self.MAX_COMBINED_LATENCY_MS = 1000  # Skip if combined latency > 1s
+        self.MAX_PER_EXCHANGE_LATENCY_MS = 900  # Phase 18: disable exchange when latency > 900ms
         self.LATENCY_EMA_ALPHA = 0.3  # Smoothing factor for latency EMA
         self.MAX_VWAP_SLIPPAGE_PCT = settings.MAX_VWAP_SLIPPAGE_PCT
         
@@ -707,9 +708,11 @@ class ArbitrageEngine:
                     elif now_ms - self._spread_first_seen[spread_key] < self.MIN_SPREAD_HOLD_MS:
                         continue  # Not yet confirmed
 
-                # LATENCY CHECK: Skip if combined exchange latency exceeds spread lifetime
+                # LATENCY CHECK: Skip if any exchange latency exceeds per-exchange threshold (Phase 18)
                 buy_latency = self._exchange_latency_ms.get(buy_ex, self.DEFAULT_EXCHANGE_LATENCY_MS)
                 sell_latency = self._exchange_latency_ms.get(sell_ex, self.DEFAULT_EXCHANGE_LATENCY_MS)
+                if buy_latency > self.MAX_PER_EXCHANGE_LATENCY_MS or sell_latency > self.MAX_PER_EXCHANGE_LATENCY_MS:
+                    continue  # Individual exchange too slow
                 combined_latency = buy_latency + sell_latency
                 if combined_latency > self.MAX_COMBINED_LATENCY_MS:
                     continue

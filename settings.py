@@ -92,9 +92,9 @@ TELEGRAM_CHAT_ID = _get_env_str("ARB_TELEGRAM_CHAT_ID", "")
 # RISK MANAGEMENT PARAMETERS
 # ============================================================================
 # Minimum net ROI percentage required to execute trade (after fees & slippage)
-# Minimum percentage ROI after fees to consider executing (0.05 = 0.05%)
-# AGGRESSIVE: Lowered to 0.02% for maximum opportunities (+50% more trades)
-MIN_NET_ROI_PCT = _get_env_float("ARB_MIN_NET_ROI_PCT", 0.02)
+# Minimum percentage ROI after fees to consider executing (0.03 = 0.03%)
+# Phase 9: minimum allowed profit = 0.03% to avoid marginal trades
+MIN_NET_ROI_PCT = _get_env_float("ARB_MIN_NET_ROI_PCT", 0.03)
 
 # Maximum exposure per trade in USDT
 # Auto-scales to 60% of per-exchange capital (works for any balance size)
@@ -124,9 +124,9 @@ MAX_CONCURRENT_OPPORTUNITIES = _get_env_int("ARB_MAX_CONCURRENT_OPPS", 3)
 # Auto-scale risk limits based on total capital (virtual or live)
 # ============================================================================
 NUM_EXCHANGES = 5
-DAILY_LOSS_PCT = 0.03        # Max daily loss = 3% of total capital (tight risk control)
-SINGLE_TRADE_LOSS_PCT = 0.05 # Max loss per trade = 5% of total capital
-HOURLY_LOSS_PCT = 0.03       # Max hourly loss = 3% of total capital
+DAILY_LOSS_PCT = 0.05        # Max daily loss = 5% of total capital (Phase 14)
+SINGLE_TRADE_LOSS_PCT = 0.01 # Max loss per trade = 1% of total capital (Phase 14)
+HOURLY_LOSS_PCT = 0.05       # Max hourly loss = 5% of total capital (aligned with daily)
 OPEN_EXPOSURE_PCT = 0.60     # Max open exposure = 60% of total capital
 
 _total_capital = VIRTUAL_CAPITAL_PER_EXCHANGE * NUM_EXCHANGES
@@ -137,9 +137,9 @@ MAX_OPEN_EXPOSURE = _get_env_float("ARB_MAX_OPEN_EXPOSURE", _total_capital * OPE
 MAX_CONSECUTIVE_LOSSES = _get_env_int("ARB_MAX_CONSECUTIVE_LOSSES", 5)  # Pause after N losses
 ANOMALOUS_SPREAD_PCT = _get_env_float("ARB_ANOMALOUS_SPREAD_PCT", 5.0)  # Skip spreads above this
 MAX_DATA_AGE_SEC = _get_env_float("ARB_MAX_DATA_AGE_SEC", 2.0)  # Aligned with MAX_ORDERBOOK_AGE_MS (2s). 0.5s was too aggressive for home PCs.
-MIN_LIVE_ROI_PCT = _get_env_float("ARB_MIN_LIVE_ROI_PCT", 0.01)  # Min ROI% to execute live (catches zero-profit large-qty trades)
+MIN_LIVE_ROI_PCT = _get_env_float("ARB_MIN_LIVE_ROI_PCT", 0.03)  # Min ROI% to execute live (Phase 9: floor at 0.03%)
 MIN_BALANCE_PER_EXCHANGE = _get_env_float("ARB_MIN_BALANCE_PER_EXCHANGE", 8.0)  # Min balance to trade (lowered for small accounts)
-MIN_TRADE_SIZE_USDT = _get_env_float("ARB_MIN_TRADE_SIZE_USDT", 3.0)  # Minimum trade size to cover fees
+MIN_TRADE_SIZE_USDT = _get_env_float("ARB_MIN_TRADE_SIZE_USDT", 8.0)  # Target trade size 8-12 USDT (Phase 8)
 BALANCE_RESERVE_USDT = _get_env_float("ARB_BALANCE_RESERVE_USDT", 2.0)  # Keep reserve on each exchange
 MAX_BALANCE_USAGE_PCT = _get_env_float("ARB_MAX_BALANCE_USAGE_PCT", 75.0)  # AGGRESSIVE: 75% for max capital utilization
 
@@ -316,9 +316,9 @@ def get_enabled_strategies(capital_per_exchange: float = None) -> list:
 # PERFORMANCE & THROTTLING (optimized for weak hardware)
 # ============================================================================
 # Scan interval in seconds
-# AGGRESSIVE: 0.15s for maximum speed (8.89 scans/s, +33% faster)
-# Critical for catching fleeting arbitrage opportunities
-SCAN_INTERVAL_SEC = _get_env_float("ARB_SCAN_INTERVAL_SEC", 0.15)
+# HFT: 0.05s = 50ms scan cycle (20 scans/s) for maximum opportunity capture
+# Phase 4: High frequency scanner requirement
+SCAN_INTERVAL_SEC = _get_env_float("ARB_SCAN_INTERVAL_SEC", 0.05)
 
 # Monitoring output interval in seconds (reduce log spam)
 # AGGRESSIVE: 30s for more frequent status updates
