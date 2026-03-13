@@ -530,9 +530,24 @@ class OrderExecutor:
                 
                 if buy_filled_pct < min_fill_pct:
                     # Not enough fill — cancel ALL slice orders and abort
+                    # BUT: if cancel fails (order already filled since last check),
+                    # we must sell the filled qty to avoid an orphaned position.
+                    orphaned_qty = 0.0
                     for oid in slice_order_ids:
-                        await self._safe_cancel(buy_client, symbol, oid, 'buy')
-                    logger.info(f"📭 Maker buy only {buy_filled_pct:.0f}% filled (need {min_fill_pct}%) — cancelled {len(slice_order_ids)} slices")
+                        cancel_res = await self._safe_cancel(buy_client, symbol, oid, 'buy')
+                        if cancel_res.get('reason') == 'likely_filled':
+                            # Order filled between fill-check and cancel → accumulate orphaned qty
+                            re_check = await self._verify_fill(buy_client, symbol, oid, 'buy', buy_price, qty / len(slice_order_ids))
+                            orphaned_qty += re_check.get('filled_qty', 0)
+                    total_orphaned = total_filled_qty + orphaned_qty
+                    if total_orphaned > 0:
+                        # Orders filled despite our abort — must sell to avoid unhedged position
+                        hedge_qty = round_qty(sell_ex, symbol, total_orphaned)
+                        if hedge_qty > 0:
+                            logger.warning(f"⚠️  Maker abort: {total_orphaned:.6f} filled despite cancel — emergency sell")
+                            await self._emergency_close(buy_ex, symbol, 'sell', hedge_qty, sell_price, buy_client)
+                    else:
+                        logger.info(f"📭 Maker buy only {buy_filled_pct:.0f}% filled (need {min_fill_pct}%) — cancelled {len(slice_order_ids)} slices")
                     # Semi-HFT: Record failed fill for fill-rate tracking
                     if self.semi_hft:
                         self.semi_hft.record_fill(buy_ex, filled=False, partial=buy_filled_pct > 0)
@@ -786,14 +801,26 @@ class OrderExecutor:
         logger.warning(f"⏰ {side} order {order_id} fill timeout after {self.FILL_TIMEOUT_SEC}s")
         return {'filled': False, 'avg_price': 0, 'filled_qty': 0}
     
-    async def _safe_cancel(self, client, symbol: str, order_id: str, side: str):
-        """Try to cancel an unfilled order."""
+    async def _safe_cancel(self, client, symbol: str, order_id: str, side: str) -> dict:
+        """Try to cancel an unfilled order. Returns {'cancelled': True/False, 'reason': ...}."""
         try:
             if hasattr(client, 'cancel_order'):
                 await client.cancel_order(symbol, order_id)
                 logger.info(f"✅ Cancelled {side} order {order_id}")
+                return {'cancelled': True}
+            return {'cancelled': False, 'reason': 'no_cancel_method'}
         except Exception as e:
+            err = str(e).lower()
+            # Distinguish "already filled" from real errors
+            already_filled = any(kw in err for kw in (
+                'filled', 'completed', 'done', 'not found', 'does not exist',
+                'not exist', 'order_not_exist', 'invalid order',
+            ))
+            if already_filled:
+                logger.warning(f"⚠️  Cancel {side} order {order_id}: likely already filled ({e})")
+                return {'cancelled': False, 'reason': 'likely_filled'}
             logger.warning(f"⚠️  Cancel {side} order {order_id} failed: {e}")
+            return {'cancelled': False, 'reason': str(e)}
 
     async def cancel_all_open_orders(self):
         """Cancel all tracked open limit orders (called on shutdown)."""
