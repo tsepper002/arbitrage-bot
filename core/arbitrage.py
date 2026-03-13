@@ -766,8 +766,9 @@ class ArbitrageEngine:
 
                 # GLOBAL SLIPPAGE BUFFER: deduct estimated slippage from trades
                 # SMART MODE: When MEXC is buy side (0% maker → limit order),
-                # Maker-first (is_mexc_buy=True): limit order on buy side has less slippage →
-                # only the sell side (market order) carries slippage → 1 leg.
+                # Maker-first (is_mexc_buy=True): limit order on buy side bounds slippage
+                # even though it fills as taker (due to MAKER_PRICE_OFFSET_PCT),
+                # the buy price is capped by the limit → effectively 1 slippage leg.
                 # For all other pairs: both sides are market → 2 legs.
                 slippage_per_leg = settings.GLOBAL_SLIPPAGE_PER_LEG_PCT
                 slippage_legs = 1 if is_mexc_buy else 2
