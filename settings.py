@@ -126,7 +126,7 @@ MAX_CONCURRENT_OPPORTUNITIES = _get_env_int("ARB_MAX_CONCURRENT_OPPS", 3)
 NUM_EXCHANGES = 5
 DAILY_LOSS_PCT = 0.05        # Max daily loss = 5% of total capital (Phase 14)
 SINGLE_TRADE_LOSS_PCT = 0.01 # Max loss per trade = 1% of total capital (Phase 14)
-HOURLY_LOSS_PCT = 0.05       # Max hourly loss = 5% of total capital (aligned with daily)
+HOURLY_LOSS_PCT = 0.02       # Max hourly loss = 2% of total capital (sub-fraction of daily)
 OPEN_EXPOSURE_PCT = 0.60     # Max open exposure = 60% of total capital
 
 _total_capital = VIRTUAL_CAPITAL_PER_EXCHANGE * NUM_EXCHANGES
