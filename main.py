@@ -968,10 +968,10 @@ class IntegratedArbitrageBot:
                 self.iceberg_detector, self.order_flow_tracker] if x is not None)
             logger.info(f"{'✅' if _exec_count == 4 else '⚠️'} Execution Modules: {_exec_count}/4 initialized")
             
-            # Initialize Strategy Dispatcher (NEW: Manages all 15 strategies!)
-            logger.info("\n🎯 Initializing Strategy Dispatcher (All 15 Strategies)...")
+            # Initialize Strategy Dispatcher (manages arb + directional strategies)
+            logger.info("\n🎯 Initializing Strategy Dispatcher...")
             self.strategy_dispatcher = StrategyDispatcher(self)
-            logger.info("✅ Strategy Dispatcher initialized - ALL 15 STRATEGIES ACTIVE!")
+            logger.info("✅ Strategy Dispatcher initialized - arb + directional strategies active!")
             
             # Initialize Directional Trade Manager (single-exchange TP/SL trading)
             try:

@@ -129,7 +129,7 @@ class DirectionalTradeManager:
             # Signal confidence can tighten/loosen TP
             confidence = data.get('confidence', data.get('strength', 0.5))
             if confidence > 0.8:
-                tp_sl = {**tp_sl, 'tp_pct': tp_sl['tp_pct'] * 0.8}  # Tighter TP for high confidence
+                tp_sl = {**tp_sl, 'tp_pct': tp_sl['tp_pct'] * 0.8}  # Lower TP target for high confidence (easier to hit)
             
             # Calculate quantity
             qty = trade_size_usdt / price
