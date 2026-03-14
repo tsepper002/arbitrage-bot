@@ -340,8 +340,14 @@ class OrderExecutor:
                 total_capital = 1.0
             trade_value = qty * buy_price
             
-            # Per-trade cap: max 5% of total capital per single trade
-            max_per_trade = total_capital * (settings.MAX_EXPOSURE_PER_TRADE_PCT / 100.0)
+            # Per-trade cap: max % of total capital per single trade.
+            # Floor at MIN_ORDER_USDT so small-capital accounts can still trade:
+            # arb trades are hedged (buy+sell simultaneous), real risk is ~0.05%
+            # spread movement, not the full trade value.
+            max_per_trade = max(
+                total_capital * (settings.MAX_EXPOSURE_PER_TRADE_PCT / 100.0),
+                self.MIN_ORDER_USDT
+            )
             if trade_value > max_per_trade:
                 old_qty = qty
                 qty = max_per_trade / buy_price if buy_price > 0 else 0

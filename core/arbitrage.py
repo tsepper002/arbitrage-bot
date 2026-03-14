@@ -618,12 +618,13 @@ class ArbitrageEngine:
                 top_ask = asks[0][0]
                 gross_spread_pct = ((top_bid - top_ask) / top_ask) * 100.0 if top_ask > 0 else 0
                 
-                # §4 CONSERVATIVE FEE CALCULATION:
-                # Always use taker fee for scanner profitability calculations.
-                # MAKER_PRICE_OFFSET_PCT > 0 means buy price is ABOVE ask → fills as taker.
-                # If execution actually gets maker fee (e.g., limit order rests), that's a bonus.
+                # §4 FEE CALCULATION — use actual expected fee for execution mode:
+                # When MAKER_FIRST is enabled, buy-side limit orders at the ask
+                # fill as maker (0% on MEXC). Use maker fee for more accurate
+                # profitability estimation — we already have a cushion
+                # (spread_threshold_above_fees) to cover the rare taker fill case.
                 is_mexc_buy = (settings.MAKER_FIRST_ENABLED and buy_ex == 'MEXC')
-                buy_fee = self._fee_rate(buy_ex, "taker")
+                buy_fee = self._fee_rate(buy_ex, "maker" if settings.MAKER_FIRST_ENABLED else "taker")
                 sell_fee = self._fee_rate(sell_ex, "taker")
                 sum_fees_pct = (buy_fee + sell_fee) * 100.0
                 

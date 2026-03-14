@@ -2098,11 +2098,9 @@ class IntegratedArbitrageBot:
             return None
         
         # Calculate profit with real prices and fees
-        # MEXC always has 0% maker fee even for market orders — use it unconditionally
+        # Use maker fee when MAKER_FIRST is enabled (buy-side fills as maker)
         from core.exchange_config import EXCHANGE_PARAMS
-        if best_buy_ex == 'MEXC':
-            buy_fee = 0.0  # MEXC 0% maker fee — always cheaper to buy here
-        elif settings.MAKER_FIRST_ENABLED:
+        if settings.MAKER_FIRST_ENABLED:
             buy_fee = EXCHANGE_PARAMS.get(best_buy_ex, {}).get('maker', 0.001)
         else:
             buy_fee = EXCHANGE_PARAMS.get(best_buy_ex, {}).get('taker', 0.001)

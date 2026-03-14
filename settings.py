@@ -139,7 +139,7 @@ ANOMALOUS_SPREAD_PCT = _get_env_float("ARB_ANOMALOUS_SPREAD_PCT", 5.0)  # Skip s
 MAX_DATA_AGE_SEC = _get_env_float("ARB_MAX_DATA_AGE_SEC", 2.0)  # Aligned with MAX_ORDERBOOK_AGE_MS (2s). 0.5s was too aggressive for home PCs.
 MIN_LIVE_ROI_PCT = _get_env_float("ARB_MIN_LIVE_ROI_PCT", 0.02)  # Min ROI% to execute live (Phase 4: micro-arb floor 0.02%)
 MIN_BALANCE_PER_EXCHANGE = _get_env_float("ARB_MIN_BALANCE_PER_EXCHANGE", 8.0)  # Min balance to trade (lowered for small accounts)
-MIN_TRADE_SIZE_USDT = _get_env_float("ARB_MIN_TRADE_SIZE_USDT", 8.0)  # Target trade size 8-12 USDT (Phase 8)
+MIN_TRADE_SIZE_USDT = _get_env_float("ARB_MIN_TRADE_SIZE_USDT", 5.0)  # Lowered: $5 covers most exchange minimums (only HTX needs $10)
 BALANCE_RESERVE_USDT = _get_env_float("ARB_BALANCE_RESERVE_USDT", 2.0)  # Keep reserve on each exchange
 MAX_BALANCE_USAGE_PCT = _get_env_float("ARB_MAX_BALANCE_USAGE_PCT", 75.0)  # AGGRESSIVE: 75% for max capital utilization
 
