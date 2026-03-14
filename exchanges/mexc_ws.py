@@ -152,8 +152,9 @@ class MexcWS:
         if isinstance(data, dict) and data.get("method") == "ping":
             try:
                 resp = {"method": "pong"}
-                await self._send(ws, resp)
-                logger.info("MEXC: replied pong")
+                if ws is not None:
+                    await self._send(ws, resp)
+                    logger.info("MEXC: replied pong")
             except Exception as e:
                 logger.warning(f"MEXC: failed to send pong: {e}")
             return

@@ -19,7 +19,6 @@ import random
 from .ws_helpers import WSHealthMonitor, WSReconnectHelper
 
 logger = logging.getLogger("kucoin_ws")
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
 
 DEPTH_LEVELS = 20
 
@@ -60,8 +59,16 @@ class KucoinWS:
             r = requests.post("https://api.kucoin.com/api/v1/bullet-public", timeout=5)
             r.raise_for_status()
             data = r.json()
-            token = data["data"]["token"]
-            endpoint = data["data"]["instanceServers"][0]["endpoint"]
+            resp_data = data.get("data") or {}
+            token = resp_data.get("token")
+            servers = resp_data.get("instanceServers") or []
+            if not token or not servers:
+                logger.error("KuCoin token response missing data: %s", data)
+                return None
+            endpoint = servers[0].get("endpoint", "")
+            if not endpoint:
+                logger.error("KuCoin missing endpoint in response")
+                return None
             return f"{endpoint}?token={token}"
         except Exception:
             logger.exception("KuCoin token fetch error")
@@ -177,10 +184,11 @@ class KucoinWS:
                     # Track symbol-level health
                     self._health_monitor.on_message_received(sym)
                     
-                    asyncio.run_coroutine_threadsafe(
-                        self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
-                        self.loop
-                    )
+                    if not self.loop.is_closed():
+                        asyncio.run_coroutine_threadsafe(
+                            self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
+                            self.loop
+                        )
                     return
 
                 # incremental updates: some formats use 'changes' or 'delta' fields
@@ -198,12 +206,14 @@ class KucoinWS:
                         self._apply_changes(sym, "bids", ch["bids"])
                     if "asks" in ch:
                         self._apply_changes(sym, "asks", ch["asks"])
-                    bids_levels = self._book_to_levels(self._local_books[sym]["bids"], "bids")
-                    asks_levels = self._book_to_levels(self._local_books[sym]["asks"], "asks")
-                    asyncio.run_coroutine_threadsafe(
-                        self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
-                        self.loop
-                    )
+                    if sym and sym in self._local_books:
+                        bids_levels = self._book_to_levels(self._local_books[sym]["bids"], "bids")
+                        asks_levels = self._book_to_levels(self._local_books[sym]["asks"], "asks")
+                        if not self.loop.is_closed():
+                            asyncio.run_coroutine_threadsafe(
+                                self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
+                                self.loop
+                            )
                     return
 
                 # some updates may come with 'bids'/'asks' fields directly (treat as changes)
@@ -212,12 +222,13 @@ class KucoinWS:
                         self._apply_changes(sym, "bids", payload.get("bids", []))
                     if "asks" in payload:
                         self._apply_changes(sym, "asks", payload.get("asks", []))
-                    bids_levels = self._book_to_levels(self._local_books[sym]["bids"], "bids")
-                    asks_levels = self._book_to_levels(self._local_books[sym]["asks"], "asks")
-                    asyncio.run_coroutine_threadsafe(
-                        self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
-                        self.loop
-                    )
+                    if sym and sym in self._local_books and not self.loop.is_closed():
+                        bids_levels = self._book_to_levels(self._local_books[sym]["bids"], "bids")
+                        asks_levels = self._book_to_levels(self._local_books[sym]["asks"], "asks")
+                        asyncio.run_coroutine_threadsafe(
+                            self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
+                            self.loop
+                        )
                     return
 
                 # ticker fallback: update top-of-book
@@ -241,7 +252,7 @@ class KucoinWS:
                     bid = best_bid or price
                     ask_size = best_ask_size
                     bid_size = best_bid_size
-                    if sym:
+                    if sym and not self.loop.is_closed():
                         logger.debug(f"KuCoin -> update store: {sym} bid={bid} ask={ask} bid_size={bid_size} ask_size={ask_size}")
                         asyncio.run_coroutine_threadsafe(
                             self.price_store.update(self.exchange, sym, bid, bid_size, ask, ask_size, time.time()),
@@ -262,7 +273,7 @@ class KucoinWS:
             endpoint = self._prepare_endpoint()
             if not endpoint:
                 time.sleep(backoff)
-                backoff = min(backoff * 2, 60.0)
+                backoff = min(backoff * 1.5, 30.0)  # Cap at 30s, slower growth
                 continue
             try:
                 logger.info(f"{self.exchange}: connecting to {endpoint}")
@@ -279,7 +290,7 @@ class KucoinWS:
             except Exception as e:
                 logger.exception(f"KuCoin run error - reconnecting: {e}")
             time.sleep(backoff)
-            backoff = min(backoff * 2, 60.0)
+            backoff = min(backoff * 1.5, 30.0)  # Cap at 30s, slower growth
 
     def stop(self):
         self._stop.set()

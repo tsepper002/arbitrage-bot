@@ -1,0 +1,20 @@
+# Docker ignore file — exclude unnecessary files from build context
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.example
+*.md
+logs/
+*.log
+.vscode/
+.idea/
+*.bat
+*.ps1
+node_modules/
+.pytest_cache/
+htmlcov/
+.coverage

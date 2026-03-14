@@ -16,7 +16,6 @@ import random
 from .ws_helpers import WSHealthMonitor, WSReconnectHelper
 
 logger = logging.getLogger("bybit_ws")
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
 
 DEPTH_LEVELS = 20
 
@@ -172,10 +171,11 @@ class BybitWS:
                         bids_levels = self._book_to_levels(bids_map, "bids")
                         asks_levels = self._book_to_levels(asks_map, "asks")
                         logger.debug(f"Bybit depth snapshot for {sym}: bids={len(bids_levels)} asks={len(asks_levels)}")
-                        asyncio.run_coroutine_threadsafe(
-                            self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
-                            self.loop
-                        )
+                        if not self.loop.is_closed():
+                            asyncio.run_coroutine_threadsafe(
+                                self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
+                                self.loop
+                            )
                         return
 
                 # Handle delta updates: Bybit delta messages often have type 'delta' and data contains 'b' and 'a' arrays
@@ -198,10 +198,11 @@ class BybitWS:
                             self._apply_changes(sym, "asks", a_changes)
                         bids_levels = self._book_to_levels(self._local_books[sym]["bids"], "bids")
                         asks_levels = self._book_to_levels(self._local_books[sym]["asks"], "asks")
-                        asyncio.run_coroutine_threadsafe(
-                            self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
-                            self.loop
-                        )
+                        if not self.loop.is_closed():
+                            asyncio.run_coroutine_threadsafe(
+                                self.price_store.update_levels(self.exchange, sym, bids_levels, asks_levels, time.time()),
+                                self.loop
+                            )
                         return
 
                 # Other fallback shapes: sometimes orderbook updates are in payload.data or nested — handle common ticker fallback
@@ -218,7 +219,7 @@ class BybitWS:
                                 if orig.replace("-", "") == sym_field:
                                     sym = orig
                                     break
-                    if sym and val is not None:
+                    if sym and val is not None and not self.loop.is_closed():
                         logger.debug(f"Bybit -> update store (ticker): {sym} {val}")
                         asyncio.run_coroutine_threadsafe(
                             self.price_store.update(self.exchange, sym, val, None, val, None, time.time()),

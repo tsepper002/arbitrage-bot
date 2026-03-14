@@ -1,0 +1,314 @@
+#!/usr/bin/env python3
+"""
+KuCoin REST API client for authenticated operations.
+Implements order placement, cancellation, balance queries, and withdrawals.
+"""
+import time
+import math
+import hmac
+import hashlib
+import base64
+import json
+import socket
+from typing import Dict, Any, Optional, List
+import aiohttp
+import logging
+from .base_client import BaseRESTClient
+
+logger = logging.getLogger("kucoin_rest")
+
+
+class KuCoinRESTClient(BaseRESTClient):
+    """KuCoin exchange REST API client."""
+    
+    BASE_URL = "https://api.kucoin.com"
+    
+    def __init__(self, api_key: str, api_secret: str, passphrase: str):
+        super().__init__(api_key, api_secret, "KuCoin")
+        self.passphrase = passphrase
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._time_offset_ms: int = 0  # Server time offset (ms)
+
+    def _synced_ts(self) -> str:
+        """Get server-synced timestamp in milliseconds."""
+        return str(int(time.time() * 1000) + self._time_offset_ms)
+
+    async def sync_server_time(self):
+        """Sync local clock with KuCoin server time."""
+        try:
+            session = await self._get_session()
+            async with session.get(f"{self.BASE_URL}/api/v1/timestamp") as resp:
+                data = await self._check_response(resp)
+                server_time = int(data.get("data", 0))
+                if server_time > 0:
+                    self._time_offset_ms = server_time - int(time.time() * 1000)
+                    logger.info(f"KuCoin time sync: offset={self._time_offset_ms}ms")
+        except Exception as e:
+            logger.warning(f"KuCoin time sync failed: {e}")
+    
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create aiohttp session."""
+        if self._session is None or self._session.closed:
+            # Use IPv4 + ThreadedResolver to avoid DNS resolution issues
+            connector = aiohttp.TCPConnector(
+                family=socket.AF_INET,
+                resolver=aiohttp.ThreadedResolver()
+            )
+            timeout = aiohttp.ClientTimeout(total=30, sock_connect=10)
+            self._session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+        return self._session
+    
+    async def close(self):
+        """Close the aiohttp session."""
+        if self._session and not self._session.closed:
+            await self._session.close()
+    
+    async def _check_response(self, resp: aiohttp.ClientResponse) -> dict:
+        """Check HTTP status before parsing JSON. Raises on non-200 with clear error."""
+        if resp.status != 200:
+            text = await resp.text()
+            raise Exception(f"KuCoin HTTP {resp.status}: {text[:200]}")
+        return await resp.json()
+    
+    def _generate_signature(self, timestamp: str, method: str, endpoint: str, body: str = "") -> str:
+        """Generate HMAC SHA256 signature for KuCoin API."""
+        str_to_sign = timestamp + method.upper() + endpoint + body
+        signature = base64.b64encode(
+            hmac.new(
+                self.api_secret.encode('utf-8'),
+                str_to_sign.encode('utf-8'),
+                hashlib.sha256
+            ).digest()
+        )
+        return signature.decode('utf-8')
+    
+    def _get_headers(self, method: str, endpoint: str, body: str = "") -> Dict[str, str]:
+        """Get authenticated headers for KuCoin API."""
+        timestamp = self._synced_ts()
+        signature = self._generate_signature(timestamp, method, endpoint, body)
+        
+        # Encrypt passphrase
+        passphrase_signature = base64.b64encode(
+            hmac.new(
+                self.api_secret.encode('utf-8'),
+                self.passphrase.encode('utf-8'),
+                hashlib.sha256
+            ).digest()
+        ).decode('utf-8')
+        
+        return {
+            "KC-API-KEY": self.api_key,
+            "KC-API-SIGN": signature,
+            "KC-API-TIMESTAMP": timestamp,
+            "KC-API-PASSPHRASE": passphrase_signature,
+            "KC-API-KEY-VERSION": "2",
+            "Content-Type": "application/json"
+        }
+    
+    def normalize_symbol(self, symbol: str) -> str:
+        """KuCoin uses BTC-USDT format already."""
+        return symbol
+    
+    # KuCoin max decimals for quantity (baseIncrement safety net)
+    KUCOIN_QTY_MAX_DECIMALS = 8
+
+    @staticmethod
+    def _truncate_qty(quantity: float) -> str:
+        """Truncate quantity to max decimal places and format as clean string."""
+        factor = 10 ** KuCoinRESTClient.KUCOIN_QTY_MAX_DECIMALS
+        truncated = math.floor(quantity * factor) / factor
+        return f"{truncated:.{KuCoinRESTClient.KUCOIN_QTY_MAX_DECIMALS}f}".rstrip('0').rstrip('.')
+
+    async def place_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: float,
+        price: Optional[float] = None,
+        time_in_force: str = "GTC"
+    ) -> Dict[str, Any]:
+        """Place an order on KuCoin."""
+        endpoint = "/api/v1/orders"
+        url = f"{self.BASE_URL}{endpoint}"
+        
+        order_data = {
+            "clientOid": f"{int(time.time() * 1000)}",
+            "side": side.lower(),  # buy or sell
+            "symbol": self.normalize_symbol(symbol),
+            "type": "market" if order_type == "market" else "limit",
+        }
+        
+        if order_type == "market":
+            # Market orders: buy uses 'funds' (quote USDT amount), sell uses 'size' (base qty)
+            if side.lower() == "buy":
+                if not price or price <= 0:
+                    raise ValueError(f"Market buy requires valid price, got: {price}")
+                funds = quantity * price
+                # KuCoin requires funds rounded to quoteIncrement per trading pair.
+                # quoteIncrement varies: AVAX/USDT=0.01, BTC/USDT=0.0001, etc.
+                # Floor to 2 decimal places (0.01) is ALWAYS safe because:
+                # - All USDT pairs have quoteIncrement >= 0.01
+                # - 0.01 is a multiple of 0.0001 (no precision loss for fine increments)
+                # - Was 4 decimals (0.0001), which broke AVAX with 0.01 increment
+                funds = math.floor(funds * 100) / 100
+                if funds < 0.1:
+                    raise ValueError(f"Market buy funds ${funds} below KuCoin minimum $0.10")
+                order_data["funds"] = f"{funds:.2f}"
+            else:
+                # Market sell: truncate to max decimal places as safety net
+                # (proper rounding by exchange step_size happens in order_executor)
+                order_data["size"] = self._truncate_qty(quantity)
+        else:
+            order_data["price"] = str(price)
+            # Limit order: truncate size as safety net
+            order_data["size"] = self._truncate_qty(quantity)
+            order_data["timeInForce"] = time_in_force
+        
+        body = json.dumps(order_data)
+        headers = self._get_headers("POST", endpoint, body)
+        
+        session = await self._get_session()
+        async with session.post(url, data=body, headers=headers) as resp:
+            data = await self._check_response(resp)
+            if data.get("code") != "200000":
+                raise Exception(f"KuCoin order failed: {data}")
+            return data.get("data", {})
+    
+    async def cancel_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
+        """Cancel an order on KuCoin. Symbol accepted for interface compatibility but not used."""
+        endpoint = f"/api/v1/orders/{order_id}"
+        url = f"{self.BASE_URL}{endpoint}"
+        
+        headers = self._get_headers("DELETE", endpoint)
+        
+        session = await self._get_session()
+        async with session.delete(url, headers=headers) as resp:
+            data = await self._check_response(resp)
+            if data.get("code") != "200000":
+                raise Exception(f"KuCoin cancel failed: {data}")
+            return data.get("data", {})
+    
+    async def get_order_status(self, symbol: str, order_id: str) -> Dict[str, Any]:
+        """Get order status from KuCoin. Symbol accepted for interface compatibility but not used."""
+        endpoint = f"/api/v1/orders/{order_id}"
+        url = f"{self.BASE_URL}{endpoint}"
+        
+        headers = self._get_headers("GET", endpoint)
+        
+        session = await self._get_session()
+        async with session.get(url, headers=headers) as resp:
+            data = await self._check_response(resp)
+            if data.get("code") != "200000":
+                raise Exception(f"KuCoin get order failed: {data}")
+            return data.get("data", {})
+    
+    async def get_balance(self) -> Dict[str, float]:
+        """Get account balances from KuCoin."""
+        endpoint = "/api/v1/accounts"
+        url = f"{self.BASE_URL}{endpoint}"
+        
+        headers = self._get_headers("GET", endpoint)
+        
+        session = await self._get_session()
+        async with session.get(url, headers=headers) as resp:
+            data = await self._check_response(resp)
+            if data.get("code") != "200000":
+                raise Exception(f"KuCoin get balance failed: {data}")
+            
+            accounts = data.get("data", [])
+            balances = {}
+            
+            # Aggregate balances by currency (type=trade for spot)
+            for account in accounts:
+                if account.get("type") == "trade":
+                    currency = account.get("currency")
+                    available = float(account.get("available", 0))
+                    if currency:
+                        balances[currency] = balances.get(currency, 0) + available
+            
+            return balances
+    
+    async def withdraw(
+        self,
+        currency: str,
+        amount: float,
+        address: str,
+        network: str = "TRC20",
+        memo: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Initiate a withdrawal on KuCoin."""
+        endpoint = "/api/v1/withdrawals"
+        url = f"{self.BASE_URL}{endpoint}"
+        
+        withdrawal_data = {
+            "currency": currency,
+            "address": address,
+            "amount": amount,
+            "chain": network
+        }
+        
+        if memo:
+            withdrawal_data["memo"] = memo
+        
+        body = json.dumps(withdrawal_data)
+        headers = self._get_headers("POST", endpoint, body)
+        
+        session = await self._get_session()
+        async with session.post(url, data=body, headers=headers) as resp:
+            data = await self._check_response(resp)
+            if data.get("code") != "200000":
+                raise Exception(f"KuCoin withdrawal failed: {data}")
+            return data.get("data", {})
+    
+    async def get_deposit_address(self, currency: str) -> dict:
+        """
+        Get deposit address for a specific currency.
+        
+        Args:
+            currency: Currency symbol (e.g., 'USDT', 'BTC')
+            
+        Returns:
+            dict: Deposit address information
+        """
+        try:
+            endpoint = f"/api/v1/deposit-addresses"
+            url = f"{self.BASE_URL}{endpoint}"
+            params = {"currency": currency}
+            
+            headers = self._get_headers("GET", endpoint)
+            
+            session = await self._get_session()
+            async with session.get(url, headers=headers, params=params) as resp:
+                data = await self._check_response(resp)
+                if data.get("code") != "200000":
+                    logger.error(f"KuCoin get deposit address failed: {data}")
+                    return {}
+                return data.get('data', {})
+        except Exception as e:
+            logger.error(f"Error getting deposit address for {currency}: {e}")
+            return {}
+    
+    async def get_trading_pairs(self) -> list:
+        """
+        Get all available trading pairs.
+        
+        Returns:
+            list: List of trading pair information
+        """
+        try:
+            endpoint = "/api/v1/symbols"
+            url = f"{self.BASE_URL}{endpoint}"
+            
+            headers = self._get_headers("GET", endpoint)
+            
+            session = await self._get_session()
+            async with session.get(url, headers=headers) as resp:
+                data = await self._check_response(resp)
+                if data.get("code") != "200000":
+                    logger.error(f"KuCoin get trading pairs failed: {data}")
+                    return []
+                return data.get('data', [])
+        except Exception as e:
+            logger.error(f"Error getting trading pairs: {e}")
+            return []

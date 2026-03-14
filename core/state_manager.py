@@ -1,0 +1,396 @@
+#!/usr/bin/env python3
+"""
+State manager for persistent bot state (A6).
+Saves and loads bot state to survive restarts.
+"""
+import json
+import logging
+import time
+import csv
+import os
+from typing import Dict, Any, Optional, List
+import asyncio
+import settings
+
+logger = logging.getLogger("state_manager")
+
+SECONDS_PER_DAY = 86400
+
+
+class StateManager:
+    """
+    Manages persistent bot state across restarts.
+    
+    A6 IMPLEMENTATION:
+    - Saves state every 30s to JSON file
+    - Tracks: daily P&L, trades, balances, pending orders, withdrawals
+    - On startup: loads state, checks pending orders, restores daily P&L
+    - Ensures continuity across crashes/restarts
+    """
+    
+    def __init__(self, state_file: Optional[str] = None):
+        """
+        Initialize state manager.
+        
+        Args:
+            state_file: Path to state file (default from settings)
+        """
+        self.state_file = state_file or settings.STATE_FILE_PATH
+        self.trades_csv = getattr(settings, 'TRADES_CSV_PATH', 'trades.csv')
+        self.state: Dict[str, Any] = self._get_default_state()
+        self.last_save_time = 0.0
+        self.save_interval = 30.0  # Save every 30 seconds
+        self.auto_save_enabled = True
+        self._save_lock = asyncio.Lock()  # Prevent concurrent saves
+        self._is_dry_run = getattr(settings, 'DRY_RUN', True)
+        
+        logger.info(f"StateManager initialized with file: {self.state_file}")
+    
+    def _get_default_state(self) -> Dict[str, Any]:
+        """Get default empty state."""
+        return {
+            "version": "1.0",
+            "last_updated": 0.0,
+            "daily_pnl": 0.0,
+            "total_trades_today": 0,
+            "daily_reset_timestamp": 0.0,
+            "balances": {},  # exchange -> currency -> amount
+            "pending_orders": [],  # list of order dicts
+            "pending_withdrawals": [],  # list of withdrawal dicts
+            "last_rebalance_timestamp": 0.0,
+            "strategy_scores": {},  # strategy -> score dict
+            "blocked_until": {},  # symbol/exchange -> timestamp
+            "settings_overrides": {},  # runtime setting overrides
+            "consecutive_losses": 0,
+            "hourly_pnl": 0.0,
+            "hourly_reset_timestamp": 0.0,
+            "open_exposure": 0.0,
+            "total_lifetime_pnl": 0.0,
+            "total_lifetime_trades": 0,
+            "symbol_pnl": {},  # symbol -> {pnl, trades, wins}
+            "strategy_pnl": {},  # strategy -> {pnl, trades, wins}
+            "last_crash_time": 0.0,
+            "crash_count": 0,
+        }
+    
+    def load_state(self) -> bool:
+        """
+        Load state from disk with validation.
+        
+        Returns:
+            True if loaded successfully, False otherwise
+        """
+        try:
+            with open(self.state_file, 'r') as f:
+                loaded = json.load(f)
+            
+            # Validate: must be a dict with required fields
+            if not isinstance(loaded, dict):
+                logger.error("State file is not a valid JSON object, starting fresh")
+                return False
+            
+            # Merge with defaults to fill any missing fields
+            default = self._get_default_state()
+            for key, default_val in default.items():
+                if key not in loaded:
+                    loaded[key] = default_val
+                    logger.warning(f"   ⚠️ Missing state field '{key}', using default")
+            
+            self.state = loaded
+            
+            # Check for stale daily counters (reset if from yesterday)
+            last_reset = self.state.get("daily_reset_timestamp", 0.0)
+            if last_reset > 0 and time.time() - last_reset > SECONDS_PER_DAY:
+                logger.info("   🔄 Daily counters are stale (>24h), resetting")
+                self.state["daily_pnl"] = 0.0
+                self.state["total_trades_today"] = 0
+                self.state["consecutive_losses"] = 0
+                self.state["hourly_pnl"] = 0.0
+            
+            logger.info(f"✅ State loaded from {self.state_file}")
+            logger.info(f"   Daily P&L: ${self.state.get('daily_pnl', 0):.2f}")
+            logger.info(f"   Trades today: {self.state.get('total_trades_today', 0)}")
+            logger.info(f"   Lifetime P&L: ${self.state.get('total_lifetime_pnl', 0):.2f}")
+            logger.info(f"   Lifetime trades: {self.state.get('total_lifetime_trades', 0)}")
+            pending = self.state.get('pending_orders', [])
+            if pending:
+                logger.warning(f"   ⚠️ {len(pending)} pending orders from previous session!")
+            logger.info(f"   Last updated: {time.ctime(self.state.get('last_updated', 0))}")
+            
+            return True
+        
+        except FileNotFoundError:
+            logger.info(f"No previous state file found, starting fresh")
+            return False
+        
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse state file: {e}")
+            # Try backup
+            backup = f"{self.state_file}.bak"
+            if os.path.exists(backup):
+                try:
+                    with open(backup, 'r') as f:
+                        self.state = json.load(f)
+                    logger.info(f"✅ Recovered from backup state file")
+                    return True
+                except Exception:
+                    pass
+            logger.info("Starting with clean state")
+            return False
+        
+        except Exception as e:
+            logger.exception(f"Error loading state: {e}")
+            logger.info("Starting with clean state")
+            return False
+    
+    def save_state(self) -> bool:
+        """
+        Save current state to disk (thread-safe via atomic write).
+        
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        try:
+            self.state["last_updated"] = time.time()
+            
+            # Write to temp file first, then rename (atomic on most systems)
+            temp_file = f"{self.state_file}.tmp"
+            with open(temp_file, 'w') as f:
+                json.dump(self.state, f, indent=2)
+            
+            # Backup existing state before overwriting
+            if os.path.exists(self.state_file):
+                try:
+                    os.replace(self.state_file, f"{self.state_file}.bak")
+                except Exception:
+                    pass
+            
+            # Atomic rename
+            os.replace(temp_file, self.state_file)
+            
+            self.last_save_time = time.time()
+            logger.debug(f"State saved to {self.state_file}")
+            
+            return True
+        
+        except Exception as e:
+            logger.exception(f"Error saving state: {e}")
+            return False
+    
+    async def auto_save_loop(self):
+        """Automatically save state every N seconds (with async lock)."""
+        logger.info(f"Auto-save loop started (interval: {self.save_interval}s)")
+        
+        while self.auto_save_enabled:
+            await asyncio.sleep(self.save_interval)
+            if self.auto_save_enabled:
+                async with self._save_lock:
+                    self.save_state()
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a value from state."""
+        return self.state.get(key, default)
+    
+    def set(self, key: str, value: Any):
+        """Set a value in state."""
+        self.state[key] = value
+    
+    def update(self, updates: Dict[str, Any]):
+        """Update multiple values in state."""
+        self.state.update(updates)
+    
+    # Convenience methods for common operations
+    
+    def get_daily_pnl(self) -> float:
+        """Get today's P&L."""
+        return self.state.get("daily_pnl", 0.0)
+    
+    def set_daily_pnl(self, pnl: float):
+        """Set today's P&L."""
+        self.state["daily_pnl"] = pnl
+    
+    def add_to_daily_pnl(self, amount: float):
+        """Add to today's P&L."""
+        self.state["daily_pnl"] = self.state.get("daily_pnl", 0.0) + amount
+        self.state["total_lifetime_pnl"] = self.state.get("total_lifetime_pnl", 0.0) + amount
+    
+    def record_trade_detail(self, trade: Dict[str, Any]):
+        """
+        Record detailed trade info for journal and per-symbol tracking.
+        
+        Args:
+            trade: Dict with symbol, strategy, buy_ex, sell_ex, qty, net, roi_pct
+        """
+        symbol = trade.get('symbol', 'UNKNOWN')
+        strategy = trade.get('strategy', 'UNKNOWN')
+        net = trade.get('net', 0.0)
+        is_win = net > 0
+        
+        # Per-symbol P&L tracking
+        if 'symbol_pnl' not in self.state:
+            self.state['symbol_pnl'] = {}
+        if symbol not in self.state['symbol_pnl']:
+            self.state['symbol_pnl'][symbol] = {'pnl': 0.0, 'trades': 0, 'wins': 0}
+        self.state['symbol_pnl'][symbol]['pnl'] += net
+        self.state['symbol_pnl'][symbol]['trades'] += 1
+        if is_win:
+            self.state['symbol_pnl'][symbol]['wins'] += 1
+        
+        # Per-strategy P&L tracking
+        if 'strategy_pnl' not in self.state:
+            self.state['strategy_pnl'] = {}
+        if strategy not in self.state['strategy_pnl']:
+            self.state['strategy_pnl'][strategy] = {'pnl': 0.0, 'trades': 0, 'wins': 0}
+        self.state['strategy_pnl'][strategy]['pnl'] += net
+        self.state['strategy_pnl'][strategy]['trades'] += 1
+        if is_win:
+            self.state['strategy_pnl'][strategy]['wins'] += 1
+        
+        # Write to CSV trade journal (append)
+        self._append_trade_csv(trade)
+    
+    def _append_trade_csv(self, trade: Dict[str, Any]):
+        """Append trade to CSV journal."""
+        try:
+            file_exists = os.path.exists(self.trades_csv)
+            with open(self.trades_csv, 'a', newline='') as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow(['timestamp', 'symbol', 'strategy', 'buy_ex', 'sell_ex',
+                                   'qty', 'buy_price', 'sell_price', 'net', 'roi_pct', 'mode'])
+                writer.writerow([
+                    time.strftime('%Y-%m-%d %H:%M:%S'),
+                    trade.get('symbol', ''),
+                    trade.get('strategy', ''),
+                    trade.get('buy_ex', ''),
+                    trade.get('sell_ex', ''),
+                    f"{trade.get('qty', 0):.8f}",
+                    f"{trade.get('buy_avg', trade.get('buy_price', 0)):.6f}",
+                    f"{trade.get('sell_avg', trade.get('sell_price', 0)):.6f}",
+                    f"{trade.get('net', trade.get('net_profit', 0)):.6f}",
+                    f"{trade.get('roi_pct', 0):.4f}",
+                    'dry-run' if self._is_dry_run else 'live'
+                ])
+        except Exception as e:
+            logger.debug(f"Error writing trade CSV: {e}")
+    
+    def get_symbol_pnl(self) -> Dict[str, Dict]:
+        """Get per-symbol P&L breakdown."""
+        return self.state.get('symbol_pnl', {})
+    
+    def get_strategy_pnl(self) -> Dict[str, Dict]:
+        """Get per-strategy P&L breakdown."""
+        return self.state.get('strategy_pnl', {})
+    
+    def get_top_symbols(self, n: int = 5) -> List[tuple]:
+        """Get top N profitable symbols."""
+        sym_pnl = self.get_symbol_pnl()
+        sorted_syms = sorted(sym_pnl.items(), key=lambda x: x[1].get('pnl', 0), reverse=True)
+        return sorted_syms[:n]
+    
+    def get_losing_symbols(self) -> List[tuple]:
+        """Get symbols with negative P&L (candidates for removal)."""
+        sym_pnl = self.get_symbol_pnl()
+        return [(s, d) for s, d in sym_pnl.items() if d.get('pnl', 0) < 0]
+    
+    def record_crash(self):
+        """Record that a crash happened (for restart tracking)."""
+        self.state['last_crash_time'] = time.time()
+        self.state['crash_count'] = self.state.get('crash_count', 0) + 1
+        self.save_state()
+    
+    def increment_trades(self):
+        """Increment trade counters."""
+        self.state["total_trades_today"] = self.state.get("total_trades_today", 0) + 1
+        self.state["total_lifetime_trades"] = self.state.get("total_lifetime_trades", 0) + 1
+    
+    def get_balance(self, exchange: str, currency: str) -> float:
+        """Get balance for exchange and currency."""
+        return self.state.get("balances", {}).get(exchange, {}).get(currency, 0.0)
+    
+    def set_balance(self, exchange: str, currency: str, amount: float):
+        """Set balance for exchange and currency."""
+        if "balances" not in self.state:
+            self.state["balances"] = {}
+        if exchange not in self.state["balances"]:
+            self.state["balances"][exchange] = {}
+        self.state["balances"][exchange][currency] = amount
+    
+    def add_pending_order(self, order: Dict[str, Any]):
+        """Add an order to pending orders list."""
+        if "pending_orders" not in self.state:
+            self.state["pending_orders"] = []
+        order["added_at"] = time.time()
+        self.state["pending_orders"].append(order)
+        logger.info(f"Added pending order: {order.get('order_id', 'unknown')}")
+    
+    def remove_pending_order(self, order_id: str):
+        """Remove an order from pending orders list."""
+        if "pending_orders" in self.state:
+            self.state["pending_orders"] = [
+                o for o in self.state["pending_orders"]
+                if o.get("order_id") != order_id
+            ]
+            logger.info(f"Removed pending order: {order_id}")
+    
+    def get_pending_orders(self) -> list:
+        """Get list of pending orders."""
+        return self.state.get("pending_orders", [])
+    
+    def add_pending_withdrawal(self, withdrawal: Dict[str, Any]):
+        """Add a withdrawal to pending withdrawals list."""
+        if "pending_withdrawals" not in self.state:
+            self.state["pending_withdrawals"] = []
+        withdrawal["added_at"] = time.time()
+        self.state["pending_withdrawals"].append(withdrawal)
+        logger.info(f"Added pending withdrawal: {withdrawal.get('withdrawal_id', 'unknown')}")
+    
+    def remove_pending_withdrawal(self, withdrawal_id: str):
+        """Remove a withdrawal from pending withdrawals list."""
+        if "pending_withdrawals" in self.state:
+            self.state["pending_withdrawals"] = [
+                w for w in self.state["pending_withdrawals"]
+                if w.get("withdrawal_id") != withdrawal_id
+            ]
+            logger.info(f"Removed pending withdrawal: {withdrawal_id}")
+    
+    def get_pending_withdrawals(self) -> list:
+        """Get list of pending withdrawals."""
+        return self.state.get("pending_withdrawals", [])
+    
+    def should_check_daily_reset(self) -> bool:
+        """Check if daily reset time has passed."""
+        reset_time = self.state.get("daily_reset_timestamp", 0.0)
+        return time.time() >= reset_time
+    
+    def reset_daily_counters(self, next_reset_timestamp: float):
+        """Reset daily counters."""
+        self.state["daily_pnl"] = 0.0
+        self.state["total_trades_today"] = 0
+        self.state["consecutive_losses"] = 0
+        self.state["daily_reset_timestamp"] = next_reset_timestamp
+        logger.info(f"Daily counters reset, next reset at {time.ctime(next_reset_timestamp)}")
+    
+    def get_statistics(self) -> Dict:
+        """Get state statistics."""
+        return {
+            "state_file": self.state_file,
+            "last_save_time": self.last_save_time,
+            "daily_pnl": self.get_daily_pnl(),
+            "trades_today": self.state.get("total_trades_today", 0),
+            "pending_orders": len(self.get_pending_orders()),
+            "pending_withdrawals": len(self.get_pending_withdrawals()),
+            "total_lifetime_pnl": self.state.get("total_lifetime_pnl", 0.0),
+            "total_lifetime_trades": self.state.get("total_lifetime_trades", 0),
+        }
+
+
+# Factory function for easy initialization
+_state_manager_instance = None
+
+def get_state_manager(state_file: Optional[str] = None) -> StateManager:
+    """Get or create StateManager singleton."""
+    global _state_manager_instance
+    if _state_manager_instance is None:
+        _state_manager_instance = StateManager(state_file)
+    return _state_manager_instance

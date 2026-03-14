@@ -29,6 +29,18 @@ logs/
 arbs.csv
 *.csv
 
+# Secrets — NEVER commit API keys!
+.env
+.env.backup
+secrets.py
+
+# Bot runtime data (preserved across updates)
+bot_state.json
+bot_state.json.bak
+bot_state.json.tmp
+trades.csv
+models/
+
 # OS
 .DS_Store
 Thumbs.db
