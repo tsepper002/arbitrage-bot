@@ -268,8 +268,10 @@ class OrderExecutor:
     FILL_POLL_INTERVAL = 0.5
     # Maximum allowed slippage vs expected price (per leg) — from settings.py
     MAX_SLIPPAGE_PCT = settings.MAX_SLIPPAGE_PCT
-    # Minimum order size in USDT to avoid exchange rejections
-    MIN_ORDER_USDT = 5.0  # All 5 exchanges require ≥$5 notional
+    # Minimum order size in USDT to avoid exchange rejections (default)
+    MIN_ORDER_USDT = 5.0
+    # Per-exchange overrides (HTX requires $10, others $5)
+    _MIN_ORDER_PER_EX = {'HTX': 10.0}
     # Minimum expected net profit to execute a LIVE trade — from settings.py
     MIN_LIVE_NET_PROFIT = settings.MIN_LIVE_NET_PROFIT
     # Floating-point tolerance for profit comparisons (prevents rejecting
@@ -307,6 +309,12 @@ class OrderExecutor:
         
         base_currency = symbol.split('-')[0]
         quote_currency = symbol.split('-')[1] if '-' in symbol else 'USDT'
+        
+        # Per-exchange minimum order (HTX=$10, others=$5)
+        min_order = max(
+            self._MIN_ORDER_PER_EX.get(buy_ex, self.MIN_ORDER_USDT),
+            self._MIN_ORDER_PER_EX.get(sell_ex, self.MIN_ORDER_USDT),
+        )
         
         # Step 0: PROFIT GATE — refuse trades that are too thin for live execution
         # Live has slippage, delays, and fill uncertainty. Need sufficient margin.
@@ -346,13 +354,13 @@ class OrderExecutor:
             # spread movement, not the full trade value.
             max_per_trade = max(
                 total_capital * (settings.MAX_EXPOSURE_PER_TRADE_PCT / 100.0),
-                self.MIN_ORDER_USDT
+                min_order
             )
             if trade_value > max_per_trade:
                 old_qty = qty
                 qty = max_per_trade / buy_price if buy_price > 0 else 0
                 trade_value = qty * buy_price
-                if trade_value < self.MIN_ORDER_USDT:
+                if trade_value < min_order:
                     return {'status': 'blocked', 'reason': f'Trade cap: would exceed {settings.MAX_EXPOSURE_PER_TRADE_PCT}% per trade'}
                 logger.debug(f"📏 Trade cap: {old_qty:.6f} → {qty:.6f} ({settings.MAX_EXPOSURE_PER_TRADE_PCT}% limit)")
             
@@ -362,7 +370,7 @@ class OrderExecutor:
                 old_qty = qty
                 qty = max_per_exchange / buy_price if buy_price > 0 else 0
                 trade_value = qty * buy_price
-                if trade_value < self.MIN_ORDER_USDT:
+                if trade_value < min_order:
                     return {'status': 'blocked', 'reason': f'Exposure cap: would exceed {settings.MAX_EXPOSURE_PER_EXCHANGE_PCT}% on {buy_ex}'}
                 logger.debug(f"📏 Exchange cap: {old_qty:.6f} → {qty:.6f} ({settings.MAX_EXPOSURE_PER_EXCHANGE_PCT}% limit)")
             
@@ -384,7 +392,7 @@ class OrderExecutor:
                 max_per_coin = total_capital * (settings.MAX_EXPOSURE_PER_COIN_PCT / 100.0)
                 if coin_exposure + trade_value > max_per_coin:
                     allowed_value = max(0, max_per_coin - coin_exposure)
-                    if allowed_value < self.MIN_ORDER_USDT:
+                    if allowed_value < min_order:
                         return {'status': 'blocked', 'reason': f'Coin exposure cap: {base_coin} at ${coin_exposure:.2f} ({coin_exposure/total_capital*100:.1f}% of {settings.MAX_EXPOSURE_PER_COIN_PCT}% max)'}
                     old_qty = qty
                     qty = allowed_value / buy_price if buy_price > 0 else 0
@@ -419,9 +427,9 @@ class OrderExecutor:
                     available_base = self.balance_manager.get_balance(sell_ex, base_currency)
                     adjusted_qty = min(qty, available_base, max_qty_buy)
                 
-                if adjusted_qty <= 0 or adjusted_qty * buy_price < self.MIN_ORDER_USDT:
+                if adjusted_qty <= 0 or adjusted_qty * buy_price < min_order:
                     if is_triangular:
-                        reason = f"Insufficient USDT: {buy_ex} USDT=${available_usdt:.2f} (need ${self.MIN_ORDER_USDT:.2f})"
+                        reason = f"Insufficient USDT: {buy_ex} USDT=${available_usdt:.2f} (need ${min_order:.2f})"
                     else:
                         reason = (f"Insufficient balance: {buy_ex} USDT=${available_usdt:.2f}, "
                                   f"{sell_ex} {base_currency}={available_base:.6f}")
@@ -451,8 +459,8 @@ class OrderExecutor:
             if qty <= 0:
                 return {'status': 'blocked', 'reason': 'Zero quantity after adjustments'}
             order_value_usdt = qty * (buy_price if buy_price else 0)
-            if order_value_usdt < self.MIN_ORDER_USDT:
-                return {'status': 'blocked', 'reason': f'Order value ${order_value_usdt:.2f} < minimum ${self.MIN_ORDER_USDT}'}
+            if order_value_usdt < min_order:
+                return {'status': 'blocked', 'reason': f'Order value ${order_value_usdt:.2f} < minimum ${min_order}'}
             
             # Step 2c: Pre-execution orderbook depth check
             # Verify sufficient liquidity in the snapshot passed from scanner
@@ -638,8 +646,16 @@ class OrderExecutor:
             logger.info(f"📋 Orders placed in {placement_time:.3f}s: buy={buy_order_id}, sell={sell_order_id}")
             
             # Verify fills (poll order status)
-            buy_fill = await self._verify_fill(buy_client, symbol, buy_order_id, 'buy', buy_price, qty)
-            sell_fill = await self._verify_fill(sell_client, symbol, sell_order_id, 'sell', sell_price, qty)
+            if use_maker_first:
+                # Maker-first already verified ALL slice fills at lines 526-534.
+                # Re-checking only slice[0] here would see partial fill (e.g. 0.64)
+                # while sell used the correct aggregate (e.g. 1.92) — causing
+                # false imbalance detection and catastrophic emergency trades.
+                buy_fill = {'filled': total_filled_qty > 0, 'filled_qty': total_filled_qty}
+                sell_fill = await self._verify_fill(sell_client, symbol, sell_order_id, 'sell', sell_price, sell_qty)
+            else:
+                buy_fill = await self._verify_fill(buy_client, symbol, buy_order_id, 'buy', buy_price, qty)
+                sell_fill = await self._verify_fill(sell_client, symbol, sell_order_id, 'sell', sell_price, qty)
             
             execution_time = time.time() - start_time
             
